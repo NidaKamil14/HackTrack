@@ -1,18 +1,14 @@
 import React from 'react';
-import Navbar from './components/layout/Navbar';
-import Footer from './components/layout/Footer';
-import LandingPage from './pages/LandingPage';
+import { BrowserRouter } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import { AppRoutes } from './routes';
 
-function App() {
+export default function App() {
   return (
-    <div className="min-h-screen flex flex-col bg-background selection:bg-primary/30 selection:text-white">
-      <Navbar />
-      <main className="flex-grow">
-        <LandingPage />
-      </main>
-      <Footer />
-    </div>
+    <BrowserRouter>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
-
-export default App;

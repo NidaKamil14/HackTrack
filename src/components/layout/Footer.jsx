@@ -1,5 +1,5 @@
 import React from 'react';
-import { Terminal, Github, Twitter, Linkedin } from 'lucide-react';
+import { Terminal, Globe, Mail } from 'lucide-react';
 
 const Footer = () => {
   return (
@@ -19,9 +19,8 @@ const Footer = () => {
               The premium platform for discovering, managing, and evaluating hackathons globally.
             </p>
             <div className="flex items-center gap-4 text-white/40">
-              <a href="#" className="hover:text-primary transition-colors"><Twitter className="w-5 h-5" /></a>
-              <a href="#" className="hover:text-primary transition-colors"><Github className="w-5 h-5" /></a>
-              <a href="#" className="hover:text-primary transition-colors"><Linkedin className="w-5 h-5" /></a>
+              <a href="#" className="hover:text-primary transition-colors"><Globe className="w-5 h-5" /></a>
+              <a href="#" className="hover:text-primary transition-colors"><Mail className="w-5 h-5" /></a>
             </div>
           </div>
 

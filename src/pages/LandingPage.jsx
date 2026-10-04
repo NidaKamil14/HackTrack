@@ -6,7 +6,6 @@ import {
   Users, 
   Trophy, 
   Calendar,
-  Clock,
   ArrowRight,
   Search,
   CheckCircle2,
