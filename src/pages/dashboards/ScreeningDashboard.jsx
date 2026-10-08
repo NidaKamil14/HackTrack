@@ -1,12 +1,38 @@
 import React, { useState } from 'react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
 import { Icons } from '../../components/Icons';
-import { MOCK_SCREENING_SUBMISSIONS } from '../../data/mockDashboardData';
 import { useAuth } from '../../context/AuthContext';
+import { getFinalizedSubmissions } from '../../utils/submissionService.js';
 
 export default function ScreeningDashboard() {
   const { user } = useAuth();
-  const [submissions, setSubmissions] = useState(MOCK_SCREENING_SUBMISSIONS);
+  const [submissions, setSubmissions] = useState(() => {
+    const finalized = getFinalizedSubmissions();
+    return finalized.map((sub, idx) => ({
+      id: sub.submissionId || `sub-fin-${idx}`,
+      teamName: sub.teamName,
+      hackathonTitle: sub.hackathonTitle || sub.hackathonId,
+      hackathonId: sub.hackathonId,
+      track: sub.track || "General Track",
+      lead: sub.leadName || sub.submittedBy || "Team Lead",
+      projectTitle: sub.projectTitle || "Untitled Project",
+      projectDescription: sub.projectDescription || "",
+      repoUrl: sub.repositoryUrl || "#",
+      demoUrl: sub.liveDemoUrl || "#",
+      submissionFiles: sub.submissionFiles || [],
+      submissionDate: sub.finalizedAt
+        ? new Date(sub.finalizedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+        : "Finalized",
+      status: sub.screeningStatus || "Pending Review",
+      checks: sub.checks || {
+        gitFreshness: true,
+        endpointsLive: true,
+        envConfigured: true,
+        licenseMIT: true
+      },
+      flags: sub.flags || []
+    }));
+  });
   const [filterHackathon, setFilterHackathon] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
 
@@ -153,12 +179,17 @@ export default function ScreeningDashboard() {
                       <h2 className="text-base font-bold text-white">{sub.teamName}</h2>
                       <span className="text-xs text-slate-400 font-mono">• Lead: {sub.lead}</span>
                     </div>
+                    <div className="mt-1">
+                      <span className="text-sm font-semibold text-emerald-400 font-mono">
+                        {sub.projectTitle}
+                      </span>
+                    </div>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Sprint: <span className="text-slate-300 font-medium">{sub.hackathonTitle}</span> • Track: <span className="text-slate-300">{sub.track}</span>
+                      Hackathon: <span className="text-slate-300 font-medium">{sub.hackathonTitle}</span> • Track: <span className="text-slate-300">{sub.track}</span>
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex sm:flex-col items-end gap-1.5 shrink-0">
                     <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
                       isShortlisted
                         ? "bg-emerald-950 text-emerald-300 border border-emerald-500/40"
@@ -167,6 +198,9 @@ export default function ScreeningDashboard() {
                         : "bg-amber-950/70 text-amber-300 border border-amber-500/40"
                     }`}>
                       {sub.status}
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-500">
+                      Date: {sub.submissionDate}
                     </span>
                   </div>
                 </div>
@@ -193,6 +227,20 @@ export default function ScreeningDashboard() {
                       <Icons.ExternalLink />
                       <span>Live Deployment</span>
                     </a>
+
+                    {sub.submissionFiles && sub.submissionFiles.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 ml-auto">
+                        {sub.submissionFiles.map((f, fIdx) => (
+                          <span
+                            key={fIdx}
+                            className="px-2 py-1 rounded bg-slate-950 border border-slate-800 text-[10px] text-slate-300 font-mono inline-flex items-center gap-1"
+                          >
+                            <span className="text-emerald-400 font-bold">PDF</span>
+                            <span>{f.name}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* 4 Compliance Gate Toggles */}
