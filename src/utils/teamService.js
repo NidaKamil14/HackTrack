@@ -1,5 +1,6 @@
 import { PRELOADED_TEAMS } from '../data/teams.js';
 import { isUserRegistered } from './registrationService.js';
+import { addNotification } from './notificationService.js';
 
 const STORAGE_KEY = "hacktrack_teams";
 
@@ -111,6 +112,14 @@ export function createTeam({ name, hackathonId, hackathonTitle, track, leadName,
   all[code] = newTeam;
   saveAllTeams(all);
 
+  addNotification({
+    userEmail: leadEmail,
+    title: "Team Created Successfully",
+    message: `Team "${newTeam.name}" created with code: ${code}. Share this code with prospective teammates.`,
+    type: "success",
+    link: "/dashboard/student"
+  });
+
   return { success: true, team: { ...newTeam, code } };
 }
 
@@ -125,6 +134,10 @@ export function joinTeamWithCode(code, user) {
 
   if (!targetTeam) {
     return { success: false, error: `Team code "${cleanCode}" not found. Try HT-DEV-42 or HT-AI-99.` };
+  }
+
+  if (targetTeam.rosterLocked) {
+    return { success: false, error: `Team "${targetTeam.name}" roster is locked by the Team Leader and no longer accepting members.` };
   }
 
   const userEmail = user.email ? user.email.toLowerCase() : "";
@@ -155,6 +168,10 @@ export function joinTeamWithCode(code, user) {
 
   // 3. Add to roster
   const updatedMembers = Array.isArray(targetTeam.members) ? [...targetTeam.members] : [];
+  if (updatedMembers.length >= 4) {
+    return { success: false, error: `Team "${targetTeam.name}" has reached maximum capacity (4 members).` };
+  }
+
   updatedMembers.push({
     name: userName,
     role: "Member",
@@ -172,5 +189,101 @@ export function joinTeamWithCode(code, user) {
   all[cleanCode] = updatedTeam;
   saveAllTeams(all);
 
+  // Notify team leader
+  if (targetTeam.leadEmail) {
+    addNotification({
+      userEmail: targetTeam.leadEmail,
+      title: "New Team Member Joined",
+      message: `${userName} (${userEmail}) joined your team "${targetTeam.name}".`,
+      type: "info",
+      link: "/dashboard/student"
+    });
+  }
+
   return { success: true, team: { ...updatedTeam, code: cleanCode } };
+}
+
+export function lockTeamRoster(code, user) {
+  const cleanCode = (code || "").trim().toUpperCase();
+  const all = getAllTeams();
+  const team = all[cleanCode];
+
+  if (!team) return { success: false, error: "Team not found." };
+
+  const userEmail = (user?.email || "").toLowerCase().trim();
+  const isLead = team.leadEmail?.toLowerCase().trim() === userEmail || team.lead?.toLowerCase() === user?.fullName?.toLowerCase();
+
+  if (!isLead) {
+    return { success: false, error: "Only the Team Leader can lock the roster." };
+  }
+
+  team.rosterLocked = true;
+  team.isOpen = false;
+  all[cleanCode] = team;
+  saveAllTeams(all);
+
+  return { success: true, team: { ...team, code: cleanCode } };
+}
+
+export function unlockTeamRoster(code, user) {
+  const cleanCode = (code || "").trim().toUpperCase();
+  const all = getAllTeams();
+  const team = all[cleanCode];
+
+  if (!team) return { success: false, error: "Team not found." };
+
+  const userEmail = (user?.email || "").toLowerCase().trim();
+  const isLead = team.leadEmail?.toLowerCase().trim() === userEmail || team.lead?.toLowerCase() === user?.fullName?.toLowerCase();
+
+  if (!isLead) {
+    return { success: false, error: "Only the Team Leader can unlock the roster." };
+  }
+
+  team.rosterLocked = false;
+  team.isOpen = true;
+  all[cleanCode] = team;
+  saveAllTeams(all);
+
+  return { success: true, team: { ...team, code: cleanCode } };
+}
+
+export function removeTeamMember(code, memberEmail, user) {
+  const cleanCode = (code || "").trim().toUpperCase();
+  const all = getAllTeams();
+  const team = all[cleanCode];
+
+  if (!team) return { success: false, error: "Team not found." };
+
+  const userEmail = (user?.email || "").toLowerCase().trim();
+  const isLead = team.leadEmail?.toLowerCase().trim() === userEmail || team.lead?.toLowerCase() === user?.fullName?.toLowerCase();
+
+  if (!isLead) {
+    return { success: false, error: "Only the Team Leader can remove members." };
+  }
+
+  const targetClean = (memberEmail || "").toLowerCase().trim();
+  if (targetClean === team.leadEmail?.toLowerCase().trim()) {
+    return { success: false, error: "The Team Leader cannot be removed from the team." };
+  }
+
+  const updatedMembers = (team.members || []).filter((m) => {
+    if (typeof m === 'string') return !m.toLowerCase().includes(targetClean);
+    if (typeof m === 'object' && m.email) return m.email.toLowerCase().trim() !== targetClean;
+    return true;
+  });
+
+  team.members = updatedMembers;
+  team.capacity = `${updatedMembers.length} / 4 Members`;
+  all[cleanCode] = team;
+  saveAllTeams(all);
+
+  addNotification({
+    userEmail: targetClean,
+    title: "Team Roster Update",
+    message: `You were removed from team "${team.name}".`,
+    type: "warning",
+    link: "/dashboard/student"
+  });
+
+  return { success: true, team: { ...team, code: cleanCode } };
 }

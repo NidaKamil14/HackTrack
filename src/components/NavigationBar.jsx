@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Icons } from './Icons';
 import { useAuth } from '../context/AuthContext';
 import { getRoleDashboardPath } from '../utils/auth';
+import ThemeToggle from './ThemeToggle';
 
 export default function NavigationBar({ onOpenTeamModal }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -66,6 +67,7 @@ export default function NavigationBar({ onOpenTeamModal }) {
 
         {/* Action CTAs */}
         <div className="hidden md:flex items-center space-x-3">
+          <ThemeToggle />
           <button
             onClick={onOpenTeamModal}
             className="flex items-center space-x-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 hover:border-slate-500 hover:text-white transition-colors"
@@ -115,6 +117,7 @@ export default function NavigationBar({ onOpenTeamModal }) {
 
         {/* Mobile Hamburger Button */}
         <div className="md:hidden flex items-center gap-2">
+          <ThemeToggle />
           <button
             onClick={onOpenTeamModal}
             className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-200 text-xs flex items-center gap-1"

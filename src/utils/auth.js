@@ -4,10 +4,19 @@ export const DEMO_USERS = [
     email: "alex@university.edu",
     password: "password123",
     fullName: "Alex Chen",
-    role: "student",
-    roleCategory: "Student / Team Leader",
+    role: "leader",
+    roleCategory: "Team Leader",
     university: "Stanford University",
-    memberId: "STU-88219"
+    memberId: "LEAD-88219"
+  },
+  {
+    email: "priya@university.edu",
+    password: "password123",
+    fullName: "Priya Sharma",
+    role: "student",
+    roleCategory: "Student / Participant",
+    university: "Stanford University",
+    memberId: "STU-55412"
   },
   {
     email: "screening@hacktrack.io",
@@ -35,6 +44,24 @@ export const DEMO_USERS = [
     roleCategory: "Platform Administrator",
     university: "HackTrack Central HQ",
     memberId: "ADM-001"
+  },
+  {
+    email: "organizer@hacktrack.io",
+    password: "password123",
+    fullName: "Kavita Rao",
+    role: "organizer",
+    roleCategory: "Hackathon Organizer",
+    university: "DevPulse Operations Committee",
+    memberId: "ORG-102"
+  },
+  {
+    email: "mentor@hacktrack.io",
+    password: "password123",
+    fullName: "David Sterling",
+    role: "mentor",
+    roleCategory: "Technical Mentor",
+    university: "Cloud Architecture Guild",
+    memberId: "MTR-404"
   }
 ];
 
@@ -53,6 +80,14 @@ export function getUsers() {
     return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEMO_USERS;
   } catch {
     return DEMO_USERS;
+  }
+}
+
+export function saveUsers(users) {
+  try {
+    localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(users));
+  } catch (err) {
+    console.error("Storage error:", err);
   }
 }
 
@@ -126,17 +161,44 @@ export function logoutUser() {
   }
 }
 
+// Update a user's role (Admin action)
+export function updateUserRole(userEmail, newRole) {
+  const users = getUsers();
+  const clean = userEmail.toLowerCase().trim();
+  const index = users.findIndex((u) => u.email.toLowerCase() === clean);
+  if (index === -1) return { success: false, error: "User not found" };
+
+  users[index].role = newRole;
+  users[index].roleCategory = getRoleTitle(newRole);
+  saveUsers(users);
+
+  // If currently logged in user is modified, update session
+  const current = getCurrentUser();
+  if (current && current.email.toLowerCase() === clean) {
+    current.role = newRole;
+    current.roleCategory = getRoleTitle(newRole);
+    localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(current));
+  }
+
+  return { success: true, user: users[index] };
+}
+
 // Helper to get role dashboard path
 export function getRoleDashboardPath(role) {
   switch (role) {
+    case "leader":
+      return "/dashboard/leader";
     case "screening":
       return "/dashboard/screening";
     case "judge":
       return "/dashboard/judge";
     case "admin":
       return "/dashboard/admin";
+    case "organizer":
+      return "/dashboard/organizer";
+    case "mentor":
+      return "/dashboard/mentor";
     case "student":
-    case "leader":
     default:
       return "/dashboard/student";
   }
@@ -145,15 +207,20 @@ export function getRoleDashboardPath(role) {
 // Helper to get display title for a role
 export function getRoleTitle(role) {
   switch (role) {
+    case "leader":
+      return "Team Leader";
     case "screening":
       return "Screening Committee";
     case "judge":
-      return "Judge";
+      return "Judge / Evaluator";
     case "admin":
-      return "Admin";
+      return "Platform Administrator";
+    case "organizer":
+      return "Hackathon Organizer";
+    case "mentor":
+      return "Technical Mentor";
     case "student":
-    case "leader":
     default:
-      return "Student / Team Leader";
+      return "Student / Participant";
   }
 }

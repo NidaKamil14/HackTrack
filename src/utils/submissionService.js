@@ -12,17 +12,17 @@
  * - S3-ready file upload metadata architecture (storage: "s3", objectKey: null)
  * - Immutable finalized status (freeze & lock)
  * - Filtering for Screening Committee queue (finalized only)
+ * - Bidirectional screening status updates synced with participant and judge views
  */
 
 import { isUserRegistered } from './registrationService.js';
 import { getTeamByCode, getUserTeamForHackathon } from './teamService.js';
+import { addNotification } from './notificationService.js';
 
 const STORAGE_KEY = "hacktrack_submissions";
 
 /**
  * Pre-seeded submission records:
- * 1. DevPulse / AsyncCoders (draft for Alex Chen)
- * 2. AI Catalyst / NeuralShift (finalized for screening queue visibility)
  */
 const DEFAULT_SUBMISSIONS = [
   {
@@ -63,6 +63,18 @@ const DEFAULT_SUBMISSIONS = [
       }
     ],
     status: "draft",
+    screeningStatus: "Pending Review",
+    screeningRemarks: "",
+    rejectionReason: "",
+    checks: {
+      gitFreshness: true,
+      endpointsLive: true,
+      envConfigured: true,
+      licenseMIT: true
+    },
+    flags: [],
+    screenedAt: null,
+    screenedBy: null,
     createdAt: "2026-10-04T10:00:00.000Z",
     updatedAt: "2026-10-04T10:45:00.000Z",
     finalizedAt: null
@@ -94,6 +106,18 @@ const DEFAULT_SUBMISSIONS = [
       }
     ],
     status: "finalized",
+    screeningStatus: "Shortlisted",
+    screeningRemarks: "Verified clean modular repository. All agent tool endpoints live and responding under 300ms.",
+    rejectionReason: "",
+    checks: {
+      gitFreshness: true,
+      endpointsLive: true,
+      envConfigured: true,
+      licenseMIT: true
+    },
+    flags: [],
+    screenedAt: "2026-10-04T11:00:00.000Z",
+    screenedBy: "Dr. Marcus Vance",
     createdAt: "2026-10-03T14:00:00.000Z",
     updatedAt: "2026-10-03T18:30:00.000Z",
     finalizedAt: "2026-10-03T18:30:00.000Z"
@@ -125,6 +149,18 @@ const DEFAULT_SUBMISSIONS = [
       }
     ],
     status: "finalized",
+    screeningStatus: "Rejected",
+    screeningRemarks: "Commits found prior to kickoff window. Missing environment configuration documentation.",
+    rejectionReason: "Pre-dated private commits before kickoff window",
+    checks: {
+      gitFreshness: false,
+      endpointsLive: true,
+      envConfigured: false,
+      licenseMIT: true
+    },
+    flags: ["Pre-dated private commits before kickoff window", "Missing .env.example documentation"],
+    screenedAt: "2026-10-03T16:00:00.000Z",
+    screenedBy: "Dr. Marcus Vance",
     createdAt: "2026-10-02T09:00:00.000Z",
     updatedAt: "2026-10-02T16:00:00.000Z",
     finalizedAt: "2026-10-02T16:00:00.000Z"
@@ -156,6 +192,18 @@ const DEFAULT_SUBMISSIONS = [
       }
     ],
     status: "finalized",
+    screeningStatus: "Shortlisted",
+    screeningRemarks: "Multi-modal vision engine verified on live endpoints with compliant MIT license.",
+    rejectionReason: "",
+    checks: {
+      gitFreshness: true,
+      endpointsLive: true,
+      envConfigured: true,
+      licenseMIT: true
+    },
+    flags: [],
+    screenedAt: "2026-10-03T14:00:00.000Z",
+    screenedBy: "Dr. Marcus Vance",
     createdAt: "2026-10-03T07:30:00.000Z",
     updatedAt: "2026-10-03T12:00:00.000Z",
     finalizedAt: "2026-10-03T12:00:00.000Z"
@@ -173,7 +221,7 @@ export function getSubmissions() {
       return DEFAULT_SUBMISSIONS;
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : DEFAULT_SUBMISSIONS;
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_SUBMISSIONS;
   } catch {
     return DEFAULT_SUBMISSIONS;
   }
@@ -281,9 +329,121 @@ export function getSubmissionByTeamAndHackathon(teamId, hackathonId) {
  * Retrieves only FINALIZED submissions for the Screening Committee queue.
  * Drafts are strictly excluded.
  */
-export function getFinalizedSubmissions() {
+export function getFinalizedSubmissions(hackathonId = null) {
   const all = getSubmissions();
-  return all.filter((s) => s.status === "finalized");
+  return all.filter((s) => s.status === "finalized" && (!hackathonId || s.hackathonId === hackathonId));
+}
+
+/**
+ * Retrieves only pre-screened SHORTLISTED submissions eligible for judging.
+ */
+export function getShortlistedSubmissions(hackathonId = null) {
+  const all = getSubmissions();
+  return all.filter(
+    (s) =>
+      s.status === "finalized" &&
+      s.screeningStatus === "Shortlisted" &&
+      (!hackathonId || s.hackathonId === hackathonId)
+  );
+}
+
+/**
+ * Updates screening decision, remarks, rejection reason, and compliance checklist.
+ * Persists changes immediately and dispatches notifications.
+ */
+export function updateScreeningDecision({
+  submissionId,
+  status, // "Shortlisted" | "Rejected" | "Under Review" | "Pending Review"
+  remarks = "",
+  rejectionReason = "",
+  checks = null,
+  flags = [],
+  reviewer = "Dr. Marcus Vance (Screening Committee)"
+}) {
+  if (!submissionId || !status) {
+    return { success: false, error: "Submission ID and Status are required." };
+  }
+
+  const all = getSubmissions();
+  const index = all.findIndex((s) => s.submissionId === submissionId);
+
+  if (index === -1) {
+    return { success: false, error: "Submission not found." };
+  }
+
+  const existing = all[index];
+  const now = new Date().toISOString();
+
+  const updatedRecord = {
+    ...existing,
+    screeningStatus: status,
+    screeningRemarks: remarks !== undefined ? remarks : existing.screeningRemarks,
+    rejectionReason: status === "Rejected" ? (rejectionReason || existing.rejectionReason) : "",
+    checks: checks ? { ...existing.checks, ...checks } : existing.checks,
+    flags: Array.isArray(flags) ? flags : existing.flags,
+    screenedAt: now,
+    screenedBy: reviewer,
+    updatedAt: now
+  };
+
+  all[index] = updatedRecord;
+  saveAllSubmissions(all);
+
+  // Notify team submitter
+  const notifType = status === "Shortlisted" ? "success" : status === "Rejected" ? "error" : "info";
+  addNotification({
+    userEmail: existing.submittedBy,
+    title: `Screening Update: ${status}`,
+    message: status === "Shortlisted"
+      ? `Congratulations! "${existing.projectTitle}" has passed screening and advanced to judging.`
+      : status === "Rejected"
+      ? `Screening gate feedback: "${rejectionReason || remarks || 'Submission did not satisfy screening criteria.'}"`
+      : `Submission status updated to "${status}".`,
+    type: notifType,
+    link: "/dashboard/student"
+  });
+
+  return { success: true, submission: updatedRecord };
+}
+
+/**
+ * Supported reopening mechanism:
+ * Unlocks a finalized submission (returns to draft) so team leader can make revisions.
+ */
+export function unlockSubmission(submissionId, reason = "Revision requested", adminUser = null) {
+  const all = getSubmissions();
+  const index = all.findIndex((s) => s.submissionId === submissionId);
+
+  if (index === -1) {
+    return { success: false, error: "Submission not found." };
+  }
+
+  const existing = all[index];
+  const now = new Date().toISOString();
+
+  const unlockedRecord = {
+    ...existing,
+    status: "draft",
+    screeningStatus: "Pending Review",
+    screeningRemarks: `Reopened for revisions: ${reason}`,
+    finalizedAt: null,
+    updatedAt: now,
+    unlockedAt: now,
+    unlockedBy: adminUser?.fullName || "Platform Admin"
+  };
+
+  all[index] = unlockedRecord;
+  saveAllSubmissions(all);
+
+  addNotification({
+    userEmail: existing.submittedBy,
+    title: "Submission Reopened for Edits",
+    message: `Your project submission for "${existing.hackathonTitle}" has been unlocked for edits.`,
+    type: "info",
+    link: "/dashboard/student"
+  });
+
+  return { success: true, submission: unlockedRecord };
 }
 
 /**
@@ -299,7 +459,7 @@ export function createS3FileMetadata(file, category = "Documentation") {
     size: file.size || 0,
     category,
     storage: "s3",
-    objectKey: null, // Ready for future presigned AWS S3 upload
+    objectKey: `submissions/${Date.now()}/${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`, // Ready for future presigned AWS S3 upload
     status: "ready", // Locally verified and ready for S3 synchronization
     uploadedAt: new Date().toISOString()
   };
@@ -390,6 +550,18 @@ export function saveDraftSubmission({
     liveDemoUrl: (liveDemoUrl || "").trim(),
     submissionFiles: Array.isArray(submissionFiles) ? submissionFiles : [],
     status: "draft",
+    screeningStatus: existing?.screeningStatus || "Pending Review",
+    screeningRemarks: existing?.screeningRemarks || "",
+    rejectionReason: existing?.rejectionReason || "",
+    checks: existing?.checks || {
+      gitFreshness: true,
+      endpointsLive: true,
+      envConfigured: true,
+      licenseMIT: true
+    },
+    flags: existing?.flags || [],
+    screenedAt: existing?.screenedAt || null,
+    screenedBy: existing?.screenedBy || null,
     createdAt: existing ? existing.createdAt : now,
     updatedAt: now,
     finalizedAt: null
@@ -496,12 +668,21 @@ export function finalizeSubmission({
   const finalizedRecord = {
     ...existing,
     status: "finalized",
+    screeningStatus: "Pending Review",
     finalizedAt: finalizedTimestamp,
     updatedAt: finalizedTimestamp
   };
 
   all[existingIdx] = finalizedRecord;
   saveAllSubmissions(all);
+
+  addNotification({
+    userEmail,
+    title: "Deliverables Finalized & Locked",
+    message: `Project "${finalizedRecord.projectTitle}" has been submitted for Screening Committee gate review.`,
+    type: "success",
+    link: "/dashboard/student"
+  });
 
   return {
     success: true,

@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Icons } from '../Icons';
+import ThemeToggle from '../ThemeToggle';
 
 export default function DashboardLayout({
   portalTitle,
@@ -17,11 +18,11 @@ export default function DashboardLayout({
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased flex flex-col justify-between selection:bg-emerald-500 selection:text-slate-950">
+    <div className="min-h-screen bg-[#060a12] text-slate-100 font-sans antialiased flex flex-col justify-between selection:bg-emerald-500 selection:text-slate-950">
       
       {/* Top Dashboard Navigation Bar */}
       <div>
-        <header className="sticky top-0 z-40 bg-slate-950/90 backdrop-blur-md border-b border-slate-800">
+        <header className="sticky top-0 z-40 bg-[#0c1424]/95 backdrop-blur-md border-b border-[#253247]">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
             
             {/* Brand + Portal Label */}
@@ -47,6 +48,8 @@ export default function DashboardLayout({
 
             {/* User Profile & Actions */}
             <div className="flex items-center gap-3">
+              <ThemeToggle />
+
               <Link
                 to="/"
                 className="hidden md:inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg border border-transparent hover:border-slate-800 transition-colors"
@@ -88,7 +91,7 @@ export default function DashboardLayout({
       </div>
 
       {/* Dashboard Footer */}
-      <footer className="py-6 bg-slate-950 border-t border-slate-900 text-slate-500 text-xs">
+      <footer className="py-6 bg-[#0c1424] border-t border-[#253247] text-slate-500 text-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="font-bold text-slate-400">HackTrack Portal</span>

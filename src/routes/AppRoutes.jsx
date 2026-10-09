@@ -17,6 +17,8 @@ import StudentDashboard from '../pages/dashboards/StudentDashboard';
 import ScreeningDashboard from '../pages/dashboards/ScreeningDashboard';
 import JudgeDashboard from '../pages/dashboards/JudgeDashboard';
 import AdminDashboard from '../pages/dashboards/AdminDashboard';
+import OrganizerDashboard from '../pages/dashboards/OrganizerDashboard';
+import MentorDashboard from '../pages/dashboards/MentorDashboard';
 
 export default function AppRoutes() {
   return (
@@ -37,7 +39,15 @@ export default function AppRoutes() {
           path="/dashboard/student"
           element={
             <ProtectedRoute allowedRole="student">
-              <StudentDashboard />
+              <StudentDashboard initialTab="workspace" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/dashboard/leader"
+          element={
+            <ProtectedRoute allowedRole="leader">
+              <StudentDashboard initialTab="workspace" />
             </ProtectedRoute>
           }
         />
@@ -62,6 +72,22 @@ export default function AppRoutes() {
           element={
             <ProtectedRoute allowedRole="admin">
               <AdminDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/dashboard/organizer"
+          element={
+            <ProtectedRoute allowedRole="organizer">
+              <OrganizerDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/dashboard/mentor"
+          element={
+            <ProtectedRoute allowedRole="mentor">
+              <MentorDashboard />
             </ProtectedRoute>
           }
         />

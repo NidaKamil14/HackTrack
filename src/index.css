@@ -4,6 +4,32 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-page-bg: #05050A;
+  --color-surface-panel: #0d1526;
+  --color-surface-secondary: #080e1a;
+  --color-surface-tertiary: #121c32;
+  --color-text-primary: #FFFFFF;
+  --color-text-secondary: #94A3B8;
+  --color-border-subtle: #253247;
+  --color-border-nested: #1c283c;
+  --color-input-bg: #080e1a;
+  --color-input-border: #223044;
+}
+
+html.light {
+  --color-page-bg: #F5F7FB;
+  --color-surface-panel: #FFFFFF;
+  --color-surface-secondary: #EEF2F7;
+  --color-surface-tertiary: #E2E8F0;
+  --color-text-primary: #172033;
+  --color-text-secondary: #64748B;
+  --color-border-subtle: #D8E0EB;
+  --color-border-nested: #D8E0EB;
+  --color-input-bg: #FFFFFF;
+  --color-input-border: #D8E0EB;
+}
+
 @layer base {
   body {
     @apply bg-background text-white font-sans antialiased min-h-screen overflow-x-hidden;
@@ -11,6 +37,7 @@
     background-image: radial-gradient(circle at 50% 0%, rgba(34, 211, 238, 0.05) 0%, transparent 40%),
                       radial-gradient(circle at 80% 80%, rgba(139, 92, 246, 0.05) 0%, transparent 40%);
     background-color: #05050A;
+    transition: background-color 200ms ease, color 200ms ease;
   }
 }
 
@@ -38,4 +65,260 @@
            shadow-[0_0_15px_rgba(139,92,246,0.3)] hover:shadow-[0_0_20px_rgba(139,92,246,0.5)]
            text-sm font-medium tracking-wide border border-white/10 flex items-center justify-center gap-2;
   }
+}
+
+/* ==========================================================================
+   GLOBAL LIGHT MODE STYLING & TOKENS
+   Transforms dark theme into calm, modern, professional Light Mode:
+   - Page background: #F5F7FB
+   - Major panels/cards: #FFFFFF
+   - Secondary surfaces: #EEF2F7 / #F8FAFC
+   - Primary text: #172033
+   - Secondary text: #64748B
+   - Borders/dividers: #D8E0EB
+   - Primary action: Emerald / Teal accent preserved
+   ========================================================================== */
+
+html.light body {
+  background-color: #F5F7FB !important;
+  background-image: radial-gradient(circle at 50% 0%, rgba(16, 185, 129, 0.04) 0%, transparent 45%),
+                    radial-gradient(circle at 80% 80%, rgba(59, 130, 246, 0.03) 0%, transparent 45%) !important;
+  color: #172033 !important;
+}
+
+/* Canvas, Root Containers & Page Wrappers */
+html.light .bg-\[\#060a12\],
+html.light .bg-\[\#05050A\],
+html.light .bg-slate-950 {
+  background-color: #F5F7FB !important;
+}
+
+/* Major Panels, Header Bars, Navigation, Footers & Dialogs */
+html.light .bg-\[\#0c1424\],
+html.light .bg-\[\#0c1424\]\/95,
+html.light .bg-\[\#0d1526\],
+html.light .bg-slate-900,
+html.light .bg-slate-900\/60,
+html.light .bg-slate-900\/70,
+html.light .bg-slate-900\/80,
+html.light .bg-slate-900\/90,
+html.light .bg-slate-950\/85 {
+  background-color: #FFFFFF !important;
+}
+
+/* Secondary Surfaces, Insets, Nested Container Backgrounds */
+html.light .bg-\[\#080e1a\],
+html.light .bg-\[\#0A0A0F\],
+html.light .bg-\[\#0f172a\] {
+  background-color: #F8FAFC !important;
+}
+
+/* Sub-Cards, Inner Inset Panels, Table Header Rows, Accent Surface Pills */
+html.light .bg-\[\#121c32\],
+html.light .bg-\[\#162238\],
+html.light .bg-\[\#1a2744\],
+html.light .bg-\[\#1d2d4a\],
+html.light .bg-slate-800,
+html.light .bg-slate-800\/50 {
+  background-color: #EEF2F7 !important;
+}
+
+/* Interactive Hover Backgrounds */
+html.light .hover\:bg-slate-800:hover,
+html.light .hover\:bg-slate-700:hover,
+html.light .hover\:bg-\[\#121c32\]:hover,
+html.light .hover\:bg-\[\#162238\]:hover,
+html.light .hover\:bg-\[\#1a2744\]:hover {
+  background-color: #E2E8F0 !important;
+}
+
+/* Borders & Dividers */
+html.light .border-\[\#253247\],
+html.light .border-\[\#1c283c\],
+html.light .border-\[\#223044\],
+html.light .border-\[\#354866\],
+html.light .border-slate-800,
+html.light .border-slate-800\/60,
+html.light .border-slate-700,
+html.light .border-slate-900,
+html.light .border-white\/10,
+html.light .divide-\[\#1c283c\] > :not([hidden]) ~ :not([hidden]),
+html.light .divide-\[\#253247\] > :not([hidden]) ~ :not([hidden]),
+html.light .divide-slate-800 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #D8E0EB !important;
+}
+
+html.light .hover\:border-slate-700:hover,
+html.light .hover\:border-slate-500:hover,
+html.light .hover\:border-\[\#354866\]:hover {
+  border-color: #CBD5E1 !important;
+}
+
+/* Typography Overrides */
+html.light .text-white,
+html.light .text-slate-100,
+html.light .text-slate-200 {
+  color: #172033 !important;
+}
+
+html.light .text-slate-300,
+html.light .text-slate-400 {
+  color: #64748B !important;
+}
+
+html.light .text-slate-500 {
+  color: #64748B !important;
+}
+
+html.light .text-slate-600,
+html.light .text-slate-700 {
+  color: #94A3B8 !important;
+}
+
+/* Form Controls (Inputs, Selects, Textareas) */
+html.light input:not([type="checkbox"]):not([type="radio"]),
+html.light select,
+html.light textarea {
+  background-color: #FFFFFF !important;
+  color: #172033 !important;
+  border-color: #D8E0EB !important;
+}
+
+html.light input::placeholder,
+html.light textarea::placeholder {
+  color: #94A3B8 !important;
+}
+
+html.light input:focus,
+html.light select:focus,
+html.light textarea:focus {
+  border-color: #10B981 !important;
+  box-shadow: 0 0 0 1px #10B981 !important;
+  outline: none !important;
+}
+
+html.light select option {
+  background-color: #FFFFFF !important;
+  color: #172033 !important;
+}
+
+/* Modal Backdrops (Keep dark translucent backdrop for strong focus) */
+html.light [class*="fixed inset-0"][class*="bg-black"],
+html.light [class*="fixed inset-0"][class*="bg-\[\#060a12\]"] {
+  background-color: rgba(15, 23, 42, 0.65) !important;
+}
+
+/* Preserve Solid Primary Action Buttons */
+html.light .bg-emerald-500,
+html.light .bg-emerald-400 {
+  background-color: #10B981 !important;
+  color: #020617 !important;
+}
+
+html.light .hover\:bg-emerald-400:hover {
+  background-color: #34D399 !important;
+}
+
+html.light .bg-emerald-500 *,
+html.light .bg-emerald-400 * {
+  color: #020617 !important;
+}
+
+/* Preserve Solid Danger Buttons & Badges */
+html.light .bg-rose-600,
+html.light .bg-rose-500 {
+  background-color: #E11D48 !important;
+  color: #FFFFFF !important;
+}
+
+html.light .bg-rose-600 *,
+html.light .bg-rose-500 * {
+  color: #FFFFFF !important;
+}
+
+/* Status Alert Tints & Badges */
+html.light .bg-emerald-950,
+html.light [class*="bg-emerald-950"] {
+  background-color: #ECFDF5 !important;
+  color: #047857 !important;
+  border-color: #A7F3D0 !important;
+}
+html.light .bg-emerald-950 *,
+html.light [class*="bg-emerald-950"] * {
+  color: #047857 !important;
+}
+
+html.light .bg-rose-950,
+html.light [class*="bg-rose-950"] {
+  background-color: #FFF1F2 !important;
+  color: #BE123C !important;
+  border-color: #FECDD3 !important;
+}
+html.light .bg-rose-950 *,
+html.light [class*="bg-rose-950"] * {
+  color: #BE123C !important;
+}
+
+html.light .bg-amber-950,
+html.light [class*="bg-amber-950"] {
+  background-color: #FFFBEB !important;
+  color: #B45309 !important;
+  border-color: #FDE68A !important;
+}
+html.light .bg-amber-950 *,
+html.light [class*="bg-amber-950"] * {
+  color: #B45309 !important;
+}
+
+html.light .bg-sky-950,
+html.light [class*="bg-sky-950"] {
+  background-color: #F0F9FF !important;
+  color: #0369A1 !important;
+  border-color: #BAE6FD !important;
+}
+html.light .bg-sky-950 *,
+html.light [class*="bg-sky-950"] * {
+  color: #0369A1 !important;
+}
+
+html.light .bg-purple-950,
+html.light [class*="bg-purple-950"] {
+  background-color: #FAF5FF !important;
+  color: #7E22CE !important;
+  border-color: #E9D5FF !important;
+}
+html.light .bg-purple-950 *,
+html.light [class*="bg-purple-950"] * {
+  color: #7E22CE !important;
+}
+
+/* Status Text Colors */
+html.light .text-emerald-400 {
+  color: #059669 !important;
+}
+
+html.light .text-rose-400,
+html.light .text-rose-300 {
+  color: #E11D48 !important;
+}
+
+html.light .text-amber-400 {
+  color: #D97706 !important;
+}
+
+html.light .text-sky-400 {
+  color: #0284C7 !important;
+}
+
+/* Glass Panels and Glass Buttons in Light Mode */
+html.light .glass-panel {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  border-color: #D8E0EB !important;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05) !important;
+}
+
+html.light .btn-glass {
+  background-color: #FFFFFF !important;
+  border-color: #D8E0EB !important;
+  color: #172033 !important;
 }

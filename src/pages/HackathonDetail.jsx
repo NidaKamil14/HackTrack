@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate, useLocation, useOutletContext } from 'react-router-dom';
 import { Icons } from '../components/Icons';
-import { HACKATHONS } from '../data/hackathons';
+import { getHackathonById, getStoredHackathons } from '../utils/hackathonService';
 import { useAuth } from '../context/AuthContext';
 import { isUserRegistered, registerForHackathon } from '../utils/registrationService';
 
@@ -19,7 +19,7 @@ export default function HackathonDetail({
   const setTeamCodeInput = propSetTeamCodeInput || outletContext.setTeamCodeInput || (() => {});
 
   const currentId = propHackathonId || id;
-  const hackathon = HACKATHONS.find((h) => h.id === currentId) || HACKATHONS[0];
+  const hackathon = getHackathonById(currentId) || getStoredHackathons()[0];
   const [activeTab, setActiveTab] = useState("overview");
 
   // Registration state

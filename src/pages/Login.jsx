@@ -18,7 +18,7 @@ export default function Login({ navigate: propNavigate }) {
 
   const handlePersonaSelect = (roleKey) => {
     setSelectedRolePreview(roleKey);
-    const demo = DEMO_USERS.find((u) => u.role === (roleKey === "leader" ? "student" : roleKey));
+    const demo = DEMO_USERS.find((u) => u.role === roleKey);
     if (demo) {
       setEmail(demo.email);
       setPassword(demo.password);
@@ -68,7 +68,7 @@ export default function Login({ navigate: propNavigate }) {
   };
 
   const handleQuickDemoLaunch = (roleKey) => {
-    const user = switchDemoRole(roleKey === "leader" ? "student" : roleKey);
+    const user = switchDemoRole(roleKey);
     const destination = getRoleDashboardPath(user.role);
     navigate(destination, { replace: true });
   };
@@ -86,40 +86,48 @@ export default function Login({ navigate: propNavigate }) {
           <p className="text-xs text-slate-400 mt-1">Access your competition portal, rosters, or review queues</p>
         </div>
 
-        {/* Role Routing Preview Pill Selector */}
-        <div className="mb-5">
-          <label className="text-[11px] font-mono text-slate-400 block mb-1.5 uppercase">
-            Simulate Portal Persona (Click to autofill)
+        {/* Select Demo Role Dropdown */}
+        <div className="mb-5 space-y-1.5">
+          <label htmlFor="demo-role-select" className="text-xs font-semibold text-slate-300 block">
+            Select Demo Role
           </label>
-          <div className="grid grid-cols-4 gap-1.5 text-[11px]">
-            {[
-              { id: "student", label: "Student" },
-              { id: "screening", label: "Screening" },
-              { id: "judge", label: "Judge" },
-              { id: "admin", label: "Admin" }
-            ].map((r) => (
-              <button
-                type="button"
-                key={r.id}
-                onClick={() => handlePersonaSelect(r.id)}
-                className={`py-1.5 px-2 rounded font-medium transition-colors text-center ${
-                  selectedRolePreview === r.id
-                    ? "bg-slate-800 text-emerald-400 border border-emerald-500/40"
-                    : "bg-slate-950 text-slate-400 border border-slate-800 hover:border-slate-700"
-                }`}
-              >
-                {r.label}
-              </button>
-            ))}
+          <div className="relative">
+            <select
+              id="demo-role-select"
+              value={selectedRolePreview}
+              onChange={(e) => handlePersonaSelect(e.target.value)}
+              className="w-full bg-[#080e1a] border border-[#223044] rounded-lg px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 transition-colors cursor-pointer appearance-none pr-9 font-medium"
+            >
+              <option value="leader">Team Leader (alex@university.edu)</option>
+              <option value="student">Student / Participant (priya@university.edu)</option>
+              <option value="screening">Screening Committee (screening@hacktrack.io)</option>
+              <option value="judge">Judge (judge@hacktrack.io)</option>
+              <option value="admin">Administrator (admin@hacktrack.io)</option>
+              <option value="organizer">Organizer (organizer@hacktrack.io)</option>
+              <option value="mentor">Mentor (mentor@hacktrack.io)</option>
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
           </div>
 
-          <div className="mt-2 text-right">
+          <div className="pt-1 flex items-center justify-between text-[11px]">
+            <span className="text-slate-400 font-mono text-[10px]">Autofills credentials</span>
             <button
               type="button"
               onClick={() => handleQuickDemoLaunch(selectedRolePreview)}
-              className="text-[11px] text-emerald-400 hover:text-emerald-300 font-mono underline"
+              className="text-emerald-400 hover:text-emerald-300 font-mono underline inline-flex items-center gap-1 transition-colors"
             >
-              ⚡ Instant 1-Click Sign In as {selectedRolePreview.toUpperCase()} →
+              <span>⚡ Instant 1-Click Sign In as {
+                selectedRolePreview === "leader" ? "TEAM LEADER" :
+                selectedRolePreview === "student" ? "STUDENT" :
+                selectedRolePreview === "screening" ? "SCREENING COMMITTEE" :
+                selectedRolePreview === "judge" ? "JUDGE" :
+                selectedRolePreview === "admin" ? "ADMINISTRATOR" :
+                selectedRolePreview === "organizer" ? "ORGANIZER" : "MENTOR"
+              } →</span>
             </button>
           </div>
         </div>

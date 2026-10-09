@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import FilterBar from '../components/FilterBar';
 import HackathonCard from '../components/HackathonCard';
-import { HACKATHONS } from '../data/hackathons';
+import { getStoredHackathons } from '../utils/hackathonService';
 
 export default function BrowseHackathons({
   onOpenTeamModal: propOpenTeamModal,
@@ -22,7 +22,8 @@ export default function BrowseHackathons({
   const stages = ["All", "Registration Open", "Team Formation", "Upcoming"];
 
   const filteredHackathons = useMemo(() => {
-    return HACKATHONS.filter((h) => {
+    const list = getStoredHackathons();
+    return list.filter((h) => {
       const matchSearch =
         h.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         h.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
