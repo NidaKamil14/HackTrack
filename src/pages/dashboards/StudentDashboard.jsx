@@ -1238,29 +1238,53 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                       <div className="space-y-2">
                         <span className="text-[10px] font-mono text-slate-500 uppercase block">CRITERIA BREAKDOWN</span>
                         <div className="grid grid-cols-2 gap-2">
-                          <div className="p-2.5 bg-[#080e1a] border border-[#1c283c] rounded">
+                          <div className="p-2.5 bg-[#080e1a] border border-[#1c283c] rounded space-y-1">
                             <span className="text-slate-400 block text-[11px]">Architecture</span>
-                            <span className="font-mono text-emerald-400 font-bold text-sm">
+                            <span className="font-mono text-emerald-400 font-bold text-sm block">
                               {teamEvaluation.scores?.architecture || 0} / 30
                             </span>
+                            <div className="w-full h-1 bg-[#111E31] rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-[#2878F0] rounded-full transition-all duration-300"
+                                style={{ width: `${Math.min(100, Math.round(((teamEvaluation.scores?.architecture || 0) / 30) * 100))}%` }}
+                              />
+                            </div>
                           </div>
-                          <div className="p-2.5 bg-[#080e1a] border border-[#1c283c] rounded">
+                          <div className="p-2.5 bg-[#080e1a] border border-[#1c283c] rounded space-y-1">
                             <span className="text-slate-400 block text-[11px]">Usability & UX</span>
-                            <span className="font-mono text-emerald-400 font-bold text-sm">
+                            <span className="font-mono text-emerald-400 font-bold text-sm block">
                               {teamEvaluation.scores?.usability || 0} / 25
                             </span>
+                            <div className="w-full h-1 bg-[#111E31] rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-[#2878F0] rounded-full transition-all duration-300"
+                                style={{ width: `${Math.min(100, Math.round(((teamEvaluation.scores?.usability || 0) / 25) * 100))}%` }}
+                              />
+                            </div>
                           </div>
-                          <div className="p-2.5 bg-[#080e1a] border border-[#1c283c] rounded">
+                          <div className="p-2.5 bg-[#080e1a] border border-[#1c283c] rounded space-y-1">
                             <span className="text-slate-400 block text-[11px]">Innovation</span>
-                            <span className="font-mono text-emerald-400 font-bold text-sm">
+                            <span className="font-mono text-emerald-400 font-bold text-sm block">
                               {teamEvaluation.scores?.innovation || 0} / 25
                             </span>
+                            <div className="w-full h-1 bg-[#111E31] rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-[#2878F0] rounded-full transition-all duration-300"
+                                style={{ width: `${Math.min(100, Math.round(((teamEvaluation.scores?.innovation || 0) / 25) * 100))}%` }}
+                              />
+                            </div>
                           </div>
-                          <div className="p-2.5 bg-[#080e1a] border border-[#1c283c] rounded">
+                          <div className="p-2.5 bg-[#080e1a] border border-[#1c283c] rounded space-y-1">
                             <span className="text-slate-400 block text-[11px]">Completeness</span>
-                            <span className="font-mono text-emerald-400 font-bold text-sm">
+                            <span className="font-mono text-emerald-400 font-bold text-sm block">
                               {teamEvaluation.scores?.completeness || 0} / 20
                             </span>
+                            <div className="w-full h-1 bg-[#111E31] rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-[#2878F0] rounded-full transition-all duration-300"
+                                style={{ width: `${Math.min(100, Math.round(((teamEvaluation.scores?.completeness || 0) / 20) * 100))}%` }}
+                              />
+                            </div>
                           </div>
                         </div>
                       </div>

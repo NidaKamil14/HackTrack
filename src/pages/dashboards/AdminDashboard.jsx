@@ -270,9 +270,25 @@ export default function AdminDashboard() {
                         <td className="py-3 font-bold text-white pr-4">{h.title}</td>
                         <td className="py-3 text-slate-300 pr-4">{h.track}</td>
                         <td className="py-3 pr-4">
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/30 text-emerald-400 font-mono text-[10px]">
-                            {h.stage}
-                          </span>
+                          <div className="flex flex-col gap-1">
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/30 text-emerald-400 font-mono text-[10px] w-fit">
+                              {h.stage}
+                            </span>
+                            <div className="w-20 h-1 bg-[#111E31] rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-[#2878F0] rounded-full transition-all duration-300"
+                                style={{
+                                  width: `${
+                                    h.stage === "Results Published" ? 100 :
+                                    h.stage === "Rubric Judging" ? 85 :
+                                    h.stage === "Screening Gate" ? 70 :
+                                    h.stage === "Hacking Phase" ? 50 :
+                                    h.stage === "Team Formation" ? 35 : 20
+                                  }%`
+                                }}
+                              />
+                            </div>
+                          </div>
                         </td>
                         <td className="py-3 text-slate-400 font-mono pr-4">{h.deadline}</td>
                         <td className="py-3 pr-4">

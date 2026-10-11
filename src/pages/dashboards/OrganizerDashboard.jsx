@@ -134,6 +134,20 @@ export default function OrganizerDashboard() {
                         <div className="text-slate-400 mt-0.5">
                           {sprintTeams.length} Squads • {sprintSubs.length} Deliverable(s)
                         </div>
+                        <div className="w-full max-w-xs h-1.5 bg-[#111E31] rounded-full overflow-hidden mt-2 border border-[#253247]/50">
+                          <div
+                            className="h-full bg-[#2878F0] rounded-full transition-all duration-500"
+                            style={{
+                              width: `${
+                                h.stage === "Results Published" ? 100 :
+                                h.stage === "Rubric Judging" ? 85 :
+                                h.stage === "Screening Gate" ? 70 :
+                                h.stage === "Hacking Phase" ? 50 :
+                                h.stage === "Team Formation" ? 35 : 20
+                              }%`
+                            }}
+                          />
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
