@@ -1,5 +1,6 @@
 /* oxlint-disable react/only-export-components */
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import api from '../utils/api';
 import {
   getCurrentUser,
   authenticateUser,
@@ -13,6 +14,19 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => getCurrentUser());
+  const [backendOnline, setBackendOnline] = useState(false);
+
+  // Probe backend connectivity on mount
+  useEffect(() => {
+    api.checkHealth().then((result) => {
+      setBackendOnline(result.online);
+      if (result.online) {
+        console.log('🟢 Backend API connected. Using live server.');
+      } else {
+        console.log('🟡 Backend offline. Using localStorage fallback.');
+      }
+    });
+  }, []);
 
   useEffect(() => {
     const handleStorageChange = () => {
@@ -22,7 +36,25 @@ export function AuthProvider({ children }) {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  const login = (email, password) => {
+  const login = async (email, password) => {
+    if (backendOnline) {
+      try {
+        const data = await api.login({ email, password });
+        // Sync to localStorage for session persistence
+        const safeUser = data.user;
+        localStorage.setItem('hacktrack_current_user', JSON.stringify(safeUser));
+        setUser(safeUser);
+        return { success: true, user: safeUser, redirectPath: data.redirectPath };
+      } catch (err) {
+        if (err.isNetworkError) {
+          // Fall through to localStorage mode
+          setBackendOnline(false);
+        } else {
+          return { success: false, error: err.message || 'Login failed.' };
+        }
+      }
+    }
+    // Fallback to localStorage-based auth
     const res = authenticateUser(email, password);
     if (res.success) {
       setUser(res.user);
@@ -30,7 +62,23 @@ export function AuthProvider({ children }) {
     return res;
   };
 
-  const register = (userData) => {
+  const register = async (userData) => {
+    if (backendOnline) {
+      try {
+        const data = await api.register(userData);
+        const safeUser = data.user;
+        localStorage.setItem('hacktrack_current_user', JSON.stringify(safeUser));
+        setUser(safeUser);
+        return { success: true, user: safeUser, redirectPath: data.redirectPath };
+      } catch (err) {
+        if (err.isNetworkError) {
+          setBackendOnline(false);
+        } else {
+          return { success: false, error: err.message || 'Registration failed.' };
+        }
+      }
+    }
+    // Fallback
     const res = registerUser(userData);
     if (res.success) {
       setUser(res.user);
@@ -39,6 +87,7 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
+    api.logout();
     logoutUser();
     setUser(null);
   };
@@ -57,6 +106,7 @@ export function AuthProvider({ children }) {
       value={{
         user,
         isAuthenticated: !!user,
+        backendOnline,
         login,
         register,
         logout,
@@ -77,6 +127,7 @@ export function useAuth() {
     return {
       user: currentUser,
       isAuthenticated: !!currentUser,
+      backendOnline: false,
       login: authenticateUser,
       register: registerUser,
       logout: logoutUser,
