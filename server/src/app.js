@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
+import hackathonRoutes from './routes/hackathons.js';
 
 const app = express();
 
@@ -61,6 +62,7 @@ app.use('/api/v1/health', healthRoutes);
 // Convenience alias for health check
 app.use('/health', healthRoutes);
 app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/hackathons', hackathonRoutes);
 
 // 404 Route Handler for undefined endpoints
 app.use((req, res) => {
