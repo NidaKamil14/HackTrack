@@ -4,6 +4,7 @@ import cors from 'cors';
 import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
 import hackathonRoutes from './routes/hackathons.js';
+import teamRoutes from './routes/teams.js';
 
 const app = express();
 
@@ -63,6 +64,7 @@ app.use('/api/v1/health', healthRoutes);
 app.use('/health', healthRoutes);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/hackathons', hackathonRoutes);
+app.use('/api/v1/teams', teamRoutes);
 
 // 404 Route Handler for undefined endpoints
 app.use((req, res) => {
