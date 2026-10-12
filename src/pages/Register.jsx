@@ -50,7 +50,7 @@ export default function Register({ navigate: propNavigate }) {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleRegister = (e) => {
+  const handleRegister = async (e) => {
     e.preventDefault();
     if (!formData.fullName || !formData.email || !formData.university || !formData.password) {
       setStatusMessage({ type: "error", text: "Please fill out all required fields to proceed." });
@@ -61,7 +61,7 @@ export default function Register({ navigate: propNavigate }) {
       return;
     }
 
-    const res = register(formData);
+    const res = await register(formData);
     if (!res.success) {
       setStatusMessage({ type: "error", text: res.error });
       return;

@@ -25,14 +25,14 @@ export default function Login({ navigate: propNavigate }) {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!email || !password) {
       setStatusMessage({ type: "error", text: "Please enter both your email and password." });
       return;
     }
 
-    const res = login(email, password);
+    const res = await login(email, password);
     if (!res.success) {
       setStatusMessage({
         type: "error",
