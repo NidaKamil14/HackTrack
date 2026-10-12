@@ -2,6 +2,7 @@ import './config/env.js';
 import express from 'express';
 import cors from 'cors';
 import healthRoutes from './routes/health.js';
+import authRoutes from './routes/auth.js';
 
 const app = express();
 
@@ -59,6 +60,7 @@ app.get('/', (req, res) => {
 app.use('/api/v1/health', healthRoutes);
 // Convenience alias for health check
 app.use('/health', healthRoutes);
+app.use('/api/v1/auth', authRoutes);
 
 // 404 Route Handler for undefined endpoints
 app.use((req, res) => {
