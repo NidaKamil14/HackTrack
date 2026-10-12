@@ -7,6 +7,8 @@ import hackathonRoutes from './routes/hackathons.js';
 import teamRoutes from './routes/teams.js';
 import submissionRoutes from './routes/submissions.js';
 import evaluationRoutes from './routes/evaluations.js';
+import certificateRoutes from './routes/certificates.js';
+import adminRoutes from './routes/admin.js';
 
 const app = express();
 
@@ -69,6 +71,8 @@ app.use('/api/v1/hackathons', hackathonRoutes);
 app.use('/api/v1/teams', teamRoutes);
 app.use('/api/v1/submissions', submissionRoutes);
 app.use('/api/v1/evaluations', evaluationRoutes);
+app.use('/api/v1/certificates', certificateRoutes);
+app.use('/api/v1/admin', adminRoutes);
 
 // 404 Route Handler for undefined endpoints
 app.use((req, res) => {
