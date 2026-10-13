@@ -766,6 +766,19 @@ class HackTrackStore {
       if (hackathon && acceptedCount >= hackathon.maxTeamSize) {
         throw new Error(`Team limit reached (${hackathon.maxTeamSize} members).`);
       }
+
+      // Safeguard: participant cannot be accepted in two teams of the same hackathon (BR-2)
+      const alreadyAcceptedElsewhere = this.teamMembers.find(
+        (m) =>
+          m.hackathonId === team.hackathonId &&
+          m.userId === memberRecord.userId &&
+          m.status === 'accepted' &&
+          m.id !== memberRecord.id
+      );
+      if (alreadyAcceptedElsewhere) {
+        throw new Error('This participant is already an accepted member of another team in this hackathon (BR-2).');
+      }
+
       memberRecord.status = 'accepted';
       memberRecord.reviewedAt = new Date().toISOString();
     } else if (action === 'reject') {
