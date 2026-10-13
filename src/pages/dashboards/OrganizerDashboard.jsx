@@ -76,6 +76,113 @@ export default function OrganizerDashboard() {
   // Modal State: Configure Rubric / Settings
   const [configTarget, setConfigTarget] = useState(null);
 
+  // Modal State: Rubric Editor
+  const [rubricTarget, setRubricTarget] = useState(null);
+  const [rubricDraft, setRubricDraft] = useState([]);
+  const [rubricError, setRubricError] = useState("");
+
+  const openRubricEditor = (hackathon) => {
+    setRubricTarget(hackathon);
+    setRubricDraft(
+      (hackathon.rubrics || []).map((r, i) => ({
+        _key: `existing-${i}`,
+        name: r.name || "",
+        weight: r.weight || "0%",
+        desc: r.desc || r.description || "",
+      }))
+    );
+    setRubricError("");
+  };
+
+  const addRubricRow = () => {
+    setRubricDraft((prev) => [
+      ...prev,
+      { _key: `new-${Date.now()}`, name: "", weight: "0%", desc: "" },
+    ]);
+  };
+
+  const removeRubricRow = (key) => {
+    setRubricDraft((prev) => prev.filter((r) => r._key !== key));
+  };
+
+  const updateRubricRow = (key, field, value) => {
+    setRubricDraft((prev) =>
+      prev.map((r) => (r._key === key ? { ...r, [field]: value } : r))
+    );
+  };
+
+  const moveRubricRow = (index, direction) => {
+    const next = [...rubricDraft];
+    const swap = index + direction;
+    if (swap < 0 || swap >= next.length) return;
+    [next[index], next[swap]] = [next[swap], next[index]];
+    setRubricDraft(next);
+  };
+
+  const computeTotalWeight = () => {
+    return rubricDraft.reduce((sum, r) => {
+      const num = parseFloat(r.weight) || 0;
+      return sum + num;
+    }, 0);
+  };
+
+  const handleSaveRubrics = async (e) => {
+    e.preventDefault();
+    if (!rubricTarget) return;
+
+    // Validate
+    const nonEmpty = rubricDraft.filter((r) => r.name.trim());
+    if (nonEmpty.length === 0) {
+      setRubricError("Add at least one rubric criterion.");
+      return;
+    }
+
+    const total = nonEmpty.reduce((s, r) => s + (parseFloat(r.weight) || 0), 0);
+    if (Math.abs(total - 100) > 1) {
+      setRubricError(`Weights must add up to 100%. Currently: ${total.toFixed(0)}%`);
+      return;
+    }
+
+    const cleanRubrics = nonEmpty.map((r) => ({
+      name: r.name.trim(),
+      weight: r.weight.includes("%") ? r.weight.trim() : `${r.weight.trim()}%`,
+      desc: r.desc.trim(),
+    }));
+
+    // Save to localStorage
+    updateHackathon(rubricTarget.id, { rubrics: cleanRubrics });
+
+    // Also try saving to backend API
+    try {
+      const token = localStorage.getItem("hacktrack_token");
+      if (token) {
+        await fetch(`http://localhost:5050/api/v1/hackathons/${rubricTarget.id}/criteria`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            criteria: cleanRubrics.map((r) => ({
+              name: r.name,
+              maxScore: parseFloat(r.weight) || 25,
+              weightage: (parseFloat(r.weight) || 25) / 100,
+              description: r.desc,
+            })),
+          }),
+        });
+      }
+    } catch {
+      // Fallback handled by localStorage
+    }
+
+    setRubricTarget(null);
+    setRubricDraft([]);
+    setRefreshKey((k) => k + 1);
+    setNotice(`✓ Evaluation rubrics updated for "${rubricTarget.title}".`);
+    setTimeout(() => setNotice(null), 4000);
+  };
+
   const [announcementText, setAnnouncementText] = useState("");
   const [announcementTarget, setAnnouncementTarget] = useState("all");
   const [notice, setNotice] = useState(null);
@@ -371,6 +478,12 @@ export default function OrganizerDashboard() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => openRubricEditor(h)}
+                            className="px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 hover:text-amber-300 rounded text-xs transition-colors font-medium"
+                          >
+                            ✦ Rubrics ({(h.rubrics || []).length})
+                          </button>
                           <button
                             onClick={() => setConfigTarget(h)}
                             className="px-2.5 py-1.5 bg-[#080e1a] hover:bg-[#121c32] border border-[#253247] text-slate-300 hover:text-white rounded text-xs transition-colors"
@@ -727,6 +840,212 @@ export default function OrganizerDashboard() {
                     className="px-4 py-1.5 bg-emerald-500 text-slate-950 font-bold rounded text-xs"
                   >
                     Save Changes
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Rubric Editor */}
+        {rubricTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+            <div className="bg-[#0d1526] border border-[#253247] rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-5 my-8">
+              <div className="flex items-center justify-between border-b border-[#253247] pb-3">
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <span className="text-amber-400">✦</span> Evaluation Rubrics
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Configure scoring criteria for <span className="text-amber-400 font-mono">{rubricTarget.title}</span>
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setRubricTarget(null); setRubricDraft([]); }}
+                  className="text-slate-400 hover:text-white text-sm"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Weight Summary Bar */}
+              <div className="bg-[#080e1a] border border-[#1c283c] rounded-lg p-3">
+                <div className="flex items-center justify-between text-xs mb-2">
+                  <span className="text-slate-400 font-mono">TOTAL WEIGHT</span>
+                  <span className={`font-bold font-mono ${
+                    Math.abs(computeTotalWeight() - 100) <= 1
+                      ? "text-emerald-400"
+                      : "text-red-400"
+                  }`}>
+                    {computeTotalWeight().toFixed(0)}% / 100%
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-[#111E31] rounded-full overflow-hidden border border-[#253247]/50">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      Math.abs(computeTotalWeight() - 100) <= 1
+                        ? "bg-emerald-400"
+                        : computeTotalWeight() > 100
+                          ? "bg-red-400"
+                          : "bg-amber-400"
+                    }`}
+                    style={{ width: `${Math.min(computeTotalWeight(), 100)}%` }}
+                  />
+                </div>
+              </div>
+
+              {rubricError && (
+                <div className="p-2.5 bg-red-950/40 border border-red-800/50 text-red-300 rounded-lg text-xs">
+                  ⚠ {rubricError}
+                </div>
+              )}
+
+              {/* Rubric Rows */}
+              <form onSubmit={handleSaveRubrics} className="space-y-3">
+                <div className="space-y-2">
+                  {rubricDraft.map((r, idx) => (
+                    <div
+                      key={r._key}
+                      className="bg-[#080e1a] border border-[#1c283c] rounded-lg p-3 space-y-2 group hover:border-amber-500/30 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-mono text-slate-500 uppercase">
+                          Criterion #{idx + 1}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => moveRubricRow(idx, -1)}
+                            disabled={idx === 0}
+                            className="text-slate-500 hover:text-white text-xs px-1 disabled:opacity-30"
+                            title="Move up"
+                          >
+                            ▲
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveRubricRow(idx, 1)}
+                            disabled={idx === rubricDraft.length - 1}
+                            className="text-slate-500 hover:text-white text-xs px-1 disabled:opacity-30"
+                            title="Move down"
+                          >
+                            ▼
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeRubricRow(r._key)}
+                            className="text-red-400/60 hover:text-red-400 text-xs px-1.5 ml-1"
+                            title="Delete criterion"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-12 gap-2">
+                        <div className="col-span-5">
+                          <label className="text-[10px] text-slate-500 font-mono block mb-0.5">NAME *</label>
+                          <input
+                            type="text"
+                            required
+                            value={r.name}
+                            onChange={(e) => updateRubricRow(r._key, "name", e.target.value)}
+                            placeholder="e.g. Technical Depth & Architecture"
+                            className="w-full bg-[#0d1526] border border-[#223044] rounded p-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-[10px] text-slate-500 font-mono block mb-0.5">WEIGHT *</label>
+                          <input
+                            type="text"
+                            required
+                            value={r.weight}
+                            onChange={(e) => updateRubricRow(r._key, "weight", e.target.value)}
+                            placeholder="30%"
+                            className="w-full bg-[#0d1526] border border-[#223044] rounded p-2 text-xs text-amber-400 font-mono placeholder-slate-600 focus:outline-none focus:border-amber-500 text-center"
+                          />
+                        </div>
+                        <div className="col-span-5">
+                          <label className="text-[10px] text-slate-500 font-mono block mb-0.5">DESCRIPTION</label>
+                          <input
+                            type="text"
+                            value={r.desc}
+                            onChange={(e) => updateRubricRow(r._key, "desc", e.target.value)}
+                            placeholder="What judges should evaluate..."
+                            className="w-full bg-[#0d1526] border border-[#223044] rounded p-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add Criterion Button */}
+                <button
+                  type="button"
+                  onClick={addRubricRow}
+                  className="w-full py-2.5 border-2 border-dashed border-[#253247] hover:border-amber-500/40 rounded-lg text-xs text-slate-400 hover:text-amber-400 transition-colors"
+                >
+                  + Add Evaluation Criterion
+                </button>
+
+                {/* Preset Templates */}
+                <div className="pt-2 border-t border-[#253247]">
+                  <p className="text-[10px] text-slate-500 font-mono uppercase mb-2">QUICK TEMPLATES</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRubricDraft([
+                        { _key: "t1", name: "Innovation & Novelty", weight: "25%", desc: "Originality and creativity of the proposed solution." },
+                        { _key: "t2", name: "Technical Execution", weight: "25%", desc: "Code quality, architecture, and technical completeness." },
+                        { _key: "t3", name: "UI/UX Design", weight: "25%", desc: "User interface elegance, usability, and accessibility." },
+                        { _key: "t4", name: "Real-world Feasibility", weight: "25%", desc: "Scalability, business viability, and practical impact." },
+                      ])}
+                      className="px-3 py-1.5 bg-[#121c32] hover:bg-[#1a2744] border border-[#253247] text-slate-300 hover:text-white rounded text-[11px] transition-colors"
+                    >
+                      🎯 Standard (4 criteria × 25%)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRubricDraft([
+                        { _key: "a1", name: "Agent Autonomy & Intelligence", weight: "35%", desc: "Robustness of multi-step planning and tool usage." },
+                        { _key: "a2", name: "Novelty & System Utility", weight: "25%", desc: "Uniqueness compared to existing commercial tools." },
+                        { _key: "a3", name: "Execution & Engineering", weight: "25%", desc: "API resilience, error fallbacks, and response latency." },
+                        { _key: "a4", name: "Responsible AI Standards", weight: "15%", desc: "Guardrails, toxicity filtering, dataset attribution." },
+                      ])}
+                      className="px-3 py-1.5 bg-[#121c32] hover:bg-[#1a2744] border border-[#253247] text-slate-300 hover:text-white rounded text-[11px] transition-colors"
+                    >
+                      🤖 AI / ML Focus
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRubricDraft([
+                        { _key: "h1", name: "Hardware & Telemetry Quality", weight: "35%", desc: "Sensor fidelity, data transmission, battery efficiency." },
+                        { _key: "h2", name: "Practical Impact", weight: "30%", desc: "Cost savings or tangible benefits to operations." },
+                        { _key: "h3", name: "Dashboard & Interface Design", weight: "20%", desc: "Clarity of visualizations and alerting responsiveness." },
+                        { _key: "h4", name: "Scalability & Viability", weight: "15%", desc: "Ease of deployment across environments." },
+                      ])}
+                      className="px-3 py-1.5 bg-[#121c32] hover:bg-[#1a2744] border border-[#253247] text-slate-300 hover:text-white rounded text-[11px] transition-colors"
+                    >
+                      🔌 IoT / Hardware
+                    </button>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex justify-end gap-2 pt-3 border-t border-[#253247]">
+                  <button
+                    type="button"
+                    onClick={() => { setRubricTarget(null); setRubricDraft([]); }}
+                    className="px-4 py-2 bg-[#121c32] hover:bg-[#1a2744] text-slate-300 rounded-lg text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition-colors shadow"
+                  >
+                    Save Rubrics
                   </button>
                 </div>
               </form>
