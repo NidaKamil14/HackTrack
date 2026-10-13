@@ -40,6 +40,16 @@ export const SYSTEM_ROLES = [
     ]
   },
   {
+    id: "organizers",
+    title: "Organizers",
+    summary: "Create and govern distinct hackathons, manage tracks, and configure rubrics.",
+    points: [
+      "Create new multi-track hackathons and set schedules",
+      "Configure custom evaluation rubrics and eligibility guidelines",
+      "Broadcast real-time announcements to participants and monitor squads"
+    ]
+  },
+  {
     id: "admins",
     title: "Admin",
     summary: "Full lifecycle governance and stage timeline management.",

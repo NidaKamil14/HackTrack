@@ -58,8 +58,8 @@ router.get('/:id', (req, res) => {
   });
 });
 
-// POST /api/v1/hackathons: Admin creates a new hackathon (FR-6, BR-4)
-router.post('/', requireAuth, requireRole('admin'), (req, res) => {
+// POST /api/v1/hackathons: Admin or Organizer creates a new hackathon (FR-6, BR-4)
+router.post('/', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
   const {
     title,
     tagLine,
@@ -129,8 +129,8 @@ router.post('/', requireAuth, requireRole('admin'), (req, res) => {
   }
 });
 
-// PUT /api/v1/hackathons/:id: Admin updates hackathon configuration (FR-6, FR-7, FR-8, FR-23)
-router.put('/:id', requireAuth, requireRole('admin'), (req, res) => {
+// PUT /api/v1/hackathons/:id: Admin or Organizer updates hackathon configuration (FR-6, FR-7, FR-8, FR-23)
+router.put('/:id', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
   try {
     const updated = store.updateHackathon(req.params.id, req.body);
     return res.json({
@@ -165,8 +165,8 @@ router.delete('/:id', requireAuth, requireRole('admin'), (req, res) => {
   }
 });
 
-// POST /api/v1/hackathons/:id/publish: Admin publishes hackathon for participant registration (FR-10)
-router.post('/:id/publish', requireAuth, requireRole('admin'), (req, res) => {
+// POST /api/v1/hackathons/:id/publish: Admin or Organizer publishes hackathon for participant registration (FR-10)
+router.post('/:id/publish', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
   try {
     const updated = store.updateHackathon(req.params.id, { status: 'published' });
     return res.json({
@@ -183,8 +183,8 @@ router.post('/:id/publish', requireAuth, requireRole('admin'), (req, res) => {
   }
 });
 
-// POST /api/v1/hackathons/:id/criteria: Admin configures rubric criteria (FR-9)
-router.post('/:id/criteria', requireAuth, requireRole('admin'), (req, res) => {
+// POST /api/v1/hackathons/:id/criteria: Admin or Organizer configures rubric criteria (FR-9)
+router.post('/:id/criteria', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
   const { criteria } = req.body || {};
   if (!Array.isArray(criteria) || criteria.length === 0) {
     return res.status(400).json({

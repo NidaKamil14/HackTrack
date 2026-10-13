@@ -154,8 +154,8 @@ export default function Home({
         <div className="max-w-6xl mx-auto px-4">
           
           <div className="max-w-2xl mb-8">
-            <h2 className="text-2xl font-bold text-white">5 System Roles</h2>
-            <p className="text-sm text-slate-400 mt-1">Each user has dedicated tools suited to their place in the hackathon lifecycle.</p>
+            <h2 className="text-2xl font-bold text-white">6 System Roles</h2>
+            <p className="text-sm text-slate-400 mt-1">Each role has dedicated tools suited to their place in the hackathon lifecycle.</p>
           </div>
 
           <div className="flex flex-wrap gap-2 mb-6">

@@ -38,7 +38,10 @@ export const HACKATHONS = [
       { name: "Innovation & Problem Solving", weight: "25%", desc: "Creativity of the solution and real-world applicability." },
       { name: "Screening & Completeness", weight: "20%", desc: "Test coverage, documentation, and compliance with rules." }
     ],
-    tags: ["Open Source", "Cloud", "Developer Tooling", "Web Systems"]
+    tags: ["Open Source", "Cloud", "Developer Tooling", "Web Systems"],
+    organizerEmail: "organizer@hacktrack.io",
+    organizerName: "Kavita Rao",
+    organizerUniversity: "DevPulse Operations Committee"
   },
   {
     id: "ai-catalyst-2026",
@@ -79,7 +82,10 @@ export const HACKATHONS = [
       { name: "Execution & Engineering", weight: "25%", desc: "API resilience, error fallbacks, and response latency." },
       { name: "Responsible AI Standards", weight: "15%", desc: "Guardrails, toxicity filtering, and dataset attribution." }
     ],
-    tags: ["Autonomous Agents", "Vision", "Edge LLM", "LangChain"]
+    tags: ["Autonomous Agents", "Vision", "Edge LLM", "LangChain"],
+    organizerEmail: "marcus.ai@hacktrack.io",
+    organizerName: "Dr. Marcus Vance",
+    organizerUniversity: "AI Catalyst Foundation"
   },
   {
     id: "smart-campus-2026",
@@ -119,7 +125,10 @@ export const HACKATHONS = [
       { name: "Dashboard & Interface Design", weight: "20%", desc: "Clarity of visualizations and alerting responsiveness." },
       { name: "Viability & Scalability", weight: "15%", desc: "Ease of deployment across multiple buildings." }
     ],
-    tags: ["Campus IoT", "Telemetry", "Student Life", "Hardware"]
+    tags: ["Campus IoT", "Telemetry", "Student Life", "Hardware"],
+    organizerEmail: "elena.iot@hacktrack.io",
+    organizerName: "Prof. Elena Rostova",
+    organizerUniversity: "Campus IoT Consortium"
   }
 ];
 

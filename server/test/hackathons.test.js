@@ -5,6 +5,7 @@ import app from '../src/app.js';
 let server;
 let baseUrl;
 let adminToken;
+let organizerToken;
 let studentToken;
 
 test.before(async () => {
@@ -24,6 +25,15 @@ test.before(async () => {
   });
   const adminData = await adminRes.json();
   adminToken = adminData.token;
+
+  // Login as organizer
+  const orgRes = await fetch(`${baseUrl}/api/v1/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'organizer@hacktrack.io', password: 'password123' }),
+  });
+  const orgData = await orgRes.json();
+  organizerToken = orgData.token;
 
   // Login as student
   const studentRes = await fetch(`${baseUrl}/api/v1/auth/login`, {
@@ -154,5 +164,26 @@ test('HackTrack Hackathons & Criteria (FR-6 to FR-11, FR-23, BR-4, BR-5)', async
     const body = await res.json();
     assert.equal(body.hackathon.isRegistrationClosed, true);
     assert.equal(body.hackathon.isSubmissionClosed, true);
+  });
+
+  await t.test('8. Organizer can create and manage their hackathons', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/hackathons`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${organizerToken}`,
+      },
+      body: JSON.stringify({
+        title: 'CyberShield 2026',
+        tagLine: 'Defend the Infrastructure',
+        registrationDeadline: new Date(Date.now() + 2 * 86400000).toISOString(),
+        submissionDeadline: new Date(Date.now() + 5 * 86400000).toISOString(),
+        minTeamSize: 1,
+        maxTeamSize: 4,
+      }),
+    });
+    assert.equal(res.status, 201);
+    const body = await res.json();
+    assert.equal(body.hackathon.title, 'CyberShield 2026');
   });
 });

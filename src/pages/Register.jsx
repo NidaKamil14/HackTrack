@@ -27,6 +27,12 @@ export default function Register({ navigate: propNavigate }) {
       target: "/dashboard/student"
     },
     {
+      id: "organizer",
+      title: "Hackathon Organizer",
+      desc: "Create and govern hackathons, define rubrics & manage competitions",
+      target: "/dashboard/organizer"
+    },
+    {
       id: "screening",
       title: "Screening Committee",
       desc: "Verify repos, inspect demo URLs & enforce rules",

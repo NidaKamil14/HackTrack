@@ -5,15 +5,59 @@ import { useAuth } from '../context/AuthContext';
 import { DEMO_USERS, getRoleDashboardPath } from '../utils/auth';
 import { registerForHackathon } from '../utils/registrationService';
 
+const ROLE_PREVIEWS = [
+  {
+    role: "organizer",
+    title: "Organizer",
+    tagline: "Create & Run Hackathons",
+    email: "organizer@hacktrack.io",
+    highlight: true,
+  },
+  {
+    role: "leader",
+    title: "Team Leader",
+    tagline: "Form Squad & Submit",
+    email: "alex@university.edu",
+  },
+  {
+    role: "student",
+    title: "Participant",
+    tagline: "Join Squad & Compete",
+    email: "priya@university.edu",
+  },
+  {
+    role: "judge",
+    title: "Judge",
+    tagline: "Score Rubrics",
+    email: "judge@hacktrack.io",
+  },
+  {
+    role: "admin",
+    title: "Administrator",
+    tagline: "Platform HQ",
+    email: "admin@hacktrack.io",
+  },
+  {
+    role: "screening",
+    title: "Screening",
+    tagline: "Verify Repos",
+    email: "screening@hacktrack.io",
+  },
+];
+
 export default function Login({ navigate: propNavigate }) {
   const routerNavigate = useNavigate();
   const navigate = propNavigate || routerNavigate;
   const location = useLocation();
   const { login, switchDemoRole } = useAuth();
 
-  const [email, setEmail] = useState("alex@university.edu");
-  const [password, setPassword] = useState("password123");
-  const [selectedRolePreview, setSelectedRolePreview] = useState("student");
+  const searchParams = new URLSearchParams(location.search);
+  const initialRole = searchParams.get('role') || "organizer";
+  const initialDemo = DEMO_USERS.find((u) => u.role === initialRole) || DEMO_USERS.find((u) => u.role === "organizer");
+
+  const [selectedRolePreview, setSelectedRolePreview] = useState(initialRole);
+  const [email, setEmail] = useState(initialDemo ? initialDemo.email : "organizer@hacktrack.io");
+  const [password, setPassword] = useState(initialDemo ? initialDemo.password : "password123");
   const [statusMessage, setStatusMessage] = useState(null);
 
   const handlePersonaSelect = (roleKey) => {
@@ -36,7 +80,7 @@ export default function Login({ navigate: propNavigate }) {
     if (!res.success) {
       setStatusMessage({
         type: "error",
-        text: `${res.error} (Demo accounts: alex@university.edu, screening@hacktrack.io, judge@hacktrack.io, admin@hacktrack.io / password123)`
+        text: `${res.error} (Demo accounts: organizer@hacktrack.io, alex@university.edu, admin@hacktrack.io / password123)`
       });
       return;
     }
@@ -74,7 +118,7 @@ export default function Login({ navigate: propNavigate }) {
   };
 
   return (
-    <div className="py-14 max-w-md mx-auto px-4">
+    <div className="py-14 max-w-xl mx-auto px-4">
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl">
         
         {/* Brand Heading */}
@@ -83,51 +127,62 @@ export default function Login({ navigate: propNavigate }) {
             <Icons.Terminal />
           </div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Sign in to HackTrack</h1>
-          <p className="text-xs text-slate-400 mt-1">Access your competition portal, rosters, or review queues</p>
+          <p className="text-xs text-slate-400 mt-1">Select your role or enter credentials to launch your competition console</p>
         </div>
 
-        {/* Select Demo Role Dropdown */}
-        <div className="mb-5 space-y-1.5">
-          <label htmlFor="demo-role-select" className="text-xs font-semibold text-slate-300 block">
-            Select Demo Role
-          </label>
-          <div className="relative">
-            <select
-              id="demo-role-select"
-              value={selectedRolePreview}
-              onChange={(e) => handlePersonaSelect(e.target.value)}
-              className="w-full bg-[#080e1a] border border-[#223044] rounded-lg px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 transition-colors cursor-pointer appearance-none pr-9 font-medium"
-            >
-              <option value="leader">Team Leader (alex@university.edu)</option>
-              <option value="student">Student / Participant (priya@university.edu)</option>
-              <option value="screening">Screening Committee (screening@hacktrack.io)</option>
-              <option value="judge">Judge (judge@hacktrack.io)</option>
-              <option value="admin">Administrator (admin@hacktrack.io)</option>
-              <option value="organizer">Organizer (organizer@hacktrack.io)</option>
-              <option value="mentor">Mentor (mentor@hacktrack.io)</option>
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-              </svg>
-            </div>
+        {/* Quick Role Selection Grid */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-semibold text-slate-300">
+              Select Role / Account
+            </label>
+            <span className="text-[10px] font-mono text-emerald-400">Click to switch instantly</span>
           </div>
 
-          <div className="pt-1 flex items-center justify-between text-[11px]">
-            <span className="text-slate-400 font-mono text-[10px]">Autofills credentials</span>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {ROLE_PREVIEWS.map((r) => {
+              const isSelected = selectedRolePreview === r.role;
+              return (
+                <button
+                  key={r.role}
+                  type="button"
+                  onClick={() => handlePersonaSelect(r.role)}
+                  className={`p-2.5 rounded-xl border text-left transition-all relative ${
+                    isSelected
+                      ? "bg-emerald-950/60 border-emerald-500 ring-1 ring-emerald-500/50 shadow-sm"
+                      : "bg-[#080e1a] border-[#202b3c] hover:border-slate-600 hover:bg-[#0c1424]"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-bold block ${isSelected ? "text-emerald-300" : "text-white"}`}>
+                      {r.title}
+                    </span>
+                    {r.highlight && (
+                      <span className="text-[9px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono border border-amber-500/40">
+                        HOST
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-slate-400 block mt-0.5 truncate">
+                    {r.tagline}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Quick 1-Click Action */}
+          <div className="mt-3 p-2.5 rounded-lg bg-[#080e1a] border border-[#1a2536] flex items-center justify-between text-xs">
+            <div className="truncate pr-2">
+              <span className="text-[11px] text-slate-400 font-mono block">Selected account:</span>
+              <span className="text-xs text-white font-mono font-medium truncate block">{email}</span>
+            </div>
             <button
               type="button"
               onClick={() => handleQuickDemoLaunch(selectedRolePreview)}
-              className="text-emerald-400 hover:text-emerald-300 font-mono underline inline-flex items-center gap-1 transition-colors"
+              className="px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500 hover:text-slate-950 text-xs font-semibold font-mono transition-all shrink-0 flex items-center gap-1"
             >
-              <span>⚡ Instant 1-Click Sign In as {
-                selectedRolePreview === "leader" ? "TEAM LEADER" :
-                selectedRolePreview === "student" ? "STUDENT" :
-                selectedRolePreview === "screening" ? "SCREENING COMMITTEE" :
-                selectedRolePreview === "judge" ? "JUDGE" :
-                selectedRolePreview === "admin" ? "ADMINISTRATOR" :
-                selectedRolePreview === "organizer" ? "ORGANIZER" : "MENTOR"
-              } →</span>
+              <span>1-Click Launch →</span>
             </button>
           </div>
         </div>
@@ -148,14 +203,14 @@ export default function Login({ navigate: propNavigate }) {
         {/* Form Fields */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="text-xs font-medium text-slate-300 block mb-1">Email or Student ID</label>
+            <label className="text-xs font-medium text-slate-300 block mb-1">Email Address</label>
             <input
               type="text"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="alex@university.edu"
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              placeholder="organizer@hacktrack.io"
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
             />
           </div>
 
@@ -176,7 +231,7 @@ export default function Login({ navigate: propNavigate }) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••••••"
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
             />
           </div>
 
@@ -190,12 +245,12 @@ export default function Login({ navigate: propNavigate }) {
 
         {/* Switch to Register */}
         <div className="mt-6 pt-5 border-t border-slate-800 text-center text-xs text-slate-400">
-          Don't have a HackTrack account yet?{" "}
+          Want to organize a new competition?{" "}
           <button
             onClick={() => navigate('/register')}
             className="text-emerald-400 hover:underline font-semibold"
           >
-            Register Here
+            Register as an Organizer
           </button>
         </div>
 

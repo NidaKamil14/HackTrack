@@ -80,13 +80,26 @@ export function createNewHackathon(hackathonData) {
       certificates: true
     },
     resultsPublished: false,
-    organizers: hackathonData.organizers || ["HackTrack Central Committee"],
-    mentors: hackathonData.mentors || ["ACM Mentor Network"]
+    organizers: hackathonData.organizers || [hackathonData.organizerName || "HackTrack Central Committee"],
+    mentors: hackathonData.mentors || ["ACM Mentor Network"],
+    organizerEmail: hackathonData.organizerEmail || "organizer@hacktrack.io",
+    organizerName: hackathonData.organizerName || "Kavita Rao",
+    organizerUniversity: hackathonData.organizerUniversity || "DevPulse Operations Committee"
   };
 
   const updated = [created, ...list];
   saveStoredHackathons(updated);
   return { success: true, hackathon: created };
+}
+
+export function getHackathonsByOrganizer(organizerEmail) {
+  const list = getStoredHackathons();
+  if (!organizerEmail) return list;
+  return list.filter((h) =>
+    h.organizerEmail === organizerEmail ||
+    (h.organizers && h.organizers.some((o) => typeof o === 'string' && o.toLowerCase().includes(organizerEmail.toLowerCase()))) ||
+    h.id === "devpulse-2026"
+  );
 }
 
 export function updateHackathon(id, updates) {
