@@ -1,19 +1,19 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+import { Button } from '../components/ui';
 
 export default function NotFound() {
-  const navigate = useNavigate();
-
   return (
-    <div className="py-24 text-center max-w-md mx-auto px-4">
-      <h2 className="text-2xl font-bold text-white mb-2">Page Not Found</h2>
-      <p className="text-xs text-slate-400 mb-6">The page you requested does not exist or has been relocated.</p>
-      <button
-        onClick={() => navigate('/')}
-        className="px-4 py-2 bg-emerald-500 text-slate-950 font-bold rounded-lg text-xs"
-      >
-        Return to HackTrack Home
-      </button>
+    <div className="container-page flex flex-col items-center py-24 text-center sm:py-32">
+      <p className="font-mono text-sm text-accent-text">404</p>
+      <h1 className="mt-3 text-3xl font-semibold tracking-tight">Page not found</h1>
+      <p className="mt-2 max-w-sm text-sm text-fg-muted">
+        The page you're looking for doesn't exist or has moved.
+      </p>
+      <div className="mt-8 flex flex-wrap justify-center gap-3">
+        <Button as={Link} to="/">Go home</Button>
+        <Button as={Link} to="/hackathons" variant="secondary">Browse hackathons</Button>
+      </div>
     </div>
   );
 }

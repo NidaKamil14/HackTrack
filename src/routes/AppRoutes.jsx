@@ -1,97 +1,54 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Routes, Route } from 'react-router-dom';
-import { AuthProvider } from '../context/AuthContext';
 import Layout from './Layout';
 import ProtectedRoute from './ProtectedRoute';
+import RouteFallback from '../components/RouteFallback';
 
-// Public Pages
+// The landing page loads eagerly; every other route is split into its own
+// chunk so visitors don't download all six role dashboards up front.
 import Home from '../pages/Home';
-import BrowseHackathons from '../pages/BrowseHackathons';
-import HackathonDetail from '../pages/HackathonDetail';
-import Login from '../pages/Login';
-import Register from '../pages/Register';
-import NotFound from '../pages/NotFound';
+const BrowseHackathons = lazy(() => import('../pages/BrowseHackathons'));
+const HackathonDetail = lazy(() => import('../pages/HackathonDetail'));
+const Login = lazy(() => import('../pages/Login'));
+const Register = lazy(() => import('../pages/Register'));
+const NotFound = lazy(() => import('../pages/NotFound'));
 
 // Role Dashboards
-import StudentDashboard from '../pages/dashboards/StudentDashboard';
-import ScreeningDashboard from '../pages/dashboards/ScreeningDashboard';
-import JudgeDashboard from '../pages/dashboards/JudgeDashboard';
-import AdminDashboard from '../pages/dashboards/AdminDashboard';
-import OrganizerDashboard from '../pages/dashboards/OrganizerDashboard';
-import MentorDashboard from '../pages/dashboards/MentorDashboard';
+const StudentDashboard = lazy(() => import('../pages/dashboards/StudentDashboard'));
+const ScreeningDashboard = lazy(() => import('../pages/dashboards/ScreeningDashboard'));
+const JudgeDashboard = lazy(() => import('../pages/dashboards/JudgeDashboard'));
+const AdminDashboard = lazy(() => import('../pages/dashboards/AdminDashboard'));
+const OrganizerDashboard = lazy(() => import('../pages/dashboards/OrganizerDashboard'));
+const MentorDashboard = lazy(() => import('../pages/dashboards/MentorDashboard'));
+
+// Dashboards render their own shell, so each gets its own Suspense boundary.
+const dashboard = (role, element) => (
+  <ProtectedRoute allowedRole={role}>
+    <Suspense fallback={<RouteFallback />}>{element}</Suspense>
+  </ProtectedRoute>
+);
 
 export default function AppRoutes() {
   return (
-    <AuthProvider>
-      <Routes>
-        {/* Public Pages Layout */}
-        <Route element={<Layout />}>
-          <Route path="/" element={<Home />} />
-          <Route path="/hackathons" element={<BrowseHackathons />} />
-          <Route path="/hackathons/:id" element={<HackathonDetail />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="*" element={<NotFound />} />
-        </Route>
+    <Routes>
+      {/* Public Pages Layout (its <Outlet> has a Suspense boundary) */}
+      <Route element={<Layout />}>
+        <Route path="/" element={<Home />} />
+        <Route path="/hackathons" element={<BrowseHackathons />} />
+        <Route path="/hackathons/:id" element={<HackathonDetail />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="*" element={<NotFound />} />
+      </Route>
 
-        {/* Role-Protected Dashboard Routes */}
-        <Route
-          path="/dashboard/student"
-          element={
-            <ProtectedRoute allowedRole="student">
-              <StudentDashboard initialTab="workspace" />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/dashboard/leader"
-          element={
-            <ProtectedRoute allowedRole="leader">
-              <StudentDashboard initialTab="workspace" />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/dashboard/screening"
-          element={
-            <ProtectedRoute allowedRole="screening">
-              <ScreeningDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/dashboard/judge"
-          element={
-            <ProtectedRoute allowedRole="judge">
-              <JudgeDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/dashboard/admin"
-          element={
-            <ProtectedRoute allowedRole="admin">
-              <AdminDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/dashboard/organizer"
-          element={
-            <ProtectedRoute allowedRole="organizer">
-              <OrganizerDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/dashboard/mentor"
-          element={
-            <ProtectedRoute allowedRole="mentor">
-              <MentorDashboard />
-            </ProtectedRoute>
-          }
-        />
-      </Routes>
-    </AuthProvider>
+      {/* Role-Protected Dashboard Routes */}
+      <Route path="/dashboard/student" element={dashboard("student", <StudentDashboard initialTab="workspace" />)} />
+      <Route path="/dashboard/leader" element={dashboard("leader", <StudentDashboard initialTab="workspace" />)} />
+      <Route path="/dashboard/screening" element={dashboard("screening", <ScreeningDashboard />)} />
+      <Route path="/dashboard/judge" element={dashboard("judge", <JudgeDashboard />)} />
+      <Route path="/dashboard/admin" element={dashboard("admin", <AdminDashboard />)} />
+      <Route path="/dashboard/organizer" element={dashboard("organizer", <OrganizerDashboard />)} />
+      <Route path="/dashboard/mentor" element={dashboard("mentor", <MentorDashboard />)} />
+    </Routes>
   );
 }

@@ -1,28 +1,22 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+import { Logo } from './ui';
+
+const linkClass = 'inline-flex min-h-10 items-center rounded-sm text-sm text-fg-muted transition-colors hover:text-fg sm:min-h-0';
 
 export default function Footer() {
-  const navigate = useNavigate();
-
   return (
-    <footer className="py-8 bg-slate-950 border-t border-slate-900 text-slate-500 text-xs">
-      <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-slate-300">HackTrack</span>
-          <span>—</span>
-          <span>Hackathon Competition Management System</span>
+    <footer className="border-t border-line bg-canvas">
+      <div className="container-page flex flex-col gap-4 py-8 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-1.5">
+          <Logo />
+          <p className="text-sm text-fg-subtle">Hackathon competition management, end to end.</p>
         </div>
-        <div className="flex items-center gap-4 text-slate-400">
-          <button onClick={() => navigate('/hackathons')} className="hover:text-white transition-colors">
-            Browse Sprints
-          </button>
-          <button onClick={() => navigate('/login')} className="hover:text-white transition-colors">
-            Log In
-          </button>
-          <button onClick={() => navigate('/register')} className="hover:text-white transition-colors">
-            Register
-          </button>
-        </div>
+        <nav aria-label="Footer" className="flex flex-wrap items-center gap-x-6 gap-y-0 sm:gap-y-2">
+          <Link to="/hackathons" className={linkClass}>Browse hackathons</Link>
+          <Link to="/login" className={linkClass}>Log in</Link>
+          <Link to="/register" className={linkClass}>Register</Link>
+        </nav>
       </div>
     </footer>
   );

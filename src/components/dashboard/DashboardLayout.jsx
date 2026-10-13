@@ -1,8 +1,9 @@
 import React from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { ExternalLink, LogOut } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { Icons } from '../Icons';
 import ThemeToggle from '../ThemeToggle';
+import { Badge, Button, Logo } from '../ui';
 
 export default function DashboardLayout({
   portalTitle,
@@ -17,94 +18,74 @@ export default function DashboardLayout({
     navigate('/login');
   };
 
+  const initial = user?.fullName ? user.fullName.charAt(0).toUpperCase() : "U";
+
   return (
-    <div className="min-h-screen bg-[#060a12] text-slate-100 font-sans antialiased flex flex-col justify-between selection:bg-emerald-500 selection:text-slate-950">
-      
-      {/* Top Dashboard Navigation Bar */}
+    <div className="flex min-h-screen flex-col justify-between bg-canvas text-fg">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-50 focus:rounded-lg focus:bg-accent focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-accent-fg">
+        Skip to main content
+      </a>
       <div>
-        <header className="sticky top-0 z-40 bg-[#0c1424]/95 backdrop-blur-md border-b border-[#253247]">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-            
-            {/* Brand + Portal Label */}
-            <div className="flex items-center gap-3">
-              <Link to="/" className="flex items-center space-x-2.5 text-left group">
-                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center transition-colors group-hover:border-emerald-400">
-                  <Icons.Terminal />
-                </div>
-                <div className="flex flex-col">
-                  <span className="font-bold text-lg text-white tracking-tight leading-none">HackTrack</span>
-                  <span className="text-[10px] text-slate-400 font-mono tracking-wider">MANAGEMENT SYSTEM</span>
-                </div>
+        <header className="sticky top-0 z-40 border-b border-line bg-canvas/80 backdrop-blur-md supports-[backdrop-filter]:bg-canvas/70">
+          <div className="container-page flex h-14 items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <Link to="/" className="inline-flex min-h-10 items-center rounded-md" aria-label="HackTrack home">
+                <Logo />
               </Link>
-
-              <span className="hidden sm:inline-block text-slate-700">|</span>
-
-              <div className="hidden sm:flex items-center gap-2">
-                <span className="px-2.5 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-500/30 text-emerald-400 text-xs font-mono font-medium">
-                  {roleBadgeText || portalTitle}
-                </span>
-              </div>
+              <span className="hidden h-5 w-px bg-line sm:block" aria-hidden="true" />
+              <Badge tone="accent" className="hidden sm:inline-flex">
+                {roleBadgeText || portalTitle}
+              </Badge>
             </div>
 
-            {/* User Profile & Actions */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1 sm:gap-2">
+              <Button as={Link} to="/" variant="ghost" size="sm" className="hidden md:inline-flex">
+                Public site
+                <ExternalLink aria-hidden="true" />
+              </Button>
               <ThemeToggle />
 
-              <Link
-                to="/"
-                className="hidden md:inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg border border-transparent hover:border-slate-800 transition-colors"
-              >
-                <span>Public Website</span>
-                <Icons.ExternalLink />
-              </Link>
-
               {user && (
-                <div className="flex items-center gap-2.5 pl-3 border-l border-slate-800">
-                  <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-emerald-400">
-                    {user.fullName ? user.fullName.charAt(0) : "U"}
-                  </div>
-                  <div className="hidden lg:flex flex-col text-left">
-                    <span className="text-xs font-semibold text-white leading-tight">{user.fullName}</span>
-                    <span className="text-[10px] text-slate-400 font-mono leading-tight truncate max-w-[140px]">
+                <div className="ml-1 flex items-center gap-2.5 border-l border-line pl-3">
+                  <span
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line bg-raised text-sm font-semibold text-fg"
+                    aria-hidden="true"
+                  >
+                    {initial}
+                  </span>
+                  <div className="hidden min-w-0 flex-col lg:flex">
+                    <span className="truncate text-sm font-medium leading-tight text-fg">{user.fullName}</span>
+                    <span className="max-w-[160px] truncate text-xs leading-tight text-fg-subtle">
                       {user.university || user.email}
                     </span>
                   </div>
                 </div>
               )}
 
-              <button
-                onClick={handleLogout}
-                className="text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-rose-900/60 text-slate-300 hover:text-rose-400 transition-colors"
-                title="Log Out of HackTrack"
-              >
-                Log Out
-              </button>
+              <Button variant="ghost" size="sm" onClick={handleLogout} aria-label="Log out" title="Log out">
+                <LogOut aria-hidden="true" />
+                <span className="hidden sm:inline">Log out</span>
+              </Button>
             </div>
-
           </div>
         </header>
 
-        {/* Dashboard Content */}
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        <main id="main-content" tabIndex={-1} className="container-page py-8 focus:outline-none">
           {children}
         </main>
       </div>
 
-      {/* Dashboard Footer */}
-      <footer className="py-6 bg-[#0c1424] border-t border-[#253247] text-slate-500 text-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-400">HackTrack Portal</span>
-            <span>—</span>
-            <span className="font-mono text-[11px] text-slate-500">Authenticated Session ({user?.role?.toUpperCase() || 'GUEST'})</span>
-          </div>
-          <div className="flex items-center gap-4 text-slate-400">
-            <Link to="/hackathons" className="hover:text-white transition-colors">Browse Hackathons</Link>
-            <Link to="/" className="hover:text-white transition-colors">Platform Home</Link>
-          </div>
+      <footer className="border-t border-line">
+        <div className="container-page flex flex-col items-center justify-between gap-3 py-6 text-sm text-fg-subtle sm:flex-row">
+          <span>
+            HackTrack · Signed in as <span className="text-fg-muted">{user?.role || 'guest'}</span>
+          </span>
+          <nav aria-label="Dashboard footer" className="flex items-center gap-6">
+            <Link to="/hackathons" className="inline-flex min-h-10 items-center rounded-sm transition-colors hover:text-fg sm:min-h-0">Browse hackathons</Link>
+            <Link to="/" className="inline-flex min-h-10 items-center rounded-sm transition-colors hover:text-fg sm:min-h-0">Platform home</Link>
+          </nav>
         </div>
       </footer>
-
     </div>
   );
 }

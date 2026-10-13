@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { Icons } from '../components/Icons';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { ArrowRight, ClipboardCheck, Compass, Crown, Gavel, Lightbulb, Settings2, ShieldCheck } from 'lucide-react';
+import { Alert, Button, Field, Input, Logo, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { DEMO_USERS, getRoleDashboardPath } from '../utils/auth';
 import { registerForHackathon } from '../utils/registrationService';
@@ -43,7 +44,23 @@ const ROLE_PREVIEWS = [
     tagline: "Verify Repos",
     email: "screening@hacktrack.io",
   },
+  {
+    role: "mentor",
+    title: "Mentor",
+    tagline: "Guide Teams",
+    email: "mentor@hacktrack.io",
+  },
 ];
+
+const ROLE_ICONS = {
+  organizer: Settings2,
+  leader: Crown,
+  student: Compass,
+  judge: Gavel,
+  admin: ShieldCheck,
+  screening: ClipboardCheck,
+  mentor: Lightbulb,
+};
 
 export default function Login({ navigate: propNavigate }) {
   const routerNavigate = useNavigate();
@@ -59,6 +76,9 @@ export default function Login({ navigate: propNavigate }) {
   const [email, setEmail] = useState(initialDemo ? initialDemo.email : "organizer@hacktrack.io");
   const [password, setPassword] = useState(initialDemo ? initialDemo.password : "password123");
   const [statusMessage, setStatusMessage] = useState(null);
+  // True only while the real login/register call is in flight; stays true on
+  // success because the page is about to redirect.
+  const [submitting, setSubmitting] = useState(false);
 
   const handlePersonaSelect = (roleKey) => {
     setSelectedRolePreview(roleKey);
@@ -76,11 +96,13 @@ export default function Login({ navigate: propNavigate }) {
       return;
     }
 
+    setSubmitting(true);
     const res = await login(email, password);
     if (!res.success) {
+      setSubmitting(false);
       setStatusMessage({
         type: "error",
-        text: `${res.error} (Demo accounts: organizer@hacktrack.io, alex@university.edu, admin@hacktrack.io / password123)`
+        text: `${res.error} Check your email and password, or continue with a demo account.`
       });
       return;
     }
@@ -91,7 +113,7 @@ export default function Login({ navigate: propNavigate }) {
       const targetHackathonId = location.state.registerHackathonId;
       setStatusMessage({
         type: "success",
-        text: `✓ Authenticated as ${res.user.fullName}! Registering for sprint and returning to specifications...`
+        text: `Signed in as ${res.user.fullName}. Registering you and returning to the hackathon…`
       });
       setTimeout(() => {
         navigate(`/hackathons/${targetHackathonId}`, { replace: true });
@@ -103,7 +125,7 @@ export default function Login({ navigate: propNavigate }) {
     const destination = location.state?.from?.pathname || getRoleDashboardPath(res.user.role);
     setStatusMessage({
       type: "success",
-      text: `✓ Authenticated as ${res.user.fullName} (${res.user.roleCategory || res.user.role}). Redirecting to ${destination}...`
+      text: `Signed in as ${res.user.fullName}. Opening your dashboard…`
     });
 
     setTimeout(() => {
@@ -117,143 +139,125 @@ export default function Login({ navigate: propNavigate }) {
     navigate(destination, { replace: true });
   };
 
+  const selectedPreview = ROLE_PREVIEWS.find((r) => r.role === selectedRolePreview) || ROLE_PREVIEWS[0];
+  const alertTone = { error: "danger", success: "success", info: "info" };
+
   return (
-    <div className="py-14 max-w-xl mx-auto px-4">
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl">
-        
-        {/* Brand Heading */}
-        <div className="text-center mb-6">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto mb-3">
-            <Icons.Terminal />
-          </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Sign in to HackTrack</h1>
-          <p className="text-xs text-slate-400 mt-1">Select your role or enter credentials to launch your competition console</p>
-        </div>
+    <div className="container-page py-10 sm:py-16">
+      <div className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[1fr_1.1fr] lg:gap-12">
+        {/* Credentials */}
+        <section className="lg:pt-6">
+          <Logo className="mb-8" />
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Sign in</h1>
+          <p className="mt-1.5 text-sm text-fg-muted">Welcome back. Sign in to open your HackTrack workspace.</p>
 
-        {/* Quick Role Selection Grid */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <label className="text-xs font-semibold text-slate-300">
-              Select Role / Account
-            </label>
-            <span className="text-[10px] font-mono text-emerald-400">Click to switch instantly</span>
-          </div>
+          {statusMessage && (
+            <Alert tone={alertTone[statusMessage.type] || "info"} className="mt-6">
+              {statusMessage.text}
+            </Alert>
+          )}
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
+            <Field label="Email">
+              <Input
+                type="email"
+                autoComplete="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@university.edu"
+              />
+            </Field>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label htmlFor="login-password" className="text-sm font-medium text-fg">Password</label>
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => setStatusMessage({ type: "info", text: "Demo passwords for all accounts are: password123" })}
+                >
+                  Forgot password?
+                </Button>
+              </div>
+              <Input
+                id="login-password"
+                type="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter your password"
+              />
+            </div>
+
+            <Button type="submit" size="lg" className="w-full" loading={submitting}>
+              {submitting ? "Signing in…" : "Sign in"}
+            </Button>
+          </form>
+
+          <p className="mt-6 text-sm text-fg-muted">
+            New to HackTrack?{" "}
+            <Link to="/register" className="inline-flex min-h-10 items-center rounded-sm font-medium text-accent-text hover:underline sm:min-h-0">
+              Create an account
+            </Link>
+          </p>
+        </section>
+
+        {/* Demo accounts */}
+        <section aria-labelledby="demo-heading" className="rounded-2xl border border-line bg-surface p-5 sm:p-6">
+          <h2 id="demo-heading" className="text-base font-semibold">Explore with a demo account</h2>
+          <p className="mt-1 text-sm text-fg-muted">
+            Pick a role to fill in its credentials, or open its dashboard directly.
+          </p>
+
+          <div role="radiogroup" aria-label="Demo role" className="mt-5 grid gap-2 sm:grid-cols-2">
             {ROLE_PREVIEWS.map((r) => {
               const isSelected = selectedRolePreview === r.role;
+              const Icon = ROLE_ICONS[r.role] || Compass;
               return (
                 <button
                   key={r.role}
                   type="button"
+                  role="radio"
+                  aria-checked={isSelected}
                   onClick={() => handlePersonaSelect(r.role)}
-                  className={`p-2.5 rounded-xl border text-left transition-all relative ${
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg border p-3 text-left transition-colors",
                     isSelected
-                      ? "bg-emerald-950/60 border-emerald-500 ring-1 ring-emerald-500/50 shadow-sm"
-                      : "bg-[#080e1a] border-[#202b3c] hover:border-slate-600 hover:bg-[#0c1424]"
-                  }`}
+                      ? "border-accent/50 bg-accent/10"
+                      : "border-line hover:border-line-strong hover:bg-raised"
+                  )}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className={`text-xs font-bold block ${isSelected ? "text-emerald-300" : "text-white"}`}>
-                      {r.title}
-                    </span>
-                    {r.highlight && (
-                      <span className="text-[9px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono border border-amber-500/40">
-                        HOST
-                      </span>
+                  <span
+                    className={cn(
+                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
+                      isSelected ? "bg-accent text-accent-fg" : "bg-raised text-fg-muted"
                     )}
-                  </div>
-                  <span className="text-[10px] text-slate-400 block mt-0.5 truncate">
-                    {r.tagline}
+                  >
+                    <Icon className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-fg">{r.title}</span>
+                    <span className="block truncate text-xs text-fg-subtle">{r.tagline}</span>
                   </span>
                 </button>
               );
             })}
           </div>
 
-          {/* Quick 1-Click Action */}
-          <div className="mt-3 p-2.5 rounded-lg bg-[#080e1a] border border-[#1a2536] flex items-center justify-between text-xs">
-            <div className="truncate pr-2">
-              <span className="text-[11px] text-slate-400 font-mono block">Selected account:</span>
-              <span className="text-xs text-white font-mono font-medium truncate block">{email}</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => handleQuickDemoLaunch(selectedRolePreview)}
-              className="px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500 hover:text-slate-950 text-xs font-semibold font-mono transition-all shrink-0 flex items-center gap-1"
-            >
-              <span>1-Click Launch →</span>
-            </button>
+          <div className="mt-5 flex flex-col gap-3 border-t border-line pt-5 sm:flex-row sm:items-center sm:justify-between">
+            <p className="min-w-0 text-sm text-fg-muted">
+              <span className="block text-xs text-fg-subtle">Selected account</span>
+              <span className="block truncate font-mono">{email}</span>
+            </p>
+            <Button variant="secondary" onClick={() => handleQuickDemoLaunch(selectedRolePreview)}>
+              Open {selectedPreview.title} dashboard
+              <ArrowRight aria-hidden="true" />
+            </Button>
           </div>
-        </div>
-
-        {/* Status Notification */}
-        {statusMessage && (
-          <div
-            className={`p-3 rounded-lg text-xs mb-4 leading-relaxed ${
-              statusMessage.type === "error"
-                ? "bg-rose-950/40 border border-rose-800/50 text-rose-300"
-                : "bg-emerald-950/40 border border-emerald-800/50 text-emerald-300"
-            }`}
-          >
-            {statusMessage.text}
-          </div>
-        )}
-
-        {/* Form Fields */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="text-xs font-medium text-slate-300 block mb-1">Email Address</label>
-            <input
-              type="text"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="organizer@hacktrack.io"
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
-            />
-          </div>
-
-          <div>
-            <div className="flex justify-between items-center mb-1">
-              <label className="text-xs font-medium text-slate-300">Password</label>
-              <button
-                type="button"
-                onClick={() => setStatusMessage({ type: "info", text: "Demo passwords for all accounts are: password123" })}
-                className="text-[11px] text-emerald-400 hover:underline"
-              >
-                Forgot?
-              </button>
-            </div>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••••••"
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
-            />
-          </div>
-
-          <button
-            type="submit"
-            className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition-colors shadow"
-          >
-            Sign In & Launch Dashboard
-          </button>
-        </form>
-
-        {/* Switch to Register */}
-        <div className="mt-6 pt-5 border-t border-slate-800 text-center text-xs text-slate-400">
-          Want to organize a new competition?{" "}
-          <button
-            onClick={() => navigate('/register')}
-            className="text-emerald-400 hover:underline font-semibold"
-          >
-            Register as an Organizer
-          </button>
-        </div>
-
+        </section>
       </div>
     </div>
   );

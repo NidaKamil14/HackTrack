@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Icons } from './Icons';
+import { Badge, Button, Dialog, Input } from './ui';
 import { useAuth } from '../context/AuthContext';
 import { getTeamByCode, joinTeamWithCode } from '../utils/teamService';
 import { isUserRegistered, registerForHackathon } from '../utils/registrationService';
@@ -103,107 +103,103 @@ export default function TeamCodeModal({
     : "";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 relative shadow-2xl">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-slate-400 hover:text-white"
-        >
-          <Icons.Close />
-        </button>
+    <Dialog
+      open={isOpen}
+      onClose={onClose}
+      title="Team lookup"
+      description="Enter the invite code your team leader shared with you."
+    >
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleVerify();
+        }}
+      >
+        <Input
+          aria-label="Team code"
+          value={code}
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          placeholder="e.g. HT-DEV-42"
+          autoComplete="off"
+          spellCheck={false}
+          className="font-mono uppercase tracking-wider"
+        />
+        <Button type="submit" variant="secondary">
+          Verify
+        </Button>
+      </form>
 
-        <h3 className="text-base font-bold text-white mb-1">Team Lookup</h3>
-        <p className="text-xs text-slate-400 mb-4">Enter your 8-character team invite code</p>
-
-        <div className="flex gap-2 mb-4">
-          <input
-            type="text"
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            placeholder="e.g. HT-DEV-42"
-            className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-emerald-400 uppercase tracking-wider focus:outline-none focus:border-emerald-500"
-          />
-          <button
-            onClick={handleVerify}
-            className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-lg transition-colors"
-          >
-            Verify
-          </button>
-        </div>
-
-        {result ? (
-          <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 text-xs space-y-2.5">
-            <div className="flex justify-between items-center">
-              <span className="font-bold text-white text-sm">{result.name}</span>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 border border-emerald-500/30 text-emerald-400 font-mono">
-                {result.capacity}
-              </span>
+      {result ? (
+        <div className="mt-4 rounded-xl border border-line bg-raised/50 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <p className="font-semibold text-fg">{result.name}</p>
+            <Badge tone="accent" className="font-mono">{result.capacity}</Badge>
+          </div>
+          <dl className="mt-3 space-y-1.5 text-sm">
+            <div className="flex gap-2">
+              <dt className="w-16 shrink-0 text-fg-subtle">Event</dt>
+              <dd className="text-fg">{result.hackathon}</dd>
             </div>
-            <div className="text-slate-400">
-              Sprint: <span className="text-slate-200">{result.hackathon}</span>
+            <div className="flex gap-2">
+              <dt className="w-16 shrink-0 text-fg-subtle">Track</dt>
+              <dd className="text-fg">{result.track}</dd>
             </div>
-            <div className="text-slate-400">
-              Track: <span className="text-slate-200">{result.track}</span>
+            <div className="flex gap-2">
+              <dt className="w-16 shrink-0 text-fg-subtle">Roster</dt>
+              <dd className="text-fg-muted">{memberNames}</dd>
             </div>
-            <div className="text-slate-400">
-              Roster: <span className="text-slate-300">{memberNames}</span>
-            </div>
+          </dl>
 
-            {joinError && (
-              <div className="p-2.5 rounded bg-rose-950/40 border border-rose-800/50 text-rose-300 text-xs space-y-2">
-                <div>{joinError.text}</div>
-                {joinError.type === "auth" && (
-                  <button
-                    onClick={() => {
-                      onClose();
-                      navigate('/login');
-                    }}
-                    className="w-full py-1.5 bg-emerald-500 text-slate-950 font-bold rounded text-xs"
-                  >
-                    Log In to Continue →
-                  </button>
-                )}
-                {joinError.type === "registration" && (
-                  <button
-                    onClick={handleRegisterAndJoin}
-                    className="w-full py-1.5 bg-emerald-500 text-slate-950 font-bold rounded text-xs"
-                  >
-                    Register for {joinError.hackathonTitle} & Join →
-                  </button>
-                )}
-              </div>
-            )}
-
-            {joinSuccess ? (
-              <div className="p-2.5 rounded bg-emerald-500/20 text-emerald-300 text-center font-semibold text-xs border border-emerald-500/30 mt-2">
-                ✓ Joined Team Successfully! Roster updated.
-              </div>
-            ) : (
-              <div className="pt-2 flex flex-col gap-2">
-                <button
-                  onClick={handleConfirmJoin}
-                  className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition-colors"
-                >
-                  Confirm & Join Roster
-                </button>
-                <button
+          {joinError && (
+            <div role="alert" className="mt-4 space-y-3 rounded-lg border border-danger/25 bg-danger/10 p-3 text-sm text-danger">
+              <p>{joinError.text}</p>
+              {joinError.type === "auth" && (
+                <Button
+                  className="w-full"
                   onClick={() => {
                     onClose();
-                    navigate(`/hackathons/${result.hackathonId}`);
+                    navigate('/login');
                   }}
-                  className="text-center text-[11px] text-slate-400 hover:text-white"
                 >
-                  View full sprint specifications →
-                </button>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="p-3 bg-red-950/20 border border-red-900/30 text-red-400 rounded-lg text-xs text-center">
-            Code not found. Try sample codes: <b>HT-DEV-42</b> or <b>HT-AI-99</b>.
-          </div>
-        )}
-      </div>
-    </div>
+                  Log in to continue
+                </Button>
+              )}
+              {joinError.type === "registration" && (
+                <Button className="w-full" onClick={handleRegisterAndJoin}>
+                  Register for {joinError.hackathonTitle} &amp; join
+                </Button>
+              )}
+            </div>
+          )}
+
+          {joinSuccess ? (
+            <p role="status" className="mt-4 rounded-lg border border-success/25 bg-success/10 p-3 text-center text-sm font-medium text-success">
+              Joined team successfully. Your roster has been updated.
+            </p>
+          ) : (
+            <div className="mt-4 flex flex-col gap-2">
+              <Button className="w-full" onClick={handleConfirmJoin}>
+                Confirm &amp; join team
+              </Button>
+              <Button
+                variant="ghost"
+                className="w-full"
+                onClick={() => {
+                  onClose();
+                  navigate(`/hackathons/${result.hackathonId}`);
+                }}
+              >
+                View hackathon details
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <p role="alert" className="mt-4 rounded-lg border border-danger/25 bg-danger/10 p-3 text-center text-sm text-danger">
+          Code not found. Try a sample code: <b className="font-mono">HT-DEV-42</b> or <b className="font-mono">HT-AI-99</b>.
+        </p>
+      )}
+    </Dialog>
   );
 }

@@ -1,6 +1,39 @@
 import React, { useState, useMemo } from 'react';
+import {
+  Check,
+  CheckCircle2,
+  Clock,
+  ExternalLink,
+  FileText,
+  Inbox,
+  KeyRound,
+  Layers,
+  MousePointerClick,
+  ShieldCheck,
+  X,
+  XCircle,
+} from 'lucide-react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
-import { Icons } from '../../components/Icons';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+  Dialog,
+  EmptyState,
+  Field,
+  Input,
+  PageHeader,
+  Select,
+  StatCard,
+  Textarea,
+  cn,
+} from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { getFinalizedSubmissions, updateScreeningDecision } from '../../utils/submissionService.js';
 import {
@@ -8,6 +41,64 @@ import {
   getUserAssignedHackathonIds,
   redeemAccessCode
 } from '../../utils/hackathonService.js';
+
+/* Review-queue pattern (shared look with Judge and Mentor dashboards) */
+function QueueList({ title, count, children }) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
+        <h2 className="text-sm font-semibold text-fg">{title}</h2>
+        <span className="text-xs tabular-nums text-fg-subtle">{count}</span>
+      </div>
+      {children}
+    </Card>
+  );
+}
+
+function QueueItem({ selected, onSelect, title, badge, meta }) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-current={selected ? 'true' : undefined}
+        className={cn(
+          'flex w-full flex-col gap-1 border-l-2 px-5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40',
+          selected ? 'border-accent bg-raised' : 'border-transparent hover:bg-raised/50'
+        )}
+      >
+        <span className="flex items-center justify-between gap-3">
+          <span className="truncate text-sm font-medium text-fg">{title}</span>
+          {badge}
+        </span>
+        {meta && <span className="truncate text-xs text-fg-subtle">{meta}</span>}
+      </button>
+    </li>
+  );
+}
+
+function LinkButton({ href, children }) {
+  // Submissions without a URL are stored as "#" — show that plainly instead of a dead link.
+  if (!href || href === "#") {
+    return <span className="inline-flex h-8 items-center text-sm text-fg-subtle">{children}: not provided</span>;
+  }
+  return (
+    <Button as="a" href={href} target="_blank" rel="noopener noreferrer" variant="secondary" size="sm">
+      <ExternalLink aria-hidden="true" />
+      {children}
+    </Button>
+  );
+}
+
+const statusTone = (status) =>
+  status === "Shortlisted" ? "success" : status === "Rejected" ? "danger" : status === "Under Review" ? "info" : "warning";
+
+const COMPLIANCE_CHECKS = [
+  { key: "gitFreshness", label: "Git freshness" },
+  { key: "endpointsLive", label: "HTTPS live" },
+  { key: "envConfigured", label: ".env.example" },
+  { key: "licenseMIT", label: "Open license" },
+];
 
 export default function ScreeningDashboard() {
   const { user } = useAuth();
@@ -86,6 +177,9 @@ export default function ScreeningDashboard() {
     }
   };
 
+  // Which queue row is open in the review panel (presentation only)
+  const [selectedId, setSelectedId] = useState(null);
+
   // Active remarks editing
   const [remarksState, setRemarksState] = useState({});
 
@@ -130,7 +224,7 @@ export default function ScreeningDashboard() {
 
       setFeedbackNotice({
         type: newStatus === "Shortlisted" ? "success" : newStatus === "Rejected" ? "error" : "info",
-        text: `✓ Decision recorded: "${target.teamName}" set to ${newStatus}. Synced with team & judge views.`
+        text: `Decision recorded: "${target.teamName}" set to ${newStatus}. Synced with team & judge views.`
       });
       setTimeout(() => setFeedbackNotice(null), 4000);
     }
@@ -185,479 +279,314 @@ export default function ScreeningDashboard() {
     return matchHack && matchStat;
   });
 
+  const selected = filtered.find((s) => s.id === selectedId) || filtered[0] || null;
+  const activeRemarks = selected
+    ? (remarksState[selected.id] !== undefined ? remarksState[selected.id] : selected.screeningRemarks)
+    : "";
+
+  const noticeTone = feedbackNotice?.type === "success" ? "success" : feedbackNotice?.type === "error" ? "danger" : "info";
+
   return (
     <DashboardLayout
       portalTitle="Screening Committee Review Portal"
       roleBadgeText="SCREENING COMMITTEE"
     >
-      <div className="space-y-6">
-        
-        {/* 1. OVERVIEW & METRICS */}
-        <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-5 shadow-sm">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs font-mono text-emerald-400 font-semibold uppercase tracking-wider">
-                  SCREENING GATEWAY
-                </span>
-                <span className="text-slate-600">•</span>
-                <span className="text-xs text-slate-400 font-mono">
-                  {user?.university || "Review Board"}
-                </span>
+      <div className="space-y-8">
+        <PageHeader
+          eyebrow={`Screening gateway · ${user?.university || "Review Board"}`}
+          title="Screening Review Queue"
+          description="Verify compliance rules and add remarks before forwarding entries to judges."
+        />
+
+        {feedbackNotice && <Alert tone={noticeTone}>{feedbackNotice.text}</Alert>}
+
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+          <StatCard label="Finalized entries" value={total} icon={Layers} />
+          <StatCard label="Pending review" value={pendingCount} icon={Clock} />
+          <StatCard label="Shortlisted" value={shortlistedCount} icon={CheckCircle2} />
+          <StatCard label="Rejected" value={rejectedCount} icon={XCircle} />
+        </div>
+
+        {/* Role explanation + access code entry */}
+        <Card>
+          <CardContent className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-accent" aria-hidden="true" />
+              <div className="min-w-0 space-y-1">
+                <p className="text-sm font-semibold text-fg">Screening Committee (Gatekeeper)</p>
+                <p className="text-sm leading-relaxed text-fg-muted">
+                  You review <strong className="font-medium text-fg">all raw submissions</strong> right after the deadline. Verify commit freshness, live URL health, and documentation to mark entries as <strong className="font-medium text-fg">Shortlisted</strong> (which sends them to Judges) or <strong className="font-medium text-fg">Rejected</strong>.
+                </p>
               </div>
-              <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-                Screening Review Queue
-              </h1>
             </div>
-
-            <span className="text-xs text-slate-400">
-              Verify compliance rules and add remarks before forwarding entries to judges.
-            </span>
-          </div>
-
-          {feedbackNotice && (
-            <div className={`p-3 rounded-lg text-xs mb-3 ${
-              feedbackNotice.type === "success"
-                ? "bg-emerald-950/50 border border-emerald-500/40 text-emerald-300"
-                : feedbackNotice.type === "error"
-                ? "bg-rose-950/50 border border-rose-800/50 text-rose-300"
-                : "bg-sky-950/50 border border-sky-800/50 text-sky-300"
-            }`}>
-              {feedbackNotice.text}
-            </div>
-          )}
-
-          {/* 4 Metric Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-[#253247]">
-            <div className="p-3 bg-[#080e1a] border border-[#1c283c] rounded-lg">
-              <span className="text-[10px] text-slate-500 font-mono uppercase block">FINALIZED ENTRIES</span>
-              <span className="text-lg font-bold text-white mt-0.5 block">{total}</span>
-            </div>
-            <div className="p-3 bg-[#080e1a] border border-[#1c283c] rounded-lg">
-              <span className="text-[10px] text-amber-400 font-mono uppercase block">PENDING REVIEW</span>
-              <span className="text-lg font-bold text-amber-400 mt-0.5 block">{pendingCount}</span>
-            </div>
-            <div className="p-3 bg-[#080e1a] border border-[#1c283c] rounded-lg">
-              <span className="text-[10px] text-emerald-400 font-mono uppercase block">SHORTLISTED</span>
-              <span className="text-lg font-bold text-emerald-400 mt-0.5 block">{shortlistedCount}</span>
-            </div>
-            <div className="p-3 bg-[#080e1a] border border-[#1c283c] rounded-lg">
-              <span className="text-[10px] text-rose-400 font-mono uppercase block">REJECTED</span>
-              <span className="text-lg font-bold text-rose-400 mt-0.5 block">{rejectedCount}</span>
-            </div>
-          </div>
-        </section>
-
-        {/* Role Explanation Banner */}
-        <section className="bg-[#080e1a] border border-amber-500/20 rounded-xl p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs shadow-sm">
-          <div className="flex items-start gap-2.5">
-            <span className="text-lg">🛡️</span>
-            <div>
-              <span className="font-bold text-amber-400">Screening Committee (Gatekeeper):</span>
-              <p className="text-slate-300 text-[11px] mt-0.5 leading-relaxed">
-                You review <strong>all raw submissions</strong> right after the deadline. Verify commit freshness, live URL health, and documentation to mark entries as <strong>Shortlisted ✓</strong> (which sends them to Judges) or <strong>Rejected ✗</strong>.
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={() => setShowCodeModal(true)}
-            className="px-3.5 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold rounded-lg text-xs transition-colors shrink-0 flex items-center gap-1.5"
-          >
-            <span>🔑</span> Enter Screening Access Code
-          </button>
-        </section>
+            <Button variant="secondary" className="shrink-0" onClick={() => setShowCodeModal(true)}>
+              <KeyRound aria-hidden="true" />
+              Enter Screening Access Code
+            </Button>
+          </CardContent>
+        </Card>
 
         {codeNotice && (
-          <div className={`p-3 rounded-lg text-xs font-medium border ${
-            codeNotice.type === 'success'
-              ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
-              : 'bg-rose-950/60 border-rose-500/40 text-rose-300'
-          }`}>
-            {codeNotice.text}
-          </div>
+          <Alert tone={codeNotice.type === 'success' ? 'success' : 'danger'}>{codeNotice.text}</Alert>
         )}
 
-        {/* 2. FILTER & QUEUE HEADER */}
-        <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-sm">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-slate-400 font-mono text-[11px]">ACTIVE HACKATHON:</span>
-              <select
-                value={filterHackathon}
-                onChange={(e) => setFilterHackathon(e.target.value)}
-                className="bg-[#080e1a] border border-[#223044] text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 font-semibold"
-              >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="grid w-full grid-cols-1 gap-3 sm:max-w-lg sm:grid-cols-2">
+            <Field label="Active hackathon">
+              <Select value={filterHackathon} onChange={(e) => setFilterHackathon(e.target.value)}>
                 <option value="all">All Assigned Competitions ({assignedHackathons.length})</option>
                 {assignedHackathons.map((h) => (
                   <option key={h.id} value={h.id}>{h.title}</option>
                 ))}
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-slate-400">Status:</span>
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="bg-[#080e1a] border border-[#223044] text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-emerald-500"
-              >
-                <option value="all">All Statuses</option>
+              </Select>
+            </Field>
+            <Field label="Status">
+              <Select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+                <option value="all">All statuses</option>
                 <option value="Pending Review">Pending Review</option>
                 <option value="Under Review">Under Review</option>
                 <option value="Shortlisted">Shortlisted</option>
                 <option value="Rejected">Rejected</option>
-              </select>
-            </div>
+              </Select>
+            </Field>
           </div>
-
-          <span className="text-slate-500 font-mono text-[11px]">
+          <p className="text-xs tabular-nums text-fg-subtle">
             Showing {filtered.length} of {total} submissions
-          </span>
-        </section>
-
-        {/* 3. SUBMISSIONS REVIEW LIST */}
-        <div className="space-y-4">
-          {filtered.length === 0 ? (
-            <div className="bg-[#0d1526] border border-[#253247] rounded-xl p-10 text-center text-slate-400 text-xs">
-              No submissions match the selected filters.
-            </div>
-          ) : (
-            filtered.map((sub) => {
-              const isShortlisted = sub.status === "Shortlisted";
-              const isRejected = sub.status === "Rejected";
-              const activeRemarks = remarksState[sub.id] !== undefined ? remarksState[sub.id] : sub.screeningRemarks;
-
-              return (
-                <section
-                  key={sub.id}
-                  className={`bg-[#0d1526] border rounded-xl overflow-hidden shadow-sm transition-colors ${
-                    isShortlisted
-                      ? "border-emerald-500/50"
-                      : isRejected
-                      ? "border-rose-800/50"
-                      : "border-[#253247]"
-                  }`}
-                >
-                  {/* Card Header: Project Details & Current Status */}
-                  <div className="px-5 py-4 border-b border-[#253247] flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#121c32]">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h2 className="text-base font-bold text-white">{sub.teamName}</h2>
-                        <span className="text-xs text-slate-400 font-mono">• Lead: {sub.lead}</span>
-                      </div>
-                      <div className="mt-1">
-                        <span className="text-sm font-semibold text-emerald-400 font-mono">
-                          {sub.projectTitle}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        Hackathon: <span className="text-slate-300 font-medium">{sub.hackathonTitle}</span> • Track: <span className="text-slate-300">{sub.track}</span>
-                      </p>
-                    </div>
-
-                    <div className="flex sm:flex-col items-end gap-1.5 shrink-0">
-                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                        isShortlisted
-                          ? "bg-emerald-950 text-emerald-300 border border-emerald-500/40"
-                          : isRejected
-                          ? "bg-rose-950 text-rose-300 border border-rose-500/40"
-                          : "bg-amber-950/70 text-amber-300 border border-amber-500/40"
-                      }`}>
-                        {sub.status}
-                      </span>
-                      <span className="text-[10px] font-mono text-slate-500">
-                        Date: {sub.submissionDate}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Card Body: Links & Compliance Checklist */}
-                  <div className="p-5 space-y-4">
-                    {/* Project Description */}
-                    {sub.projectDescription && (
-                      <p className="text-xs text-slate-300 leading-relaxed bg-[#080e1a] p-3 rounded-lg border border-[#1c283c]">
-                        {sub.projectDescription}
-                      </p>
-                    )}
-
-                    {/* Links Row */}
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <a
-                        href={sub.repoUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-3 py-1.5 rounded-lg bg-[#080e1a] border border-[#223044] hover:border-[#354866] text-slate-200 inline-flex items-center gap-1.5 transition-colors"
-                      >
-                        <Icons.ExternalLink />
-                        <span>Inspect Repository</span>
-                      </a>
-                      <a
-                        href={sub.demoUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-3 py-1.5 rounded-lg bg-[#080e1a] border border-[#223044] hover:border-[#354866] text-emerald-400 inline-flex items-center gap-1.5 transition-colors"
-                      >
-                        <Icons.ExternalLink />
-                        <span>Live Deployment</span>
-                      </a>
-
-                      {sub.submissionFiles && sub.submissionFiles.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1.5 ml-auto">
-                          {sub.submissionFiles.map((f, fIdx) => (
-                            <span
-                              key={fIdx}
-                              className="px-2 py-1 rounded bg-[#080e1a] border border-[#1c283c] text-[10px] text-slate-300 font-mono inline-flex items-center gap-1"
-                            >
-                              <span className="text-emerald-400 font-bold">PDF</span>
-                              <span>{f.name}</span>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 4 Compliance Gate Toggles */}
-                    <div className="p-3.5 bg-[#080e1a] border border-[#1c283c] rounded-lg space-y-2">
-                      <span className="text-[10px] font-mono text-slate-500 uppercase block font-semibold">
-                        COMPLIANCE CHECKLIST (CLICK TO TOGGLE GATE)
-                      </span>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                        <button
-                          type="button"
-                          onClick={() => toggleCheck(sub.id, "gitFreshness")}
-                          className={`p-2 rounded border text-left flex items-center justify-between transition-colors ${
-                            sub.checks.gitFreshness
-                              ? "bg-emerald-950/30 border-emerald-500/40 text-emerald-300"
-                              : "bg-rose-950/30 border-rose-800/40 text-rose-300"
-                          }`}
-                        >
-                          <span>Git Freshness</span>
-                          <span className="font-mono text-[10px]">{sub.checks.gitFreshness ? "PASS ✓" : "FAIL ✕"}</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => toggleCheck(sub.id, "endpointsLive")}
-                          className={`p-2 rounded border text-left flex items-center justify-between transition-colors ${
-                            sub.checks.endpointsLive
-                              ? "bg-emerald-950/30 border-emerald-500/40 text-emerald-300"
-                              : "bg-rose-950/30 border-rose-800/40 text-rose-300"
-                          }`}
-                        >
-                          <span>HTTPS Live</span>
-                          <span className="font-mono text-[10px]">{sub.checks.endpointsLive ? "PASS ✓" : "FAIL ✕"}</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => toggleCheck(sub.id, "envConfigured")}
-                          className={`p-2 rounded border text-left flex items-center justify-between transition-colors ${
-                            sub.checks.envConfigured
-                              ? "bg-emerald-950/30 border-emerald-500/40 text-emerald-300"
-                              : "bg-rose-950/30 border-rose-800/40 text-rose-300"
-                          }`}
-                        >
-                          <span>.env.example</span>
-                          <span className="font-mono text-[10px]">{sub.checks.envConfigured ? "PASS ✓" : "FAIL ✕"}</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => toggleCheck(sub.id, "licenseMIT")}
-                          className={`p-2 rounded border text-left flex items-center justify-between transition-colors ${
-                            sub.checks.licenseMIT
-                              ? "bg-emerald-950/30 border-emerald-500/40 text-emerald-300"
-                              : "bg-rose-950/30 border-rose-800/40 text-rose-300"
-                          }`}
-                        >
-                          <span>Open License</span>
-                          <span className="font-mono text-[10px]">{sub.checks.licenseMIT ? "PASS ✓" : "FAIL ✕"}</span>
-                        </button>
-                      </div>
-
-                      {sub.rejectionReason && (
-                        <div className="pt-2 text-[11px] text-rose-300 font-mono bg-rose-950/40 p-2 rounded border border-rose-900/50">
-                          <strong>Rejection Reason:</strong> {sub.rejectionReason}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Screening Remarks Input */}
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-mono text-slate-400 uppercase font-semibold block">
-                        Screening Remarks & Evaluator Notes
-                      </label>
-                      <input
-                        type="text"
-                        value={activeRemarks}
-                        onChange={(e) => handleRemarkChange(sub.id, e.target.value)}
-                        placeholder="e.g. Clean commit tree verified; endpoints respond under 200ms latency ceiling."
-                        className="w-full bg-[#080e1a] border border-[#223044] rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-                      />
-                    </div>
-
-                    {/* 4. DECISION ACTION ROW */}
-                    <div className="pt-3 border-t border-[#1c283c] flex flex-wrap items-center justify-between gap-3">
-                      <span className="text-[11px] text-slate-500 font-mono">
-                        Committee Decision:
-                      </span>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleDecision(sub.id, "Shortlisted", activeRemarks)}
-                          className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-lg transition-colors"
-                        >
-                          ✓ Shortlist Team
-                        </button>
-
-                        <button
-                          onClick={() => openRejectModal(sub)}
-                          className="px-3 py-1.5 bg-rose-950 hover:bg-rose-900 border border-rose-700/60 text-rose-200 text-xs font-semibold rounded-lg transition-colors"
-                        >
-                          ✕ Reject Entry
-                        </button>
-
-                        <button
-                          onClick={() => handleDecision(sub.id, "Under Review", activeRemarks)}
-                          className="px-2.5 py-1.5 bg-[#121c32] hover:bg-[#1a2744] border border-[#253247] text-slate-300 text-xs rounded-lg transition-colors"
-                        >
-                          Under Review
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-              );
-            })
-          )}
+          </p>
         </div>
 
-        {/* REJECTION REASON MODAL */}
-        {rejectModalTarget && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#060a12]/80 backdrop-blur-sm animate-in fade-in duration-150">
-            <div className="bg-[#0d1526] border border-[#253247] rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-rose-950/80 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0">
-                  <Icons.AlertCircle />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-white tracking-tight">
-                    Reject Submission: {rejectModalTarget.teamName}
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Select the non-compliance reason for rejecting this project.
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-3 text-xs">
-                <div>
-                  <label className="text-slate-300 font-semibold block mb-1">Rejection Category *</label>
-                  <select
-                    value={rejectionReasonSelect}
-                    onChange={(e) => setRejectionReasonSelect(e.target.value)}
-                    className="w-full bg-[#080e1a] border border-[#223044] rounded-lg p-2.5 text-white focus:outline-none focus:border-rose-500"
-                  >
-                    <option value="Pre-dated private commits before kickoff window">Pre-dated commits before kickoff window</option>
-                    <option value="Missing working live deployment endpoint">Missing working live deployment endpoint (5xx or offline)</option>
-                    <option value="Incomplete repository or missing .env.example">Incomplete repository or missing .env.example</option>
-                    <option value="Non-permissive or missing open source license">Non-permissive or missing open source license</option>
-                    <option value="Rule violation or plagiarism detection">Rule violation or plagiarism detection</option>
-                    <option value="Other">Other (Custom explanation)</option>
-                  </select>
-                </div>
-
-                {rejectionReasonSelect === "Other" && (
-                  <div>
-                    <label className="text-slate-300 font-semibold block mb-1">Specific Reason Details *</label>
-                    <textarea
-                      rows={2}
-                      value={rejectionCustomText}
-                      onChange={(e) => setRejectionCustomText(e.target.value)}
-                      placeholder="Explain the compliance failure..."
-                      className="w-full bg-[#080e1a] border border-[#223044] rounded-lg p-2 text-white focus:outline-none focus:border-rose-500"
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {/* Queue */}
+          <div>
+            <QueueList title="Submissions" count={`${filtered.length} in queue`}>
+              {filtered.length === 0 ? (
+                <EmptyState
+                  icon={Inbox}
+                  title={total === 0 ? "Nothing to screen yet" : "No matches"}
+                  description={
+                    total === 0
+                      ? "Finalized submissions will appear here for compliance review."
+                      : "No submissions match the selected filters."
+                  }
+                />
+              ) : (
+                <ul className="divide-y divide-line">
+                  {filtered.map((sub) => (
+                    <QueueItem
+                      key={sub.id}
+                      selected={selected?.id === sub.id}
+                      onSelect={() => setSelectedId(sub.id)}
+                      title={sub.teamName}
+                      badge={<Badge tone={statusTone(sub.status)}>{sub.status}</Badge>}
+                      meta={`${sub.projectTitle} · ${sub.hackathonTitle}`}
                     />
+                  ))}
+                </ul>
+              )}
+            </QueueList>
+          </div>
+
+          {/* Review panel */}
+          <div className="lg:col-span-2">
+            {selected ? (
+              <Card>
+                <CardHeader className="flex-row flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-xs text-fg-subtle">
+                      {selected.hackathonTitle} · {selected.track}
+                    </p>
+                    <CardTitle as="h2" className="text-lg">{selected.teamName}</CardTitle>
+                    <CardDescription>
+                      <span className="font-medium text-fg">{selected.projectTitle}</span> · Lead: {selected.lead}
+                    </CardDescription>
                   </div>
-                )}
-              </div>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <Badge tone={statusTone(selected.status)} dot>{selected.status}</Badge>
+                    <span className="text-xs text-fg-subtle">{selected.submissionDate}</span>
+                  </div>
+                </CardHeader>
 
-              <div className="flex gap-2.5 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setRejectModalTarget(null)}
-                  className="flex-1 py-2 px-3 bg-[#121c32] hover:bg-[#1a2744] border border-[#253247] text-slate-300 rounded-lg text-xs font-semibold"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={confirmRejection}
-                  className="flex-1 py-2 px-3 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold shadow-sm"
-                >
-                  Confirm Rejection
-                </button>
-              </div>
+                <CardContent className="space-y-5">
+                  {selected.status === "Shortlisted" && (
+                    <Alert tone="success" title="Shortlisted">
+                      This entry has been forwarded to the judging panel.
+                    </Alert>
+                  )}
+                  {selected.status === "Rejected" && (
+                    <Alert tone="danger" title="Rejected">
+                      {selected.rejectionReason ? `Reason: ${selected.rejectionReason}` : "This entry did not pass screening."}
+                    </Alert>
+                  )}
+                  {selected.status !== "Rejected" && selected.rejectionReason && (
+                    <Alert tone="danger" title="Rejection reason">{selected.rejectionReason}</Alert>
+                  )}
+
+                  {selected.projectDescription && (
+                    <p className="rounded-lg bg-raised/50 p-3 text-sm leading-relaxed text-fg-muted">
+                      {selected.projectDescription}
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <LinkButton href={selected.repoUrl}>Inspect repository</LinkButton>
+                    <LinkButton href={selected.demoUrl}>Live deployment</LinkButton>
+                    {selected.submissionFiles && selected.submissionFiles.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {selected.submissionFiles.map((f, fIdx) => (
+                          <Badge key={fIdx} tone="neutral" className="font-mono">
+                            <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+                            {f.name}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <fieldset className="space-y-2">
+                    <legend className="eyebrow mb-2">Compliance checklist</legend>
+                    <p className="text-xs text-fg-subtle">Select a gate to toggle pass / fail.</p>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {COMPLIANCE_CHECKS.map(({ key, label }) => {
+                        const passed = Boolean(selected.checks[key]);
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => toggleCheck(selected.id, key)}
+                            aria-pressed={passed}
+                            className={cn(
+                              'flex min-h-10 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+                              passed
+                                ? 'border-success/25 bg-success/10 text-fg hover:border-success/40'
+                                : 'border-danger/25 bg-danger/10 text-fg hover:border-danger/40'
+                            )}
+                          >
+                            <span>{label}</span>
+                            <span className={cn('inline-flex items-center gap-1 text-xs font-medium', passed ? 'text-success' : 'text-danger')}>
+                              {passed ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <X className="h-3.5 w-3.5" aria-hidden="true" />}
+                              {passed ? "Pass" : "Fail"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </fieldset>
+
+                  <Field label="Screening remarks & evaluator notes">
+                    <Input
+                      type="text"
+                      value={activeRemarks}
+                      onChange={(e) => handleRemarkChange(selected.id, e.target.value)}
+                      placeholder="e.g. Clean commit tree verified; endpoints respond under 200ms latency ceiling."
+                    />
+                  </Field>
+                </CardContent>
+
+                <CardFooter className="flex-wrap justify-end gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => handleDecision(selected.id, "Under Review", activeRemarks)}>
+                    Mark under review
+                  </Button>
+                  <Button variant="danger-ghost" size="sm" onClick={() => openRejectModal(selected)}>
+                    <XCircle aria-hidden="true" />
+                    Reject entry
+                  </Button>
+                  <Button size="sm" onClick={() => handleDecision(selected.id, "Shortlisted", activeRemarks)}>
+                    <CheckCircle2 aria-hidden="true" />
+                    Shortlist team
+                  </Button>
+                </CardFooter>
+              </Card>
+            ) : (
+              <Card>
+                <EmptyState
+                  icon={MousePointerClick}
+                  title="Select a submission"
+                  description="Pick an entry from the queue to review its compliance and record a decision."
+                />
+              </Card>
+            )}
+          </div>
+        </div>
+
+        {/* Rejection reason dialog */}
+        <Dialog
+          open={Boolean(rejectModalTarget)}
+          onClose={() => setRejectModalTarget(null)}
+          title={rejectModalTarget ? `Reject submission: ${rejectModalTarget.teamName}` : ""}
+          description="Select the non-compliance reason for rejecting this project."
+        >
+          <div className="space-y-4">
+            <Field label="Rejection category" required>
+              <Select value={rejectionReasonSelect} onChange={(e) => setRejectionReasonSelect(e.target.value)}>
+                <option value="Pre-dated private commits before kickoff window">Pre-dated commits before kickoff window</option>
+                <option value="Missing working live deployment endpoint">Missing working live deployment endpoint (5xx or offline)</option>
+                <option value="Incomplete repository or missing .env.example">Incomplete repository or missing .env.example</option>
+                <option value="Non-permissive or missing open source license">Non-permissive or missing open source license</option>
+                <option value="Rule violation or plagiarism detection">Rule violation or plagiarism detection</option>
+                <option value="Other">Other (Custom explanation)</option>
+              </Select>
+            </Field>
+
+            {rejectionReasonSelect === "Other" && (
+              <Field label="Specific reason details" required>
+                <Textarea
+                  rows={2}
+                  value={rejectionCustomText}
+                  onChange={(e) => setRejectionCustomText(e.target.value)}
+                  placeholder="Explain the compliance failure..."
+                />
+              </Field>
+            )}
+
+            <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+              <Button variant="secondary" onClick={() => setRejectModalTarget(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={confirmRejection}>
+                Confirm rejection
+              </Button>
             </div>
           </div>
-        )}
+        </Dialog>
 
-        {/* Modal: Enter Screening Access Code */}
-        {showCodeModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
-            <div className="bg-[#0d1526] border border-[#253247] rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-              <div className="flex items-center justify-between border-b border-[#253247] pb-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-base">🔑</span>
-                  <h3 className="text-sm font-bold text-white">Enter Screening Access Code</h3>
-                </div>
-                <button
-                  onClick={() => setShowCodeModal(false)}
-                  className="text-slate-400 hover:text-white text-xs"
-                >
-                  ✕
-                </button>
-              </div>
+        {/* Enter Screening Access Code dialog */}
+        <Dialog
+          open={showCodeModal}
+          onClose={() => setShowCodeModal(false)}
+          title="Enter Screening Access Code"
+          description="Hackathon organizers create unique screening access codes. Enter your assigned code once to unlock and review submissions for that hackathon."
+        >
+          <form onSubmit={handleRedeemCode} className="space-y-4">
+            <p className="text-sm text-fg-muted">
+              Example: <span className="break-all font-mono text-fg">SCREEN-DEVPULSE-3M2P</span>
+            </p>
 
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Hackathon organizers create unique screening access codes (e.g. <span className="font-mono text-amber-400">SCREEN-DEVPULSE-3M2P</span>). Enter your assigned code once to unlock and review submissions for that hackathon.
-              </p>
+            {codeNotice?.type === 'error' && <Alert tone="danger">{codeNotice.text}</Alert>}
 
-              <form onSubmit={handleRedeemCode} className="space-y-4 text-xs">
-                <div>
-                  <label className="text-[11px] font-mono text-slate-400 block mb-1 uppercase font-semibold">
-                    ACCESS CODE
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={accessCodeInput}
-                    onChange={(e) => setAccessCodeInput(e.target.value.toUpperCase())}
-                    placeholder="e.g. SCREEN-DEVPULSE-3M2P"
-                    className="w-full bg-[#080e1a] border border-[#253247] rounded-lg p-3 text-sm font-mono font-bold text-amber-400 placeholder-slate-600 focus:outline-none focus:border-amber-500 tracking-wider uppercase"
-                  />
-                </div>
+            <Field label="Access code" required>
+              <Input
+                type="text"
+                required
+                value={accessCodeInput}
+                onChange={(e) => setAccessCodeInput(e.target.value.toUpperCase())}
+                placeholder="e.g. SCREEN-DEVPULSE-3M2P"
+                autoComplete="off"
+                spellCheck={false}
+                className="font-mono uppercase tracking-wider"
+              />
+            </Field>
 
-                <div className="flex justify-end gap-2 pt-2 border-t border-[#253247]">
-                  <button
-                    type="button"
-                    onClick={() => setShowCodeModal(false)}
-                    className="px-4 py-2 bg-[#121c32] hover:bg-[#1a2744] text-slate-300 rounded-lg text-xs"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition-colors shadow"
-                  >
-                    Verify & Unlock Hackathon
-                  </button>
-                </div>
-              </form>
+            <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+              <Button type="button" variant="secondary" onClick={() => setShowCodeModal(false)}>
+                Cancel
+              </Button>
+              <Button type="submit">
+                <KeyRound aria-hidden="true" />
+                Verify & Unlock Hackathon
+              </Button>
             </div>
-          </div>
-        )}
-
+          </form>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

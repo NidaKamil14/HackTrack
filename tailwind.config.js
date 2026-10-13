@@ -1,4 +1,11 @@
+import plugin from 'tailwindcss/plugin';
+
 /** @type {import('tailwindcss').Config} */
+
+// Design tokens live as CSS variables in src/index.css (dark + light).
+// This file only maps them to Tailwind class names.
+const token = (name) => `rgb(var(--${name}) / <alpha-value>)`;
+
 export default {
   content: [
     "./index.html",
@@ -8,60 +15,78 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+        sans: ['Geist', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+        mono: ['"Geist Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
+      },
+      // Type scale: 12 / 14 / 16 / 18 / 20 / 24 / 30 / 36 / 48 (Tailwind defaults)
+      // plus a tightened display size. Nothing below 12px.
+      fontSize: {
+        display: ['3.5rem', { lineHeight: '1.05', letterSpacing: '-0.035em', fontWeight: '600' }],
       },
       colors: {
-        background: '#070B14', // Deep near-black navy
-        surface: '#0F1B2D', // Dark navy blue
-        elevated: '#111E31',
-        input: '#0B1422',
-        navy: {
-          950: '#070B14',
-          900: '#0F1B2D',
-          850: '#111E31',
-          800: '#0B1422',
-          700: '#25364D',
+        canvas: token('canvas'),
+        surface: token('surface'),
+        raised: token('raised'),
+        sunken: token('sunken'),
+        overlay: token('overlay'),
+        line: {
+          DEFAULT: token('line'),
+          strong: token('line-strong'),
         },
-        border: {
-          DEFAULT: '#25364D',
-          navy: '#25364D',
-        },
-        glass: {
-          100: 'rgba(255, 255, 255, 0.02)',
-          200: 'rgba(255, 255, 255, 0.05)',
-          300: 'rgba(255, 255, 255, 0.08)',
-        },
-        primary: {
-          DEFAULT: '#104E66', // Deep teal-blue
-          dark: '#0D4257',
-          hover: '#156382',
-          glow: 'rgba(53, 200, 232, 0.3)',
+        fg: {
+          DEFAULT: token('fg'),
+          muted: token('fg-muted'),
+          subtle: token('fg-subtle'),
         },
         accent: {
-          DEFAULT: '#35C8E8', // Cyan accent
-          dark: '#0891B2',
-          glow: 'rgba(53, 200, 232, 0.5)',
+          DEFAULT: token('accent'),
+          hover: token('accent-hover'),
+          fg: token('accent-fg'),
+          text: token('accent-text'),
         },
-        electric: {
-          DEFAULT: '#2878F0', // Electric blue
-          blue: '#2878F0',
+        success: token('success'),
+        warning: token('warning'),
+        danger: {
+          DEFAULT: token('danger'),
+          solid: token('danger-solid'),
         },
-        slate: {
-          text: '#F1F5F9',
-          subtext: '#9AAAC0',
-          mutedtext: '#71839B',
-        }
+        info: token('info'),
+        ring: token('ring'),
       },
-      backgroundImage: {
-        'glass-gradient': 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.01) 100%)',
-        'glow-primary': 'radial-gradient(circle at center, rgba(53,200,232,0.12) 0%, transparent 70%)',
-        'glow-accent': 'radial-gradient(circle at center, rgba(40,120,240,0.12) 0%, transparent 70%)',
+      maxWidth: {
+        page: '76rem',   // 1216px — standard page container
+        prose: '42rem',  // long-form text
+      },
+      borderRadius: {
+        // sm 2px · md 6px · lg 8px (controls) · xl 12px (cards) · 2xl 16px (dialogs)
+        DEFAULT: '0.375rem',
       },
       boxShadow: {
-        'glass': '0 8px 32px 0 rgba(0, 0, 0, 0.37)',
-        'glass-hover': '0 8px 32px 0 rgba(53, 200, 232, 0.15)',
+        sm: 'var(--shadow-sm)',
+        md: 'var(--shadow-md)',
+        lg: 'var(--shadow-lg)',
+      },
+      transitionTimingFunction: {
+        out: 'cubic-bezier(0.16, 1, 0.3, 1)',
+      },
+      keyframes: {
+        'fade-in': { from: { opacity: '0' }, to: { opacity: '1' } },
+        'dialog-in': {
+          from: { opacity: '0', transform: 'translateY(4px) scale(0.98)' },
+          to: { opacity: '1', transform: 'translateY(0) scale(1)' },
+        },
+      },
+      animation: {
+        'fade-in': 'fade-in 150ms ease-out',
+        'dialog-in': 'dialog-in 180ms cubic-bezier(0.16, 1, 0.3, 1)',
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // `touch:` targets touchscreens (phones, tablets) regardless of width,
+    // used to enlarge hit areas without bloating the desktop UI.
+    plugin(({ addVariant }) => {
+      addVariant('touch', '@media (pointer: coarse)');
+    }),
+  ],
 }

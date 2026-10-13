@@ -1,685 +1,169 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --color-page-bg: #070B14;
-  --color-surface-panel: #0F1B2D;
-  --color-surface-secondary: #0B1422;
-  --color-surface-tertiary: #111E31;
-  --color-text-primary: #F1F5F9;
-  --color-text-secondary: #9AAAC0;
-  --color-text-muted: #71839B;
-  --color-border-subtle: #25364D;
-  --color-border-nested: #25364D;
-  --color-input-bg: #0B1422;
-  --color-input-border: #25364D;
-  --color-accent-cyan: #35C8E8;
-  --color-electric-blue: #2878F0;
-  --color-btn-primary: #104E66;
-  --color-btn-primary-hover: #156382;
+/* ==========================================================================
+   HACKTRACK DESIGN TOKENS
+   Colours are stored as space-separated RGB channels so Tailwind can apply
+   opacity modifiers (e.g. bg-accent/10). Consume them through the Tailwind
+   names in tailwind.config.js, never as raw hex values in components.
+
+   Surface hierarchy (back → front):
+     canvas  → page background
+     surface → cards, panels, nav bars
+     raised  → hover rows, nested panels, segmented controls
+     sunken  → inputs, code wells, inset areas
+   ========================================================================== */
+
+:root,
+html.dark {
+  color-scheme: dark;
+
+  --canvas: 9 10 12;          /* #090A0C */
+  --surface: 17 19 22;        /* #111316 */
+  --raised: 24 27 31;         /* #181B1F */
+  --sunken: 13 14 17;         /* #0D0E11 */
+  --overlay: 3 4 6;           /* dialog backdrop */
+
+  --line: 38 41 48;           /* #262930 hairline borders */
+  --line-strong: 56 61 71;    /* #383D47 hover / emphasis borders */
+
+  --fg: 237 238 240;          /* #EDEEF0 primary text   ~16:1 on surface */
+  --fg-muted: 165 169 178;    /* #A5A9B2 secondary text ~8:1  */
+  --fg-subtle: 132 137 148;   /* #848994 tertiary text  ~5:1  */
+
+  --accent: 60 200 230;       /* #3CC8E6 HackTrack cyan */
+  --accent-hover: 110 216 240;
+  --accent-fg: 3 22 28;       /* text on accent fills */
+  --accent-text: 96 212 238;  /* accent used as text/links */
+
+  --success: 61 214 140;
+  --warning: 245 184 61;
+  --danger: 248 113 113;
+  --danger-solid: 220 38 38;
+  --info: 96 165 250;
+
+  --ring: 60 200 230;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(255 255 255 / 0.03);
+  --shadow-lg: 0 24px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.04);
 }
 
 html.light {
-  --color-page-bg: #F5F7FB;
-  --color-surface-panel: #FFFFFF;
-  --color-surface-secondary: #EEF2F7;
-  --color-surface-tertiary: #E2E8F0;
-  --color-text-primary: #172033;
-  --color-text-secondary: #64748B;
-  --color-border-subtle: #D8E0EB;
-  --color-border-nested: #D8E0EB;
-  --color-input-bg: #FFFFFF;
-  --color-input-border: #D8E0EB;
+  color-scheme: light;
+
+  --canvas: 247 248 250;      /* #F7F8FA */
+  --surface: 255 255 255;
+  --raised: 242 244 247;      /* #F2F4F7 */
+  --sunken: 255 255 255;
+  --overlay: 15 17 21;
+
+  --line: 227 230 235;        /* #E3E6EB */
+  --line-strong: 205 210 218; /* #CDD2DA */
+
+  --fg: 15 17 21;             /* #0F1115 */
+  --fg-muted: 75 82 98;       /* #4B5262 ~7.8:1 on white */
+  --fg-subtle: 104 111 125;   /* #686F7D ~4.9:1 on white */
+
+  --accent: 14 116 144;       /* #0E7490 — white text passes AA */
+  --accent-hover: 11 95 119;
+  --accent-fg: 255 255 255;
+  --accent-text: 14 116 144;
+
+  --success: 22 101 52;      /* #166534 */
+  --warning: 146 64 14;      /* #92400E */
+  --danger: 185 28 28;       /* #B91C1C — text; buttons use danger-solid */
+  --danger-solid: 220 38 38;
+  --info: 29 78 216;         /* #1D4ED8 */
+
+  --ring: 14 116 144;
+
+  --shadow-sm: 0 1px 2px rgb(15 17 21 / 0.06);
+  --shadow-md: 0 4px 12px -2px rgb(15 17 21 / 0.08), 0 1px 2px rgb(15 17 21 / 0.04);
+  --shadow-lg: 0 24px 48px -12px rgb(15 17 21 / 0.18);
 }
 
 @layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
   body {
-    @apply bg-background font-sans antialiased min-h-screen overflow-x-hidden;
-    /* Framer dark aesthetic background with subtle radial glow */
-    background-image: radial-gradient(circle at 50% 0%, rgba(53, 200, 232, 0.04) 0%, transparent 40%),
-                      radial-gradient(circle at 80% 80%, rgba(40, 120, 240, 0.035) 0%, transparent 40%);
-    background-color: #070B14;
-    color: #F1F5F9;
-    transition: background-color 200ms ease, color 200ms ease;
+    @apply min-h-screen overflow-x-hidden bg-canvas font-sans text-fg antialiased;
+    font-feature-settings: 'ss01', 'cv11';
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+
+  h1, h2, h3, h4 {
+    @apply text-fg;
+    letter-spacing: -0.015em;
+  }
+
+  code, kbd, samp, pre {
+    @apply font-mono;
+  }
+
+  ::selection {
+    background-color: rgb(var(--accent) / 0.3);
+    color: rgb(var(--fg));
+  }
+
+  /* One visible, consistent keyboard focus indicator for every element.
+     !important so legacy `focus:outline-none` utilities cannot hide it. */
+  /* Programmatic focus targets (tabindex="-1": <main>, dialog panels) are excluded. */
+  :focus-visible:not([tabindex='-1']) {
+    outline: 2px solid rgb(var(--ring)) !important;
+    outline-offset: 2px;
+  }
+
+  [disabled],
+  [aria-disabled='true'] {
+    cursor: not-allowed;
+  }
+
+  /* Grids default to one shrinkable column. Without this, a grid with only
+     breakpoint columns (e.g. `lg:grid-cols-3`) sizes its implicit mobile column
+     to its widest unbreakable child and overflows small screens.
+     Any grid-cols-* utility still overrides this (utilities layer wins). */
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Long unbroken strings (URLs, repo links, codes) must wrap, not overflow.
+     Table cells are excluded: tables scroll inside TableContainer, and
+     `anywhere` would let columns collapse and split ordinary words. */
+  p, dd, li {
+    overflow-wrap: anywhere;
+  }
+  td :is(p, dd, li) {
+    overflow-wrap: break-word;
   }
 }
 
 @layer components {
-  /* Premium Glass Surface Treatment */
-  .glass-panel {
-    @apply bg-glass-100 backdrop-blur-xl border border-white/10 rounded-2xl shadow-glass transition-all duration-300;
+  /* Page container — use instead of ad-hoc max-w-6xl / max-w-7xl */
+  .container-page {
+    @apply mx-auto w-full max-w-page px-4 sm:px-6 lg:px-8;
   }
 
-  .glass-panel:hover {
-    @apply bg-glass-200 border-white/20 shadow-glass-hover;
-  }
-
-  /* Glass Button Variant */
-  .btn-glass {
-    @apply px-4 py-2 rounded-lg bg-[#111E31] border border-[#253247]
-           hover:bg-[#16263D] hover:border-[#35C8E8] transition-all duration-300 
-           text-sm font-medium tracking-wide text-[#F1F5F9] flex items-center justify-center gap-2;
-  }
-
-  /* Primary Deep Teal Button */
-  .btn-primary {
-    @apply px-4 py-2 rounded-lg bg-[#104E66] hover:bg-[#156382] transition-all duration-300
-           shadow-[0_2px_8px_rgba(16,78,102,0.35)] hover:shadow-[0_4px_14px_rgba(53,200,232,0.25)]
-           text-sm font-medium tracking-wide border border-[#35C8E8]/30 text-[#F1F5F9] flex items-center justify-center gap-2;
+  /* Small uppercase label for stat tiles, table headers and section eyebrows */
+  .eyebrow {
+    @apply text-xs font-medium uppercase tracking-[0.08em] text-fg-subtle;
   }
 }
 
-/* ==========================================================================
-   GLOBAL LIGHT MODE STYLING & TOKENS
-   Transforms dark theme into calm, modern, professional Light Mode:
-   - Page background: #F5F7FB
-   - Major panels/cards: #FFFFFF
-   - Secondary surfaces: #EEF2F7 / #F8FAFC
-   - Primary text: #172033
-   - Secondary text: #64748B
-   - Borders/dividers: #D8E0EB
-   - Primary action: Emerald / Teal accent preserved
-   ========================================================================== */
-
-html.light body {
-  background-color: #F5F7FB !important;
-  background-image: radial-gradient(circle at 50% 0%, rgba(16, 185, 129, 0.04) 0%, transparent 45%),
-                    radial-gradient(circle at 80% 80%, rgba(59, 130, 246, 0.03) 0%, transparent 45%) !important;
-  color: #172033 !important;
-}
-
-/* Canvas, Root Containers & Page Wrappers */
-html.light .bg-\[\#060a12\],
-html.light .bg-\[\#05050A\],
-html.light .bg-slate-950 {
-  background-color: #F5F7FB !important;
-}
-
-/* Major Panels, Header Bars, Navigation, Footers & Dialogs */
-html.light .bg-\[\#0c1424\],
-html.light .bg-\[\#0c1424\]\/95,
-html.light .bg-\[\#0d1526\],
-html.light .bg-slate-900,
-html.light .bg-slate-900\/60,
-html.light .bg-slate-900\/70,
-html.light .bg-slate-900\/80,
-html.light .bg-slate-900\/90,
-html.light .bg-slate-950\/85 {
-  background-color: #FFFFFF !important;
-}
-
-/* Secondary Surfaces, Insets, Nested Container Backgrounds */
-html.light .bg-\[\#080e1a\],
-html.light .bg-\[\#0A0A0F\],
-html.light .bg-\[\#0f172a\] {
-  background-color: #F8FAFC !important;
-}
-
-/* Sub-Cards, Inner Inset Panels, Table Header Rows, Accent Surface Pills */
-html.light .bg-\[\#121c32\],
-html.light .bg-\[\#162238\],
-html.light .bg-\[\#1a2744\],
-html.light .bg-\[\#1d2d4a\],
-html.light .bg-slate-800,
-html.light .bg-slate-800\/50 {
-  background-color: #EEF2F7 !important;
-}
-
-/* Interactive Hover Backgrounds */
-html.light .hover\:bg-slate-800:hover,
-html.light .hover\:bg-slate-700:hover,
-html.light .hover\:bg-\[\#121c32\]:hover,
-html.light .hover\:bg-\[\#162238\]:hover,
-html.light .hover\:bg-\[\#1a2744\]:hover {
-  background-color: #E2E8F0 !important;
-}
-
-/* Borders & Dividers */
-html.light .border-\[\#253247\],
-html.light .border-\[\#1c283c\],
-html.light .border-\[\#223044\],
-html.light .border-\[\#354866\],
-html.light .border-slate-800,
-html.light .border-slate-800\/60,
-html.light .border-slate-700,
-html.light .border-slate-900,
-html.light .border-white\/10,
-html.light .divide-\[\#1c283c\] > :not([hidden]) ~ :not([hidden]),
-html.light .divide-\[\#253247\] > :not([hidden]) ~ :not([hidden]),
-html.light .divide-slate-800 > :not([hidden]) ~ :not([hidden]) {
-  border-color: #D8E0EB !important;
-}
-
-html.light .hover\:border-slate-700:hover,
-html.light .hover\:border-slate-500:hover,
-html.light .hover\:border-\[\#354866\]:hover {
-  border-color: #CBD5E1 !important;
-}
-
-/* Typography Overrides */
-html.light .text-white,
-html.light .text-slate-100,
-html.light .text-slate-200 {
-  color: #172033 !important;
-}
-
-html.light .text-slate-300,
-html.light .text-slate-400 {
-  color: #64748B !important;
-}
-
-html.light .text-slate-500 {
-  color: #64748B !important;
-}
-
-html.light .text-slate-600,
-html.light .text-slate-700 {
-  color: #94A3B8 !important;
-}
-
-/* Form Controls (Inputs, Selects, Textareas) */
-html.light input:not([type="checkbox"]):not([type="radio"]),
-html.light select,
-html.light textarea {
-  background-color: #FFFFFF !important;
-  color: #172033 !important;
-  border-color: #D8E0EB !important;
-}
-
-html.light input::placeholder,
-html.light textarea::placeholder {
-  color: #94A3B8 !important;
-}
-
-html.light input:focus,
-html.light select:focus,
-html.light textarea:focus {
-  border-color: #10B981 !important;
-  box-shadow: 0 0 0 1px #10B981 !important;
-  outline: none !important;
-}
-
-html.light select option {
-  background-color: #FFFFFF !important;
-  color: #172033 !important;
-}
-
-/* Modal Backdrops (Keep dark translucent backdrop for strong focus) */
-html.light [class*="fixed inset-0"][class*="bg-black"],
-html.light [class*="fixed inset-0"][class*="bg-\[\#060a12\]"] {
-  background-color: rgba(15, 23, 42, 0.65) !important;
-}
-
-/* Preserve Solid Primary Action Buttons */
-html.light .bg-emerald-500,
-html.light .bg-emerald-400 {
-  background-color: #10B981 !important;
-  color: #020617 !important;
-}
-
-html.light .hover\:bg-emerald-400:hover {
-  background-color: #34D399 !important;
-}
-
-html.light .bg-emerald-500 *,
-html.light .bg-emerald-400 * {
-  color: #020617 !important;
-}
-
-/* Preserve Solid Danger Buttons & Badges */
-html.light .bg-rose-600,
-html.light .bg-rose-500 {
-  background-color: #E11D48 !important;
-  color: #FFFFFF !important;
-}
-
-html.light .bg-rose-600 *,
-html.light .bg-rose-500 * {
-  color: #FFFFFF !important;
-}
-
-/* Status Alert Tints & Badges */
-html.light .bg-emerald-950,
-html.light [class*="bg-emerald-950"] {
-  background-color: #ECFDF5 !important;
-  color: #047857 !important;
-  border-color: #A7F3D0 !important;
-}
-html.light .bg-emerald-950 *,
-html.light [class*="bg-emerald-950"] * {
-  color: #047857 !important;
-}
-
-html.light .bg-rose-950,
-html.light [class*="bg-rose-950"] {
-  background-color: #FFF1F2 !important;
-  color: #BE123C !important;
-  border-color: #FECDD3 !important;
-}
-html.light .bg-rose-950 *,
-html.light [class*="bg-rose-950"] * {
-  color: #BE123C !important;
-}
-
-html.light .bg-amber-950,
-html.light [class*="bg-amber-950"] {
-  background-color: #FFFBEB !important;
-  color: #B45309 !important;
-  border-color: #FDE68A !important;
-}
-html.light .bg-amber-950 *,
-html.light [class*="bg-amber-950"] * {
-  color: #B45309 !important;
-}
-
-html.light .bg-sky-950,
-html.light [class*="bg-sky-950"] {
-  background-color: #F0F9FF !important;
-  color: #0369A1 !important;
-  border-color: #BAE6FD !important;
-}
-html.light .bg-sky-950 *,
-html.light [class*="bg-sky-950"] * {
-  color: #0369A1 !important;
-}
-
-html.light .bg-purple-950,
-html.light [class*="bg-purple-950"] {
-  background-color: #FAF5FF !important;
-  color: #7E22CE !important;
-  border-color: #E9D5FF !important;
-}
-html.light .bg-purple-950 *,
-html.light [class*="bg-purple-950"] * {
-  color: #7E22CE !important;
-}
-
-/* Status Text Colors */
-html.light .text-emerald-400 {
-  color: #059669 !important;
-}
-
-html.light .text-rose-400,
-html.light .text-rose-300 {
-  color: #E11D48 !important;
-}
-
-html.light .text-amber-400 {
-  color: #D97706 !important;
-}
-
-html.light .text-sky-400 {
-  color: #0284C7 !important;
-}
-
-/* Glass Panels and Glass Buttons in Light Mode */
-html.light .glass-panel {
-  background-color: rgba(255, 255, 255, 0.85) !important;
-  border-color: #D8E0EB !important;
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05) !important;
-}
-
-html.light .btn-glass {
-  background-color: #FFFFFF !important;
-  border-color: #D8E0EB !important;
-  color: #172033 !important;
-}
-
-/* ==========================================================================
-   GLOBAL DARK MODE POLISH & TOKENS (FRAMER REFERENCE PALETTE)
-   Strictly scoped to html.dark and html:not(.light)
-   Palette:
-   - Main background: #070B14 (deep near-black navy)
-   - Surface / cards: #0F1B2D (dark navy blue)
-   - Elevated surfaces: #111E31
-   - Borders / dividers: #25364D
-   - Primary text: #F1F5F9
-   - Secondary text: #9AAAC0
-   - Muted text: #71839B
-   - Cyan accent: #35C8E8 (highlights & active states)
-   - Electric blue: #2878F0 (progress indicators)
-   - Primary buttons: #104E66 (deep teal-blue, hover: #156382)
-   - Input backgrounds: #0B1422
-   ========================================================================== */
-
-/* 1. Body & Canvas Overrides */
-html.dark body,
-html:not(.light) body {
-  background-color: #070B14 !important;
-  background-image: radial-gradient(circle at 50% 0%, rgba(53, 200, 232, 0.04) 0%, transparent 40%),
-                    radial-gradient(circle at 80% 80%, rgba(40, 120, 240, 0.035) 0%, transparent 40%) !important;
-  color: #F1F5F9 !important;
-}
-
-/* 2. Main Background / Page Wrappers */
-html.dark .bg-\[\#060a12\],
-html.dark .bg-\[\#05050A\],
-html.dark .bg-slate-950,
-html:not(.light) .bg-\[\#060a12\],
-html:not(.light) .bg-\[\#05050A\],
-html:not(.light) .bg-slate-950 {
-  background-color: #070B14 !important;
-}
-
-/* 3. Surface / Cards / Header / Footer / Panels */
-html.dark .bg-\[\#0c1424\],
-html.dark .bg-\[\#0c1424\]\/95,
-html.dark .bg-\[\#0d1526\],
-html.dark .bg-slate-900,
-html.dark .bg-slate-900\/40,
-html.dark .bg-slate-900\/50,
-html.dark .bg-slate-900\/60,
-html.dark .bg-slate-900\/70,
-html.dark .bg-slate-900\/80,
-html.dark .bg-slate-900\/90,
-html.dark .bg-slate-950\/85,
-html:not(.light) .bg-\[\#0c1424\],
-html:not(.light) .bg-\[\#0c1424\]\/95,
-html:not(.light) .bg-\[\#0d1526\],
-html:not(.light) .bg-slate-900,
-html:not(.light) .bg-slate-900\/40,
-html:not(.light) .bg-slate-900\/50,
-html:not(.light) .bg-slate-900\/60,
-html:not(.light) .bg-slate-900\/70,
-html:not(.light) .bg-slate-900\/80,
-html:not(.light) .bg-slate-900\/90,
-html:not(.light) .bg-slate-950\/85 {
-  background-color: #0F1B2D !important;
-}
-
-/* 4. Secondary Surfaces / Wells / Insets / Input Backgrounds */
-html.dark .bg-\[\#080e1a\],
-html.dark .bg-\[\#0A0A0F\],
-html.dark .bg-\[\#0f172a\],
-html:not(.light) .bg-\[\#080e1a\],
-html:not(.light) .bg-\[\#0A0A0F\],
-html:not(.light) .bg-\[\#0f172a\] {
-  background-color: #0B1422 !important;
-}
-
-/* 5. Elevated Surfaces / Inner Headers / Table Header Rows / Metric Pills */
-html.dark .bg-\[\#121c32\],
-html.dark .bg-\[\#162238\],
-html.dark .bg-\[\#1a2744\],
-html.dark .bg-\[\#1d2d4a\],
-html.dark .bg-slate-800,
-html.dark .bg-slate-800\/50,
-html:not(.light) .bg-\[\#121c32\],
-html:not(.light) .bg-\[\#162238\],
-html:not(.light) .bg-\[\#1a2744\],
-html:not(.light) .bg-\[\#1d2d4a\],
-html:not(.light) .bg-slate-800,
-html:not(.light) .bg-slate-800\/50 {
-  background-color: #111E31 !important;
-}
-
-/* 6. Interactive Hover States on Surfaces */
-html.dark .hover\:bg-slate-800:hover,
-html.dark .hover\:bg-slate-700:hover,
-html.dark .hover\:bg-\[\#121c32\]:hover,
-html.dark .hover\:bg-\[\#162238\]:hover,
-html.dark .hover\:bg-\[\#1a2744\]:hover,
-html:not(.light) .hover\:bg-slate-800:hover,
-html:not(.light) .hover\:bg-slate-700:hover,
-html:not(.light) .hover\:bg-\[\#121c32\]:hover,
-html:not(.light) .hover\:bg-\[\#162238\]:hover,
-html:not(.light) .hover\:bg-\[\#1a2744\]:hover {
-  background-color: #16263D !important;
-}
-
-/* 7. Borders & Dividers */
-html.dark .border-\[\#253247\],
-html.dark .border-\[\#1c283c\],
-html.dark .border-\[\#223044\],
-html.dark .border-\[\#354866\],
-html.dark .border-slate-800,
-html.dark .border-slate-800\/60,
-html.dark .border-slate-700,
-html.dark .border-slate-900,
-html.dark .border-white\/10,
-html.dark .border-white\/5,
-html.dark .divide-\[\#1c283c\] > :not([hidden]) ~ :not([hidden]),
-html.dark .divide-\[\#253247\] > :not([hidden]) ~ :not([hidden]),
-html.dark .divide-slate-800 > :not([hidden]) ~ :not([hidden]),
-html:not(.light) .border-\[\#253247\],
-html:not(.light) .border-\[\#1c283c\],
-html:not(.light) .border-\[\#223044\],
-html:not(.light) .border-\[\#354866\],
-html:not(.light) .border-slate-800,
-html:not(.light) .border-slate-800\/60,
-html:not(.light) .border-slate-700,
-html:not(.light) .border-slate-900,
-html:not(.light) .border-white\/10,
-html:not(.light) .border-white\/5,
-html:not(.light) .divide-\[\#1c283c\] > :not([hidden]) ~ :not([hidden]),
-html:not(.light) .divide-\[\#253247\] > :not([hidden]) ~ :not([hidden]),
-html:not(.light) .divide-slate-800 > :not([hidden]) ~ :not([hidden]) {
-  border-color: #25364D !important;
-}
-
-html.dark .hover\:border-slate-700:hover,
-html.dark .hover\:border-slate-500:hover,
-html.dark .hover\:border-\[\#354866\]:hover,
-html:not(.light) .hover\:border-slate-700:hover,
-html:not(.light) .hover\:border-slate-500:hover,
-html:not(.light) .hover\:border-\[\#354866\]:hover {
-  border-color: #35C8E8 !important;
-}
-
-/* 8. Typography Overrides */
-html.dark .text-white,
-html.dark .text-slate-100,
-html.dark .text-slate-200,
-html:not(.light) .text-white,
-html:not(.light) .text-slate-100,
-html:not(.light) .text-slate-200 {
-  color: #F1F5F9 !important;
-}
-
-html.dark .text-slate-300,
-html.dark .text-slate-400,
-html:not(.light) .text-slate-300,
-html:not(.light) .text-slate-400 {
-  color: #9AAAC0 !important;
-}
-
-html.dark .text-slate-500,
-html.dark .text-slate-600,
-html.dark .text-slate-700,
-html:not(.light) .text-slate-500,
-html:not(.light) .text-slate-600,
-html:not(.light) .text-slate-700 {
-  color: #71839B !important;
-}
-
-/* 9. Form Controls (Inputs, Selects, Textareas) */
-html.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-html.dark select,
-html.dark textarea,
-html:not(.light) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-html:not(.light) select,
-html:not(.light) textarea {
-  background-color: #0B1422 !important;
-  color: #F1F5F9 !important;
-  border-color: #25364D !important;
-}
-
-html.dark input::placeholder,
-html.dark textarea::placeholder,
-html:not(.light) input::placeholder,
-html:not(.light) textarea::placeholder {
-  color: #71839B !important;
-}
-
-html.dark input:focus,
-html.dark select:focus,
-html.dark textarea:focus,
-html:not(.light) input:focus,
-html:not(.light) select:focus,
-html:not(.light) textarea:focus {
-  border-color: #35C8E8 !important;
-  box-shadow: 0 0 0 1px #35C8E8 !important;
-  outline: none !important;
-}
-
-html.dark select option,
-html:not(.light) select option {
-  background-color: #0F1B2D !important;
-  color: #F1F5F9 !important;
-}
-
-/* 10. Primary Action Buttons (deep teal-blue #104E66) */
-html.dark .bg-emerald-500,
-html.dark .bg-emerald-400,
-html.dark .btn-primary,
-html:not(.light) .bg-emerald-500,
-html:not(.light) .bg-emerald-400,
-html:not(.light) .btn-primary {
-  background-color: #104E66 !important;
-  background-image: none !important;
-  color: #F1F5F9 !important;
-  border: 1px solid rgba(53, 200, 232, 0.3) !important;
-  box-shadow: 0 2px 8px rgba(16, 78, 102, 0.35) !important;
-}
-
-html.dark .hover\:bg-emerald-400:hover,
-html.dark .btn-primary:hover,
-html:not(.light) .hover\:bg-emerald-400:hover,
-html:not(.light) .btn-primary:hover {
-  background-color: #156382 !important;
-  border-color: #35C8E8 !important;
-  box-shadow: 0 4px 14px rgba(53, 200, 232, 0.25) !important;
-}
-
-html.dark .bg-emerald-500 *,
-html.dark .bg-emerald-400 *,
-html.dark .btn-primary *,
-html:not(.light) .bg-emerald-500 *,
-html:not(.light) .bg-emerald-400 *,
-html:not(.light) .btn-primary * {
-  color: #F1F5F9 !important;
-}
-
-/* 11. Cyan Accent (#35C8E8) for Highlights & Active States */
-html.dark .text-emerald-400,
-html.dark .text-emerald-300,
-html:not(.light) .text-emerald-400,
-html:not(.light) .text-emerald-300 {
-  color: #35C8E8 !important;
-}
-
-html.dark .border-emerald-500,
-html.dark .border-emerald-500\/30,
-html.dark .border-emerald-500\/40,
-html.dark .border-emerald-400,
-html:not(.light) .border-emerald-500,
-html:not(.light) .border-emerald-500\/30,
-html:not(.light) .border-emerald-500\/40,
-html:not(.light) .border-emerald-400 {
-  border-color: rgba(53, 200, 232, 0.35) !important;
-}
-
-html.dark .bg-emerald-500\/10,
-html.dark .bg-emerald-500\/20,
-html.dark .bg-emerald-950,
-html.dark [class*="bg-emerald-950"],
-html:not(.light) .bg-emerald-500\/10,
-html:not(.light) .bg-emerald-500\/20,
-html:not(.light) .bg-emerald-950,
-html:not(.light) [class*="bg-emerald-950"] {
-  background-color: rgba(53, 200, 232, 0.12) !important;
-  color: #35C8E8 !important;
-  border-color: rgba(53, 200, 232, 0.3) !important;
-}
-
-html.dark .bg-emerald-950 *,
-html.dark [class*="bg-emerald-950"] *,
-html:not(.light) .bg-emerald-950 *,
-html:not(.light) [class*="bg-emerald-950"] * {
-  color: #35C8E8 !important;
-}
-
-/* 12. Electric Blue (#2878F0) for Progress Indicators & Sliders */
-html.dark input[type="range"],
-html:not(.light) input[type="range"] {
-  accent-color: #2878F0 !important;
-}
-
-html.dark progress,
-html:not(.light) progress {
-  accent-color: #2878F0 !important;
-}
-
-.progress-bar-fill {
-  background-color: #2878F0 !important;
-}
-html.light .progress-bar-fill {
-  background-color: #3B82F6 !important;
-}
-
-/* 13. Glass Panels & Buttons */
-html.dark .glass-panel,
-html:not(.light) .glass-panel {
-  background-color: rgba(15, 27, 45, 0.85) !important;
-  border-color: #25364D !important;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4) !important;
-}
-
-html.dark .btn-glass,
-html:not(.light) .btn-glass {
-  background-color: #111E31 !important;
-  border-color: #25364D !important;
-  color: #F1F5F9 !important;
-}
-
-html.dark .btn-glass:hover,
-html:not(.light) .btn-glass:hover {
-  background-color: #16263D !important;
-  border-color: #35C8E8 !important;
-}
-
-/* 14. Selection Highlight */
-html.dark ::selection,
-html:not(.light) ::selection {
-  background-color: #35C8E8 !important;
-  color: #070B14 !important;
-}
-
-/* 15. Modal Backdrops */
-html.dark [class*="fixed inset-0"][class*="bg-black"],
-html.dark [class*="fixed inset-0"][class*="bg-\[\#060a12\]"],
-html:not(.light) [class*="fixed inset-0"][class*="bg-black"],
-html:not(.light) [class*="fixed inset-0"][class*="bg-\[\#060a12\]"] {
-  background-color: rgba(7, 11, 20, 0.82) !important;
-}
-
-/* 16. Status Tints (Amber, Rose, Sky) in Dark Mode */
-html.dark .bg-amber-950,
-html.dark [class*="bg-amber-950"],
-html:not(.light) .bg-amber-950,
-html:not(.light) [class*="bg-amber-950"] {
-  background-color: rgba(245, 158, 11, 0.12) !important;
-  border-color: rgba(245, 158, 11, 0.3) !important;
-  color: #FBBF24 !important;
-}
-
-html.dark .bg-rose-950,
-html.dark [class*="bg-rose-950"],
-html:not(.light) .bg-rose-950,
-html:not(.light) [class*="bg-rose-950"] {
-  background-color: rgba(244, 63, 94, 0.12) !important;
-  border-color: rgba(244, 63, 94, 0.3) !important;
-  color: #FB7185 !important;
-}
-
-html.dark .bg-sky-950,
-html.dark [class*="bg-sky-950"],
-html:not(.light) .bg-sky-950,
-html:not(.light) [class*="bg-sky-950"] {
-  background-color: rgba(40, 120, 240, 0.12) !important;
-  border-color: rgba(40, 120, 240, 0.3) !important;
-  color: #60A5FA !important;
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

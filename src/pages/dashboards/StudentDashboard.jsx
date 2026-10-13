@@ -1,7 +1,50 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import {
+  Award,
+  Bell,
+  CalendarDays,
+  Check,
+  ClipboardCheck,
+  Compass,
+  Copy,
+  FolderOpen,
+  Lock,
+  LockOpen,
+  Paperclip,
+  Printer,
+  Rocket,
+  Trophy,
+  Upload,
+  UserPlus,
+  Users,
+  X
+} from 'lucide-react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
-import { Icons } from '../../components/Icons';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  DescriptionList,
+  Dialog,
+  EmptyState,
+  Field,
+  Input,
+  PageHeader,
+  Select,
+  TabPanel,
+  TableContainer,
+  Tabs,
+  Textarea,
+  cn,
+  stageTone,
+  tableClasses
+} from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { getStoredHackathons } from '../../utils/hackathonService';
 import { getUserRegistrations, registerForHackathon } from '../../utils/registrationService';
@@ -32,12 +75,66 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 }
 
+const TAB_VALUES = ["workspace", "roster", "results", "certificates", "notifications", "discover"];
+
+const NOTICE_TONES = { success: "success", info: "info", error: "danger" };
+
+// Feedback strings from the handlers carry a leading check glyph; strip it for display.
+function noticeText(text) {
+  return String(text || "").replace(/^✓\s*/, "");
+}
+
+const SCREENING_CHECKS = [
+  { key: "gitFreshness", label: "Git freshness" },
+  { key: "endpointsLive", label: "HTTPS endpoint live" },
+  { key: "envConfigured", label: ".env.example documentation" },
+  { key: "licenseMIT", label: "Open source license" }
+];
+
+const RUBRIC_CRITERIA = [
+  { key: "architecture", label: "Architecture", max: 30 },
+  { key: "usability", label: "Usability & UX", max: 25 },
+  { key: "innovation", label: "Innovation", max: 25 },
+  { key: "completeness", label: "Completeness", max: 20 }
+];
+
+function screeningTone(status) {
+  if (status === "Shortlisted") return "success";
+  if (status === "Rejected") return "danger";
+  return "warning";
+}
+
+/** Small labelled sub-section used inside cards. */
+function FormSection({ title, description, actions, children, className }) {
+  return (
+    <section className={cn("space-y-4", className)}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-fg">{title}</h3>
+          {description && <p className="mt-0.5 text-sm text-fg-muted">{description}</p>}
+        </div>
+        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 export default function StudentDashboard({ initialTab = "workspace" }) {
   const { user } = useAuth();
   const userEmail = user?.email || "";
 
-  // Active dashboard tab
-  const [activeTab, setActiveTab] = useState(initialTab);
+  // Active dashboard tab (synced to ?tab=, falls back to initialTab)
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const activeTab = TAB_VALUES.includes(tabParam) ? tabParam : initialTab;
+  const setActiveTab = (next) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      params.set("tab", next);
+      return params;
+    });
+  };
 
   // Invite code copy feedback
   const [copied, setCopied] = useState(false);
@@ -183,7 +280,6 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
         type: "success",
         text: `✓ Created team "${res.team.name}"! Unique Invite Code: ${res.team.code}`
       });
-      setIsCreatingTeam(false);
       setNewTeamName("");
       setRefreshKey((k) => k + 1);
     } else {
@@ -403,1233 +499,1029 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     setTimeout(() => setSubmissionNotice(null), 6000);
   };
 
+  const readOnlyForm = isFinalized || !isLeader;
+
+  const tabItems = [
+    {
+      value: "workspace",
+      label: "Project submission",
+      icon: <Rocket aria-hidden="true" />,
+      badge: isFinalized ? <Badge tone="success">Submitted</Badge> : null
+    },
+    {
+      value: "roster",
+      label: "Team & roster",
+      icon: <Users aria-hidden="true" />,
+      badge: currentTeam ? <Badge className="tabular-nums">{currentTeam.capacity}</Badge> : null
+    },
+    {
+      value: "results",
+      label: "Screening & judging",
+      icon: <ClipboardCheck aria-hidden="true" />,
+      badge: teamSubmission?.screeningStatus ? (
+        <Badge tone={screeningTone(teamSubmission.screeningStatus)}>{teamSubmission.screeningStatus}</Badge>
+      ) : null
+    },
+    {
+      value: "certificates",
+      label: "Certificates",
+      icon: <Award aria-hidden="true" />,
+      badge: certificates.length > 0 ? (
+        <Badge tone="accent" className="tabular-nums">{certificates.length}</Badge>
+      ) : null
+    },
+    {
+      value: "notifications",
+      label: "Notifications",
+      icon: <Bell aria-hidden="true" />,
+      badge: unreadNotifsCount > 0 ? (
+        <Badge tone="danger" className="tabular-nums" aria-label={`${unreadNotifsCount} unread`}>
+          {unreadNotifsCount}
+        </Badge>
+      ) : null
+    },
+    {
+      value: "discover",
+      label: "Discover",
+      icon: <Compass aria-hidden="true" />
+    }
+  ];
+
+  const copyButtonLabel = copied ? "Copied" : "Copy code";
+
   return (
     <DashboardLayout
       portalTitle={isLeader ? "Team Leader Portal" : "Student Participant Portal"}
       roleBadgeText={isLeader ? "TEAM LEADER" : "STUDENT PARTICIPANT"}
     >
-      <div className="space-y-6">
+      <div className="space-y-8">
 
-        {/* 1. COMPACT HEADER */}
-        <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-5 shadow-sm">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs font-mono text-emerald-400 font-semibold uppercase tracking-wider">
-                  {isLeader ? "TEAM LEADER CHAMBER" : "PARTICIPANT DASHBOARD"}
-                </span>
-                <span className="text-slate-600">•</span>
-                <span className="text-xs text-slate-400 font-mono">
-                  {user?.university || userEmail || "Active Participant"}
-                </span>
-              </div>
-              <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-                Welcome back, {user?.fullName || "Developer"}
-              </h1>
+        {/* HEADER */}
+        <PageHeader
+          eyebrow={isLeader ? "Team leader workspace" : "Participant workspace"}
+          title={`Welcome back, ${user?.fullName || "Developer"}`}
+          description="Register for hackathons, build your team, submit your project and follow it through screening, judging and certificates."
+          meta={
+            <>
+              <span>{user?.university || userEmail || "Active Participant"}</span>
+              <span className="flex items-center gap-1.5">
+                <span className="tabular-nums font-medium text-fg">{registeredHackathons.length}</span>
+                {registeredHackathons.length === 1 ? "registration" : "registrations"}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Users className="h-4 w-4" aria-hidden="true" />
+                <span className="font-medium text-fg">{currentTeam ? currentTeam.name : "No team yet"}</span>
+              </span>
+              <Badge tone={isLeader ? "accent" : "neutral"}>{isLeader ? "Team leader" : "Member"}</Badge>
+            </>
+          }
+          actions={
+            activeTab !== "discover" ? (
+              <Button variant="secondary" onClick={() => setActiveTab("discover")}>
+                <Compass aria-hidden="true" />
+                Discover hackathons
+              </Button>
+            ) : null
+          }
+        />
+
+        <div className="space-y-4">
+          {/* Multi-hackathon context switcher */}
+          {registeredHackathons.length > 1 && (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <Field label="Hackathon" hint="Submission, team and results below are for this hackathon." className="sm:w-96">
+                <Select
+                  value={activeSprint?.id || ""}
+                  onChange={(e) => setSelectedHackathonId(e.target.value)}
+                >
+                  {registeredHackathons.map((h) => (
+                    <option key={h.id} value={h.id}>{h.title}</option>
+                  ))}
+                </Select>
+              </Field>
             </div>
+          )}
 
-            {/* Quick Status Bar */}
-            <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs font-mono text-slate-400 bg-[#080e1a] px-3.5 py-2 rounded-lg border border-[#1c283c]">
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-500">Sprints:</span>
-                <span className="text-white font-medium">{registeredHackathons.length}</span>
-              </div>
-              <span className="text-slate-700 hidden sm:inline">•</span>
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-500">Squad:</span>
-                <span className="text-emerald-400 font-medium">
-                  {currentTeam ? currentTeam.name : "No Team Yet"}
-                </span>
-              </div>
-              <span className="text-slate-700 hidden sm:inline">•</span>
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-500">Role:</span>
-                <span className={isLeader ? "text-emerald-400 font-bold" : "text-slate-300"}>
-                  {isLeader ? "Team Leader" : "Member"}
-                </span>
-              </div>
-            </div>
-          </div>
-        </section>
+          <Tabs
+            items={tabItems}
+            value={activeTab}
+            onValueChange={setActiveTab}
+            label="Participant dashboard sections"
+            idPrefix="student"
+          />
 
-        {/* 2. NAVIGATION TAB PILLS */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-[#253247] pb-3">
-          <button
-            onClick={() => setActiveTab("workspace")}
-            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-              activeTab === "workspace"
-                ? "bg-emerald-500 text-slate-950 font-bold shadow-sm"
-                : "bg-[#0d1526] border border-[#253247] text-slate-300 hover:text-white hover:border-slate-500"
-            }`}
-          >
-            <span>🚀 Project Submission</span>
-            {isFinalized && <span className="w-2 h-2 rounded-full bg-rose-400"></span>}
-          </button>
-
-          <button
-            onClick={() => setActiveTab("roster")}
-            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-              activeTab === "roster"
-                ? "bg-emerald-500 text-slate-950 font-bold shadow-sm"
-                : "bg-[#0d1526] border border-[#253247] text-slate-300 hover:text-white hover:border-slate-500"
-            }`}
-          >
-            <span>👥 Squad & Roster</span>
-            {currentTeam && <span className="font-mono text-[10px] opacity-80">({currentTeam.capacity})</span>}
-          </button>
-
-          <button
-            onClick={() => setActiveTab("results")}
-            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-              activeTab === "results"
-                ? "bg-emerald-500 text-slate-950 font-bold shadow-sm"
-                : "bg-[#0d1526] border border-[#253247] text-slate-300 hover:text-white hover:border-slate-500"
-            }`}
-          >
-            <span>📊 Screening & Judging</span>
-            {teamSubmission?.screeningStatus && (
-              <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono ${
-                teamSubmission.screeningStatus === "Shortlisted" ? "bg-emerald-950 text-emerald-400 border border-emerald-500/40" : "bg-slate-800 text-slate-400"
-              }`}>
-                {teamSubmission.screeningStatus}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveTab("certificates")}
-            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-              activeTab === "certificates"
-                ? "bg-emerald-500 text-slate-950 font-bold shadow-sm"
-                : "bg-[#0d1526] border border-[#253247] text-slate-300 hover:text-white hover:border-slate-500"
-            }`}
-          >
-            <span>🎓 Certificates</span>
-            {certificates.length > 0 && (
-              <span className="px-1.5 py-0.2 rounded bg-amber-400 text-slate-950 font-bold text-[10px]">
-                {certificates.length}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveTab("notifications")}
-            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-              activeTab === "notifications"
-                ? "bg-emerald-500 text-slate-950 font-bold shadow-sm"
-                : "bg-[#0d1526] border border-[#253247] text-slate-300 hover:text-white hover:border-slate-500"
-            }`}
-          >
-            <span>🔔 Notifications</span>
-            {unreadNotifsCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded bg-rose-500 text-white font-bold text-[10px]">
-                {unreadNotifsCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveTab("discover")}
-            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-              activeTab === "discover"
-                ? "bg-emerald-500 text-slate-950 font-bold shadow-sm"
-                : "bg-[#0d1526] border border-[#253247] text-slate-300 hover:text-white hover:border-slate-500"
-            }`}
-          >
-            <span>🌐 Discover Sprints</span>
-          </button>
+          {/* Global feedback notice */}
+          {submissionNotice && (
+            <Alert tone={NOTICE_TONES[submissionNotice.type] || "info"}>
+              {noticeText(submissionNotice.text)}
+            </Alert>
+          )}
         </div>
-
-        {/* Multi-Hackathon View Switcher */}
-        {registeredHackathons.length > 1 && (
-          <div className="flex items-center gap-2 p-2.5 bg-[#0d1526] border border-[#253247] rounded-xl overflow-x-auto text-xs shadow-sm">
-            <span className="text-slate-400 font-mono text-[11px] px-2 shrink-0">Selected Sprint Context:</span>
-            {registeredHackathons.map((h) => (
-              <button
-                key={h.id}
-                onClick={() => setSelectedHackathonId(h.id)}
-                className={`px-3 py-1.5 rounded-lg font-medium transition-colors shrink-0 ${
-                  activeSprint?.id === h.id
-                    ? "bg-emerald-500 text-slate-950 font-bold"
-                    : "bg-[#080e1a] text-slate-300 hover:text-white border border-[#1c283c]"
-                }`}
-              >
-                {h.title}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Global Feedback Notice */}
-        {submissionNotice && (
-          <div
-            className={`p-3 rounded-lg text-xs leading-relaxed ${
-              submissionNotice.type === "success"
-                ? "bg-emerald-950/40 border border-emerald-800/50 text-emerald-300"
-                : submissionNotice.type === "info"
-                ? "bg-sky-950/40 border border-sky-800/50 text-sky-300"
-                : "bg-rose-950/40 border border-rose-800/50 text-rose-300"
-            }`}
-          >
-            {submissionNotice.text}
-          </div>
-        )}
 
         {/* ========================================================= */}
         {/* TAB 1: WORKSPACE & PROJECT SUBMISSION */}
         {/* ========================================================= */}
-        {activeTab === "workspace" && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Left Col (7 cols): Primary Submission Workspace */}
-            <div className="lg:col-span-7 space-y-6">
-              <section className="bg-[#0d1526] border border-[#253247] rounded-xl overflow-hidden shadow-sm">
-                <div className="px-5 py-4 border-b border-[#253247] flex items-center justify-between bg-[#121c32]">
-                  <div>
-                    <h2 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
-                      PROJECT SUBMISSION
-                    </h2>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      {activeSprint
-                        ? `Deliverables for ${activeSprint.title}${currentTeam ? ` • Squad: ${currentTeam.name}` : ''}`
-                        : "Select a sprint to submit"}
+        <TabPanel value="workspace" activeValue={activeTab} idPrefix="student" className="focus:outline-none">
+          <div className="grid gap-6 lg:grid-cols-3">
+            {/* Primary submission workspace */}
+            <Card className="lg:col-span-2">
+              <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <CardTitle as="h2">Project submission</CardTitle>
+                  <CardDescription>
+                    {activeSprint
+                      ? `Deliverables for ${activeSprint.title}${currentTeam ? ` · Team ${currentTeam.name}` : ''}`
+                      : "Select a hackathon to submit"}
+                  </CardDescription>
+                  {activeSprint && (
+                    <p className="flex items-center gap-1.5 pt-1 text-xs text-fg-subtle">
+                      <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
+                      Deadline: <span className="font-medium text-fg-muted">{activeSprint.deadline || "TBD"}</span>
                     </p>
-                  </div>
-                  {currentTeam && (
-                    <span
-                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                        isFinalized
-                          ? "bg-rose-950/80 border border-rose-500/50 text-rose-300"
-                          : "bg-amber-950/70 border border-amber-500/50 text-amber-300"
-                      }`}
-                    >
-                      {isFinalized ? "SUBMITTED — LOCKED" : "DRAFT — NOT SUBMITTED"}
-                    </span>
                   )}
                 </div>
+                {currentTeam && (
+                  <Badge tone={isFinalized ? "success" : "warning"} dot>
+                    {isFinalized ? "Submitted · locked" : "Draft · not submitted"}
+                  </Badge>
+                )}
+              </CardHeader>
 
-                <div className="p-5 space-y-5">
-                  {!activeSprint ? (
-                    <div className="py-8 text-center text-xs text-slate-400">
-                      Please select or register for a hackathon to manage project deliverables.
-                    </div>
-                  ) : !currentTeam ? (
-                    <div className="py-6 px-4 bg-[#080e1a] border border-dashed border-[#253247] rounded-xl space-y-2 text-center">
-                      <span className="text-xs font-bold text-amber-300 font-mono block uppercase">
-                        Squad Required for Project Submission
-                      </span>
-                      <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
-                        Deliverables belong to a team. Create a new squad or enter an invite code in the Squad & Roster tab.
-                      </p>
-                      <button
-                        onClick={() => setActiveTab("roster")}
-                        className="mt-2 px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-lg transition-colors inline-block"
-                      >
-                        Go to Squad Management →
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      {/* Context Status Banner */}
-                      {isFinalized ? (
-                        <div className="px-3.5 py-2.5 bg-emerald-950/30 border-l-2 border-emerald-500 rounded-r-lg flex items-center justify-between text-xs text-emerald-300">
-                          <div className="flex items-center gap-2">
-                            <span>🔒</span>
-                            <span>Deliverables finalized and locked for Screening Committee review.</span>
-                          </div>
-                          <span className="font-mono text-[10px] text-slate-400">
-                            {teamSubmission?.finalizedAt ? new Date(teamSubmission.finalizedAt).toLocaleDateString() : 'Locked'}
-                          </span>
-                        </div>
-                      ) : !isLeader ? (
-                        <div className="px-3.5 py-2.5 bg-amber-950/20 border-l-2 border-amber-500 rounded-r-lg text-xs text-amber-300">
-                          ℹ️ You are a squad member. Only Team Leader <span className="font-bold">{currentTeam.lead}</span> can edit and freeze deliverables.
-                        </div>
-                      ) : null}
+              <CardContent className="space-y-6">
+                {!activeSprint ? (
+                  <EmptyState
+                    icon={FolderOpen}
+                    title="No hackathon selected"
+                    description="Please select or register for a hackathon to manage project deliverables."
+                    action={
+                      <Button onClick={() => setActiveTab("discover")}>
+                        <Compass aria-hidden="true" />
+                        Discover hackathons
+                      </Button>
+                    }
+                  />
+                ) : !currentTeam ? (
+                  <EmptyState
+                    icon={Users}
+                    title="A team is required to submit"
+                    description="Deliverables belong to a team. Create a new team or enter an invite code in the Team & roster tab."
+                    action={
+                      <Button onClick={() => setActiveTab("roster")}>
+                        Go to team management
+                      </Button>
+                    }
+                  />
+                ) : (
+                  <>
+                    {isFinalized ? (
+                      <Alert tone="success" title="Submission finalized and locked">
+                        Deliverables are locked for Screening Committee review
+                        {teamSubmission?.finalizedAt
+                          ? ` (finalized ${new Date(teamSubmission.finalizedAt).toLocaleDateString()}).`
+                          : "."}{" "}
+                        Reopening requires an admin request.
+                      </Alert>
+                    ) : !isLeader ? (
+                      <Alert tone="info" title="Read-only access">
+                        You are a team member. Only team leader{" "}
+                        <span className="font-medium text-fg">{currentTeam.lead}</span> can edit and finalize deliverables.
+                      </Alert>
+                    ) : null}
 
-                      <form onSubmit={handleSaveSubmission} className="space-y-4 text-xs">
-                        {/* Title */}
-                        <div>
-                          <label className="text-slate-300 font-semibold block mb-1">
-                            Project Title *
-                          </label>
-                          <input
+                    <form onSubmit={handleSaveSubmission} className="space-y-6">
+                      <FormSection title="Project details">
+                        <Field label="Project title" required>
+                          <Input
                             type="text"
-                            disabled={isFinalized || !isLeader}
+                            required={false}
+                            disabled={readOnlyForm}
                             value={formValues.projectTitle}
                             onChange={(e) => updateFormField("projectTitle", e.target.value)}
                             placeholder="e.g. ResilientQueue Engine"
-                            className="w-full bg-[#080e1a] border border-[#223044] rounded-lg p-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed"
                           />
-                        </div>
-
-                        {/* Description */}
-                        <div>
-                          <label className="text-slate-300 font-semibold block mb-1">
-                            Elevator Pitch / Summary
-                          </label>
-                          <textarea
-                            rows={3}
-                            disabled={isFinalized || !isLeader}
+                        </Field>
+                        <Field label="Elevator pitch / summary" hint="Describe the problem, architectural highlights and tech stack.">
+                          <Textarea
+                            rows={4}
+                            disabled={readOnlyForm}
                             value={formValues.projectDescription}
                             onChange={(e) => updateFormField("projectDescription", e.target.value)}
-                            placeholder="Describe the problem, architectural highlights, and tech stack..."
-                            className="w-full bg-[#080e1a] border border-[#223044] rounded-lg p-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed"
+                            placeholder="What does it do and how is it built?"
                           />
-                        </div>
+                        </Field>
+                      </FormSection>
 
-                        {/* URL Row */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div>
-                            <label className="text-slate-300 font-semibold block mb-1">
-                              Repository URL *
-                            </label>
-                            <input
+                      <FormSection title="Links" className="border-t border-line pt-6">
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <Field label="Repository URL" required>
+                            <Input
                               type="url"
-                              disabled={isFinalized || !isLeader}
+                              required={false}
+                              disabled={readOnlyForm}
                               value={formValues.repositoryUrl}
                               onChange={(e) => updateFormField("repositoryUrl", e.target.value)}
                               placeholder="https://github.com/org/repo"
-                              className="w-full bg-[#080e1a] border border-[#223044] rounded-lg p-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed font-mono text-[11px]"
+                              className="font-mono"
                             />
-                          </div>
-
-                          <div>
-                            <label className="text-slate-300 font-semibold block mb-1">
-                              Live Demo URL
-                            </label>
-                            <input
+                          </Field>
+                          <Field label="Live demo URL">
+                            <Input
                               type="url"
-                              disabled={isFinalized || !isLeader}
+                              disabled={readOnlyForm}
                               value={formValues.liveDemoUrl}
                               onChange={(e) => updateFormField("liveDemoUrl", e.target.value)}
                               placeholder="https://demo.app"
-                              className="w-full bg-[#080e1a] border border-[#223044] rounded-lg p-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed font-mono text-[11px]"
+                              className="font-mono"
+                            />
+                          </Field>
+                        </div>
+                      </FormSection>
+
+                      <FormSection
+                        title="Documentation & files"
+                        description="System architecture PDFs, whitepapers or pitch decks (staged for AWS S3)."
+                        className="border-t border-line pt-6"
+                      >
+                        {isLeader && !isFinalized && (
+                          <div className="flex flex-col gap-3 rounded-lg bg-raised/50 p-3 sm:flex-row sm:items-end">
+                            <Field label="File category" className="sm:flex-1">
+                              <Select
+                                value={selectedFileCategory}
+                                onChange={(e) => setSelectedFileCategory(e.target.value)}
+                              >
+                                <option value="System Documentation">System Documentation</option>
+                                <option value="Presentation / Pitch Deck">Pitch Deck</option>
+                                <option value="Architecture Diagram">Architecture</option>
+                              </Select>
+                            </Field>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="ghost"
+                                onClick={() => handleAddSampleFile("Architecture_Design_v2.pdf", selectedFileCategory, 1850000)}
+                              >
+                                Add sample
+                              </Button>
+                              <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>
+                                <Upload aria-hidden="true" />
+                                Upload file
+                              </Button>
+                            </div>
+                            <input
+                              type="file"
+                              ref={fileInputRef}
+                              onChange={handleFileUpload}
+                              className="hidden"
+                              accept=".pdf,.png,.jpg,.jpeg,.zip"
                             />
                           </div>
-                        </div>
-
-                        {/* S3-Ready Upload Section */}
-                        <div className="p-3.5 bg-[#080e1a] border border-[#1c283c] rounded-lg space-y-3">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <span className="text-[11px] font-mono text-slate-300 font-semibold uppercase block">
-                                Deliverable Documentation & Files (AWS S3-Ready)
-                              </span>
-                              <span className="text-[10px] text-slate-500">
-                                System architecture PDFs, whitepapers, or pitch decks
-                              </span>
-                            </div>
-
-                            {isLeader && !isFinalized && (
-                              <div className="flex items-center gap-1.5">
-                                <select
-                                  value={selectedFileCategory}
-                                  onChange={(e) => setSelectedFileCategory(e.target.value)}
-                                  className="bg-[#121c32] border border-[#253247] rounded px-2 py-1 text-[10px] text-slate-300 focus:outline-none"
-                                >
-                                  <option value="System Documentation">System Documentation</option>
-                                  <option value="Presentation / Pitch Deck">Pitch Deck</option>
-                                  <option value="Architecture Diagram">Architecture</option>
-                                </select>
-                                <button
-                                  type="button"
-                                  onClick={() => handleAddSampleFile("Architecture_Design_v2.pdf", selectedFileCategory, 1850000)}
-                                  className="px-2 py-1 rounded bg-[#121c32] border border-[#253247] text-[10px] text-slate-300 hover:text-white"
-                                >
-                                  + Sample
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => fileInputRef.current?.click()}
-                                  className="px-2.5 py-1 bg-emerald-950 border border-emerald-500/40 text-emerald-400 rounded text-[10px] font-semibold hover:bg-emerald-900/60"
-                                >
-                                  Upload
-                                </button>
-                                <input
-                                  type="file"
-                                  ref={fileInputRef}
-                                  onChange={handleFileUpload}
-                                  className="hidden"
-                                  accept=".pdf,.png,.jpg,.jpeg,.zip"
-                                />
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Staged Files List */}
-                          <div className="space-y-1.5">
-                            {formValues.submissionFiles && formValues.submissionFiles.length > 0 ? (
-                              formValues.submissionFiles.map((file) => (
-                                <div
-                                  key={file.id}
-                                  className="p-2 rounded bg-[#0d1526] border border-[#1c283c] flex items-center justify-between text-xs"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-mono text-[10px] text-emerald-400 font-bold px-1.5 py-0.5 rounded bg-emerald-950">
-                                      {file.category || "DOC"}
-                                    </span>
-                                    <span className="text-slate-200 font-medium truncate max-w-[200px] sm:max-w-xs">{file.name}</span>
-                                    <span className="text-[10px] text-slate-500 font-mono">{formatBytes(file.size)}</span>
-                                  </div>
-
-                                  {isLeader && !isFinalized && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRemoveFile(file.id)}
-                                      className="text-slate-500 hover:text-rose-400 text-xs px-1"
-                                      title="Remove staged file"
-                                    >
-                                      ✕
-                                    </button>
-                                  )}
-                                </div>
-                              ))
-                            ) : (
-                              <span className="text-[11px] text-slate-500 block italic">
-                                No files attached yet. Attach your pitch deck or architecture documentation.
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Leader Submit Actions */}
-                        {isLeader && (
-                          <div className="pt-2 flex flex-wrap items-center justify-between gap-3">
-                            <span className="text-[11px] text-slate-500 font-mono">
-                              Status: <span className="text-slate-300 font-semibold">{isFinalized ? "Locked" : "Draft"}</span>
-                            </span>
-
-                            {!isFinalized ? (
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="submit"
-                                  className="px-3.5 py-2 bg-[#162238] hover:bg-[#1d2d4a] border border-[#253247] text-slate-200 font-semibold rounded-lg text-xs transition-colors"
-                                >
-                                  Save Draft
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={handleOpenFinalizeModal}
-                                  className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg text-xs transition-colors shadow"
-                                >
-                                  Freeze & Finalize Submission →
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="text-xs text-slate-400 font-mono">
-                                Submission certified & locked. Reopening requires admin request.
-                              </span>
-                            )}
-                          </div>
                         )}
-                      </form>
-                    </>
-                  )}
-                </div>
-              </section>
-            </div>
 
-            {/* Right Col (5 cols): Roster Snapshot & Deadlines */}
-            <div className="lg:col-span-5 space-y-6">
-              {/* Squad Snapshot Card */}
-              <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-5 shadow-sm space-y-3">
-                <div className="flex items-center justify-between border-b border-[#253247] pb-3">
-                  <span className="text-xs font-mono text-emerald-400 uppercase font-semibold">SQUAD SNAPSHOT</span>
-                  {currentTeam && (
-                    <span className="px-2 py-0.5 rounded bg-[#121c32] border border-[#253247] text-[10px] font-mono text-slate-300">{currentTeam.capacity}</span>
-                  )}
-                </div>
+                        {formValues.submissionFiles && formValues.submissionFiles.length > 0 ? (
+                          <ul className="divide-y divide-line rounded-lg border border-line">
+                            {formValues.submissionFiles.map((file) => (
+                              <li key={file.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                                <div className="flex min-w-0 items-center gap-3">
+                                  <Paperclip className="h-4 w-4 shrink-0 text-fg-subtle" aria-hidden="true" />
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-medium text-fg">{file.name}</p>
+                                    <p className="text-xs text-fg-subtle">
+                                      {file.category || "DOC"} · <span className="tabular-nums">{formatBytes(file.size)}</span>
+                                    </p>
+                                  </div>
+                                </div>
+                                {isLeader && !isFinalized && (
+                                  <Button
+                                    variant="danger-ghost"
+                                    size="icon-sm"
+                                    onClick={() => handleRemoveFile(file.id)}
+                                    aria-label={`Remove ${file.name}`}
+                                    title="Remove staged file"
+                                  >
+                                    <X aria-hidden="true" />
+                                  </Button>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="rounded-lg border border-dashed border-line px-3 py-4 text-center text-sm text-fg-subtle">
+                            No files attached yet. Attach your pitch deck or architecture documentation.
+                          </p>
+                        )}
+                      </FormSection>
 
-                {currentTeam ? (
-                  <div className="space-y-2 text-xs">
-                    <div className="flex justify-between items-center py-1">
-                      <span className="font-bold text-white text-sm">{currentTeam.name}</span>
-                      <span className="text-slate-400">Leader: {currentTeam.lead}</span>
-                    </div>
-
-                    <div className="p-2.5 bg-[#080e1a] border border-[#1c283c] rounded-lg flex items-center justify-between">
-                      <div>
-                        <span className="text-[10px] font-mono text-slate-500 block">INVITE CODE</span>
-                        <span className="font-mono font-bold text-emerald-400">{currentTeam.code}</span>
-                      </div>
-                      <button
-                        onClick={() => handleCopyCode(currentTeam.code)}
-                        className="px-2.5 py-1 bg-[#121c32] hover:bg-[#1a2744] border border-[#253247] rounded text-[11px] text-slate-200"
-                      >
-                        {copied ? "✓ Copied" : "Copy Code"}
-                      </button>
-                    </div>
-
-                    <div className="pt-2">
-                      <button
-                        onClick={() => setActiveTab("roster")}
-                        className="text-xs text-emerald-400 hover:underline font-mono"
-                      >
-                        Manage Full Roster & Permissions →
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="py-4 text-center text-xs text-slate-400 space-y-2">
-                    <p>No squad formed for {activeSprint?.title || "this sprint"}.</p>
-                    <button
-                      onClick={() => setActiveTab("roster")}
-                      className="px-3 py-1.5 bg-emerald-500 text-slate-950 font-bold rounded text-xs"
-                    >
-                      Form or Join Squad
-                    </button>
-                  </div>
+                      {isLeader && (
+                        <div className="flex flex-col-reverse gap-3 border-t border-line pt-5 sm:flex-row sm:items-center sm:justify-between">
+                          <p className="text-sm text-fg-subtle">
+                            Status: <span className="font-medium text-fg">{isFinalized ? "Locked" : "Draft"}</span>
+                          </p>
+                          {!isFinalized ? (
+                            <div className="flex flex-wrap gap-2">
+                              <Button type="submit" variant="secondary">
+                                Save draft
+                              </Button>
+                              <Button onClick={handleOpenFinalizeModal}>
+                                <Lock aria-hidden="true" />
+                                Finalize submission
+                              </Button>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-fg-muted">
+                              Submission certified and locked. Reopening requires admin request.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </form>
+                  </>
                 )}
-              </section>
+              </CardContent>
+            </Card>
 
-              {/* Deadlines Card */}
-              <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-5 space-y-3 shadow-sm">
-                <div className="border-b border-[#253247] pb-3">
-                  <span className="text-xs font-mono text-slate-300 uppercase font-semibold block">SPRINT TIMELINE</span>
-                </div>
-                <div className="space-y-3 text-xs">
-                  {[
-                    { label: "Team Roster Lock Window", time: "Oct 18, 2026 • 18:00 UTC", urgency: "high" },
-                    { label: "Sprint Kickoff & Repo Push", time: "Oct 18, 2026 • 20:00 UTC", urgency: "normal" },
-                    { label: "Final Code Freeze & Demo Link", time: "Oct 20, 2026 • 20:00 UTC", urgency: "critical" },
-                    { label: "Screening Gate Clearance", time: "Oct 21, 2026 • 12:00 UTC", urgency: "normal" }
-                  ].map((dl, i) => (
-                    <div key={i} className="flex items-start gap-2.5">
-                      <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
-                        dl.urgency === "critical"
-                          ? "bg-rose-400 animate-pulse"
-                          : dl.urgency === "high"
-                          ? "bg-amber-400"
-                          : "bg-emerald-400"
-                      }`} />
-                      <div className="flex-1">
-                        <span className="text-slate-300 font-medium block leading-tight">{dl.label}</span>
-                        <span className="text-[10px] font-mono text-slate-500">{dl.time}</span>
+            {/* Aside: team snapshot & hackathon details */}
+            <div className="space-y-6">
+              <Card>
+                <CardHeader className="flex-row items-center justify-between gap-3">
+                  <CardTitle as="h2">Your team</CardTitle>
+                  {currentTeam && (
+                    <Badge className="font-mono tabular-nums">{currentTeam.capacity}</Badge>
+                  )}
+                </CardHeader>
+                <CardContent>
+                  {currentTeam ? (
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-sm font-semibold text-fg">{currentTeam.name}</p>
+                        <p className="text-sm text-fg-muted">Leader: {currentTeam.lead}</p>
                       </div>
+                      <div className="flex items-center justify-between gap-3 rounded-lg bg-raised/50 p-3">
+                        <div className="min-w-0">
+                          <p className="eyebrow">Invite code</p>
+                          <p className="truncate font-mono text-sm font-semibold text-fg">{currentTeam.code}</p>
+                        </div>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleCopyCode(currentTeam.code)}
+                          aria-live="polite"
+                        >
+                          {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+                          {copyButtonLabel}
+                        </Button>
+                      </div>
+                      <Button variant="link" className="px-0" onClick={() => setActiveTab("roster")}>
+                        Manage roster & permissions
+                      </Button>
                     </div>
-                  ))}
-                </div>
-              </section>
+                  ) : (
+                    <div className="space-y-3 text-center">
+                      <p className="text-sm text-fg-muted">
+                        No team formed for {activeSprint?.title || "this hackathon"}.
+                      </p>
+                      <Button size="sm" onClick={() => setActiveTab("roster")}>
+                        <UserPlus aria-hidden="true" />
+                        Form or join a team
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {activeSprint && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle as="h2">Hackathon details</CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-2">
+                    <DescriptionList
+                      items={[
+                        { label: "Track", value: activeSprint.track || "—" },
+                        { label: "Dates", value: activeSprint.dates || "—" },
+                        { label: "Deadline", value: activeSprint.deadline || "TBD" },
+                        { label: "Registration", value: activeSprint.registrationStatus || "—" }
+                      ]}
+                    />
+                  </CardContent>
+                </Card>
+              )}
+
             </div>
           </div>
-        )}
+        </TabPanel>
 
         {/* ========================================================= */}
-        {/* TAB 2: SQUAD & ROSTER MANAGEMENT */}
+        {/* TAB 2: TEAM & ROSTER MANAGEMENT */}
         {/* ========================================================= */}
-        {activeTab === "roster" && (
-          <div className="space-y-6">
-            {teamActionFeedback && (
-              <div className={`p-3 rounded-lg text-xs ${
-                teamActionFeedback.type === "success"
-                  ? "bg-emerald-950/50 border border-emerald-500/40 text-emerald-300"
-                  : "bg-rose-950/50 border border-rose-800/50 text-rose-300"
-              }`}>
-                {teamActionFeedback.text}
-              </div>
-            )}
+        <TabPanel value="roster" activeValue={activeTab} idPrefix="student" className="space-y-6 focus:outline-none">
+          {teamActionFeedback && (
+            <Alert tone={teamActionFeedback.type === "success" ? "success" : "danger"}>
+              {noticeText(teamActionFeedback.text)}
+            </Alert>
+          )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Squad Details & Roster (8 cols) */}
-              <div className="lg:col-span-8 space-y-6">
-                <section className="bg-[#0d1526] border border-[#253247] rounded-xl overflow-hidden shadow-sm">
-                  <div className="px-5 py-4 border-b border-[#253247] flex items-center justify-between bg-[#121c32]">
-                    <div>
-                      <h2 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
-                        SQUAD ROSTER & TEAM MANAGEMENT
-                      </h2>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
-                        {currentTeam ? `${currentTeam.name} (${activeSprint?.title})` : "No team assigned"}
-                      </p>
-                    </div>
+          <div className="grid gap-6 lg:grid-cols-3">
+            <Card className="lg:col-span-2">
+              <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <CardTitle as="h2">Team roster</CardTitle>
+                  <CardDescription>
+                    {currentTeam ? `${currentTeam.name} · ${activeSprint?.title}` : "No team assigned"}
+                  </CardDescription>
+                </div>
+                {currentTeam && (
+                  <Badge tone={currentTeam.rosterLocked ? "warning" : "success"} dot>
+                    {currentTeam.rosterLocked ? "Roster locked" : "Open for members"}
+                  </Badge>
+                )}
+              </CardHeader>
 
-                    {currentTeam && (
-                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                        currentTeam.rosterLocked
-                          ? "bg-rose-950 border border-rose-500/40 text-rose-300"
-                          : "bg-emerald-950 border border-emerald-500/40 text-emerald-300"
-                      }`}>
-                        {currentTeam.rosterLocked ? "ROSTER LOCKED" : "OPEN FOR MEMBERS"}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="p-5 space-y-5 text-xs">
-                    {currentTeam ? (
-                      <>
-                        {/* Leader Banner */}
-                        <div className="p-3.5 bg-[#080e1a] border border-[#1c283c] rounded-xl flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <span className="text-[10px] text-slate-500 font-mono block">SHAREABLE INVITE CODE</span>
-                            <span className="text-lg font-mono font-bold text-emerald-400 tracking-wider">
-                              {currentTeam.code}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => handleCopyCode(currentTeam.code)}
-                              className="px-3 py-1.5 bg-[#121c32] hover:bg-[#1a2744] border border-[#253247] text-slate-200 font-semibold rounded-lg text-xs"
-                            >
-                              {copied ? "✓ Copied" : "Copy Team Code"}
-                            </button>
-
-                            {isLeader && (
-                              <button
-                                onClick={handleToggleRosterLock}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                                  currentTeam.rosterLocked
-                                    ? "bg-[#121c32] hover:bg-[#1a2744] border border-[#253247] text-slate-200"
-                                    : "bg-amber-950 hover:bg-amber-900 border border-amber-600/40 text-amber-300"
-                                }`}
-                              >
-                                {currentTeam.rosterLocked ? "Unlock Roster" : "Lock Roster 🔒"}
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Members Table */}
-                        <div className="space-y-2">
-                          <span className="text-[11px] font-mono text-slate-400 uppercase font-semibold block">
-                            ACTIVE MEMBERS ({currentTeam.capacity})
-                          </span>
-
-                          <div className="divide-y divide-[#1c283c] border border-[#1c283c] rounded-xl overflow-hidden bg-[#080e1a]">
-                            {currentTeam.members?.map((m, idx) => {
-                              const mName = typeof m === 'string' ? m : m.name;
-                              const mEmail = typeof m === 'object' && m.email ? m.email : "";
-                              const mRole = typeof m === 'object' && m.role ? m.role : (mName.includes('(Lead)') ? 'Team Leader' : 'Member');
-                              const isThisMemberLead = mRole === "Team Leader" || mName.includes('(Lead)');
-
-                              return (
-                                <div key={idx} className="p-3.5 flex items-center justify-between">
-                                  <div>
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-bold text-white text-xs">{mName}</span>
-                                      {isThisMemberLead && (
-                                        <span className="px-1.5 py-0.2 rounded bg-emerald-950 border border-emerald-500/40 text-emerald-400 text-[10px] font-mono">
-                                          LEAD
-                                        </span>
-                                      )}
-                                    </div>
-                                    {mEmail && <span className="text-[11px] text-slate-400 font-mono block mt-0.5">{mEmail}</span>}
-                                  </div>
-
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#121c32] border border-[#253247] text-slate-300">
-                                      Active
-                                    </span>
-                                    {isLeader && !isThisMemberLead && mEmail && (
-                                      <button
-                                        onClick={() => handleRemoveMember(mEmail)}
-                                        className="text-slate-400 hover:text-rose-400 text-xs px-2 py-1 rounded bg-[#121c32] border border-[#253247]"
-                                      >
-                                        Remove
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="py-8 text-center text-slate-400 space-y-3">
-                        <p>No squad formed for {activeSprint?.title}. Create a new team or enter an invite code to join an existing team.</p>
+              <CardContent className="space-y-6">
+                {currentTeam ? (
+                  <>
+                    <div className="flex flex-col gap-3 rounded-lg bg-raised/50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="eyebrow">Shareable invite code</p>
+                        <p className="break-all font-mono text-lg font-semibold tracking-wider text-fg">
+                          {currentTeam.code}
+                        </p>
                       </div>
-                    )}
-                  </div>
-                </section>
-              </div>
-
-              {/* Formation & Join Actions (4 cols) */}
-              <div className="lg:col-span-4 space-y-6">
-                {/* Create Team Card */}
-                {!currentTeam && (
-                  <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-5 shadow-sm space-y-3">
-                    <div className="border-b border-[#253247] pb-3">
-                      <span className="text-xs font-mono text-emerald-400 uppercase font-semibold block">CREATE A NEW SQUAD</span>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleCopyCode(currentTeam.code)}
+                          aria-live="polite"
+                        >
+                          {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+                          {copied ? "Copied" : "Copy team code"}
+                        </Button>
+                        {isLeader && (
+                          <Button
+                            variant={currentTeam.rosterLocked ? "secondary" : "ghost"}
+                            size="sm"
+                            onClick={handleToggleRosterLock}
+                          >
+                            {currentTeam.rosterLocked ? <LockOpen aria-hidden="true" /> : <Lock aria-hidden="true" />}
+                            {currentTeam.rosterLocked ? "Unlock roster" : "Lock roster"}
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-xs text-slate-400">
-                      Found a team for <span className="text-slate-200">{activeSprint?.title}</span>. You will be assigned as Team Leader.
-                    </p>
 
-                    <form onSubmit={handleCreateTeamSubmit} className="space-y-3 text-xs">
-                      <div>
-                        <label className="text-slate-300 font-semibold block mb-1">Squad Name *</label>
-                        <input
+                    <div className="space-y-3">
+                      <h3 className="text-sm font-semibold text-fg">
+                        Active members <span className="font-normal tabular-nums text-fg-subtle">({currentTeam.capacity})</span>
+                      </h3>
+                      <ul className="divide-y divide-line rounded-lg border border-line">
+                        {currentTeam.members?.map((m, idx) => {
+                          const mName = typeof m === 'string' ? m : m.name;
+                          const mEmail = typeof m === 'object' && m.email ? m.email : "";
+                          const mRole = typeof m === 'object' && m.role ? m.role : (mName.includes('(Lead)') ? 'Team Leader' : 'Member');
+                          const isThisMemberLead = mRole === "Team Leader" || mName.includes('(Lead)');
+
+                          return (
+                            <li key={idx} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-sm font-medium text-fg">{mName}</span>
+                                  <Badge tone={isThisMemberLead ? "accent" : "neutral"}>
+                                    {isThisMemberLead ? "Leader" : "Member"}
+                                  </Badge>
+                                </div>
+                                {mEmail && <p className="mt-0.5 truncate font-mono text-xs text-fg-subtle">{mEmail}</p>}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Badge tone="success">Active</Badge>
+                                {isLeader && !isThisMemberLead && mEmail && (
+                                  <Button
+                                    variant="danger-ghost"
+                                    size="sm"
+                                    onClick={() => handleRemoveMember(mEmail)}
+                                  >
+                                    Remove
+                                  </Button>
+                                )}
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  </>
+                ) : (
+                  <EmptyState
+                    icon={Users}
+                    title="No team yet"
+                    description={`No team formed for ${activeSprint?.title || "this hackathon"}. Create a new team or enter an invite code to join an existing one.`}
+                  />
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="space-y-6">
+              {!currentTeam && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle as="h2">Create a team</CardTitle>
+                    <CardDescription>
+                      Start a team for <span className="text-fg">{activeSprint?.title}</span>. You will be the team leader.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <form onSubmit={handleCreateTeamSubmit} className="space-y-4">
+                      <Field label="Team name" required>
+                        <Input
                           type="text"
-                          required
                           value={newTeamName}
                           onChange={(e) => setNewTeamName(e.target.value)}
                           placeholder="e.g. ApexInnovators"
-                          className="w-full bg-[#080e1a] border border-[#223044] rounded-lg p-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                         />
-                      </div>
-                      <button
-                        type="submit"
-                        className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition-colors"
-                      >
-                        + Create Squad
-                      </button>
+                      </Field>
+                      <Button type="submit" className="w-full">
+                        <UserPlus aria-hidden="true" />
+                        Create team
+                      </Button>
                     </form>
-                  </section>
-                )}
+                  </CardContent>
+                </Card>
+              )}
 
-                {/* Join with Invite Code Card */}
-                <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-5 shadow-sm space-y-3">
-                  <div className="border-b border-[#253247] pb-3">
-                    <span className="text-xs font-mono text-slate-300 uppercase font-semibold block">JOIN VIA INVITE CODE</span>
-                  </div>
-                  <p className="text-xs text-slate-400">
-                    Enter the unique 8-character invite code provided by your Team Leader.
-                  </p>
-
-                  <form onSubmit={handleJoinTeam} className="space-y-3 text-xs">
-                    <div>
-                      <input
+              <Card>
+                <CardHeader>
+                  <CardTitle as="h2">Join with an invite code</CardTitle>
+                  <CardDescription>
+                    Enter the unique invite code provided by your team leader.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <form onSubmit={handleJoinTeam} className="space-y-4">
+                    <Field label="Invite code" required>
+                      <Input
                         type="text"
-                        required
                         value={joinCode}
                         onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                         placeholder="e.g. HT-DEV-42"
-                        className="w-full bg-[#080e1a] border border-[#223044] rounded-lg p-2.5 font-mono uppercase text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                        className="font-mono uppercase"
+                        autoComplete="off"
                       />
-                    </div>
-                    <button
-                      type="submit"
-                      className="w-full py-2 bg-[#162238] hover:bg-[#1d2d4a] border border-[#253247] text-slate-200 font-semibold rounded-lg text-xs transition-colors"
-                    >
-                      Join Squad
-                    </button>
+                    </Field>
+                    <Button type="submit" variant="secondary" className="w-full">
+                      Join team
+                    </Button>
                   </form>
-                </section>
-              </div>
+                </CardContent>
+              </Card>
             </div>
           </div>
-        )}
+        </TabPanel>
 
         {/* ========================================================= */}
         {/* TAB 3: SCREENING & JUDGING RESULTS */}
         {/* ========================================================= */}
-        {activeTab === "results" && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-
-              {/* Left Col: Screening Gate Status (6 cols) */}
-              <div className="lg:col-span-6 space-y-6">
-                <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-5 shadow-sm space-y-4">
-                  <div className="flex items-center justify-between border-b border-[#253247] pb-3">
-                    <div>
-                      <span className="text-xs font-mono text-emerald-400 uppercase font-semibold block">STAGE 1: SCREENING GATEWAY</span>
-                      <h3 className="text-sm font-bold text-white mt-0.5">Automated & Technical Compliance</h3>
+        <TabPanel value="results" activeValue={activeTab} idPrefix="student" className="focus:outline-none">
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Stage 1: screening */}
+            <Card>
+              <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <p className="eyebrow">Stage 1 · Screening</p>
+                  <CardTitle as="h2">Automated & technical compliance</CardTitle>
+                </div>
+                <Badge tone={screeningTone(teamSubmission?.screeningStatus)} dot>
+                  {teamSubmission?.screeningStatus || "Pending review"}
+                </Badge>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {teamSubmission ? (
+                  <>
+                    <div className="space-y-2">
+                      <h3 className="text-sm font-semibold text-fg">Compliance criteria</h3>
+                      <ul className="divide-y divide-line rounded-lg border border-line">
+                        {SCREENING_CHECKS.map((check) => {
+                          const passed = Boolean(teamSubmission.checks?.[check.key]);
+                          return (
+                            <li key={check.key} className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
+                              <span className="text-fg">{check.label}</span>
+                              <Badge tone={passed ? "success" : "danger"}>
+                                {passed ? <Check className="h-3 w-3" aria-hidden="true" /> : <X className="h-3 w-3" aria-hidden="true" />}
+                                {passed ? "Pass" : "Fail"}
+                              </Badge>
+                            </li>
+                          );
+                        })}
+                      </ul>
                     </div>
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                      teamSubmission?.screeningStatus === "Shortlisted"
-                        ? "bg-emerald-950 text-emerald-300 border border-emerald-500/40"
-                        : teamSubmission?.screeningStatus === "Rejected"
-                        ? "bg-rose-950 text-rose-300 border border-rose-500/40"
-                        : "bg-amber-950 text-amber-300 border border-amber-500/40"
-                    }`}>
-                      {teamSubmission?.screeningStatus || "Pending Review"}
-                    </span>
-                  </div>
 
-                  {teamSubmission ? (
-                    <div className="space-y-3 text-xs">
-                      {/* Gate Verification Checks */}
-                      <div className="space-y-2">
-                        <span className="text-[10px] font-mono text-slate-500 uppercase block">COMPLIANCE CRITERIA</span>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className={`p-2.5 rounded border ${
-                            teamSubmission.checks?.gitFreshness ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-300" : "bg-rose-950/20 border-rose-500/30 text-rose-300"
-                          }`}>
-                            <span className="font-semibold block">Git Freshness</span>
-                            <span className="text-[10px] font-mono">{teamSubmission.checks?.gitFreshness ? "PASS ✓" : "FAIL ✕"}</span>
-                          </div>
-
-                          <div className={`p-2.5 rounded border ${
-                            teamSubmission.checks?.endpointsLive ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-300" : "bg-rose-950/20 border-rose-500/30 text-rose-300"
-                          }`}>
-                            <span className="font-semibold block">HTTPS Endpoint Live</span>
-                            <span className="text-[10px] font-mono">{teamSubmission.checks?.endpointsLive ? "PASS ✓" : "FAIL ✕"}</span>
-                          </div>
-
-                          <div className={`p-2.5 rounded border ${
-                            teamSubmission.checks?.envConfigured ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-300" : "bg-rose-950/20 border-rose-500/30 text-rose-300"
-                          }`}>
-                            <span className="font-semibold block">.env.example Documentation</span>
-                            <span className="text-[10px] font-mono">{teamSubmission.checks?.envConfigured ? "PASS ✓" : "FAIL ✕"}</span>
-                          </div>
-
-                          <div className={`p-2.5 rounded border ${
-                            teamSubmission.checks?.licenseMIT ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-300" : "bg-rose-950/20 border-rose-500/30 text-rose-300"
-                          }`}>
-                            <span className="font-semibold block">Open Source License</span>
-                            <span className="text-[10px] font-mono">{teamSubmission.checks?.licenseMIT ? "PASS ✓" : "FAIL ✕"}</span>
-                          </div>
-                        </div>
+                    {teamSubmission.screeningRemarks && (
+                      <div className="space-y-1 rounded-lg bg-raised/50 p-3">
+                        <p className="eyebrow">Reviewer remarks</p>
+                        <p className="text-sm leading-relaxed text-fg-muted">{teamSubmission.screeningRemarks}</p>
+                        {teamSubmission.screenedBy && (
+                          <p className="text-xs text-fg-subtle">Reviewer: {teamSubmission.screenedBy}</p>
+                        )}
                       </div>
+                    )}
 
-                      {/* Committee Remarks */}
-                      {teamSubmission.screeningRemarks && (
-                        <div className="p-3 bg-[#080e1a] border border-[#1c283c] rounded-lg space-y-1">
-                          <span className="text-[10px] font-mono text-slate-500 uppercase block">REVIEWER REMARKS</span>
-                          <p className="text-slate-300 leading-relaxed">{teamSubmission.screeningRemarks}</p>
-                          {teamSubmission.screenedBy && (
-                            <span className="text-[10px] text-slate-500 font-mono block mt-1">Reviewer: {teamSubmission.screenedBy}</span>
-                          )}
-                        </div>
-                      )}
+                    {teamSubmission.screeningStatus === "Rejected" && teamSubmission.rejectionReason && (
+                      <Alert tone="danger" title="Non-compliance notice">
+                        {teamSubmission.rejectionReason}
+                      </Alert>
+                    )}
+                  </>
+                ) : (
+                  <EmptyState
+                    icon={ClipboardCheck}
+                    title="Nothing to screen yet"
+                    description="Submit deliverables first to enter the screening gateway."
+                    action={
+                      <Button variant="secondary" onClick={() => setActiveTab("workspace")}>
+                        Go to project submission
+                      </Button>
+                    }
+                  />
+                )}
+              </CardContent>
+            </Card>
 
-                      {/* Rejection notice */}
-                      {teamSubmission.screeningStatus === "Rejected" && teamSubmission.rejectionReason && (
-                        <div className="p-3 bg-rose-950/30 border border-rose-800/40 rounded-lg text-rose-300 text-xs space-y-1">
-                          <span className="font-bold block">Non-Compliance Notice:</span>
-                          <p>{teamSubmission.rejectionReason}</p>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="py-6 text-center text-slate-400 text-xs">
-                      Submit deliverables first to enter the screening gateway.
-                    </div>
-                  )}
-                </section>
-              </div>
-
-              {/* Right Col: Rubric Judging & Certified Results (6 cols) */}
-              <div className="lg:col-span-6 space-y-6">
-                <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-5 shadow-sm space-y-4">
-                  <div className="flex items-center justify-between border-b border-[#253247] pb-3">
-                    <div>
-                      <span className="text-xs font-mono text-emerald-400 uppercase font-semibold block">STAGE 2: RUBRIC EVALUATION</span>
-                      <h3 className="text-sm font-bold text-white mt-0.5">Judge Panel Scorecard</h3>
-                    </div>
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                      resultsReleased
-                        ? "bg-emerald-950 text-emerald-300 border border-emerald-500/40"
-                        : "bg-[#121c32] border border-[#253247] text-slate-400"
-                    }`}>
-                      {resultsReleased ? "OFFICIALLY RELEASED" : "UNDER CONFIDENTIAL EVALUATION"}
-                    </span>
-                  </div>
-
-                  {resultsReleased && teamEvaluation ? (
-                    <div className="space-y-4 text-xs">
-                      {/* Certified Total Score */}
-                      <div className="p-4 bg-[#080e1a] border border-[#1c283c] rounded-xl flex items-center justify-between">
-                        <div>
-                          <span className="text-[10px] font-mono text-slate-500 uppercase block">CERTIFIED TOTAL SCORE</span>
-                          <span className="text-2xl font-extrabold font-mono text-emerald-400">
-                            {teamEvaluation.totalScore} <span className="text-sm text-slate-500 font-normal">/ 100</span>
-                          </span>
-                        </div>
-                        <div className="text-right">
-                          <span className="px-2.5 py-1 rounded-full bg-emerald-500 text-slate-950 font-bold text-xs">
-                            Top Tier Finalist
-                          </span>
-                        </div>
+            {/* Stage 2: rubric judging */}
+            <Card>
+              <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <p className="eyebrow">Stage 2 · Rubric evaluation</p>
+                  <CardTitle as="h2">Judge panel scorecard</CardTitle>
+                </div>
+                <Badge tone={resultsReleased ? "success" : "neutral"} dot>
+                  {resultsReleased ? "Officially released" : "Under evaluation"}
+                </Badge>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {resultsReleased && teamEvaluation ? (
+                  <>
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-raised/50 p-4">
+                      <div>
+                        <p className="eyebrow">Certified total score</p>
+                        <p className="text-3xl font-semibold tabular-nums tracking-tight text-fg">
+                          {teamEvaluation.totalScore}
+                          <span className="ml-1 text-sm font-normal text-fg-subtle">/ 100</span>
+                        </p>
                       </div>
-
-                      {/* Rubric Breakdown */}
-                      <div className="space-y-2">
-                        <span className="text-[10px] font-mono text-slate-500 uppercase block">CRITERIA BREAKDOWN</span>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="p-2.5 bg-[#080e1a] border border-[#1c283c] rounded space-y-1">
-                            <span className="text-slate-400 block text-[11px]">Architecture</span>
-                            <span className="font-mono text-emerald-400 font-bold text-sm block">
-                              {teamEvaluation.scores?.architecture || 0} / 30
-                            </span>
-                            <div className="w-full h-1 bg-[#111E31] rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-[#2878F0] rounded-full transition-all duration-300"
-                                style={{ width: `${Math.min(100, Math.round(((teamEvaluation.scores?.architecture || 0) / 30) * 100))}%` }}
-                              />
-                            </div>
-                          </div>
-                          <div className="p-2.5 bg-[#080e1a] border border-[#1c283c] rounded space-y-1">
-                            <span className="text-slate-400 block text-[11px]">Usability & UX</span>
-                            <span className="font-mono text-emerald-400 font-bold text-sm block">
-                              {teamEvaluation.scores?.usability || 0} / 25
-                            </span>
-                            <div className="w-full h-1 bg-[#111E31] rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-[#2878F0] rounded-full transition-all duration-300"
-                                style={{ width: `${Math.min(100, Math.round(((teamEvaluation.scores?.usability || 0) / 25) * 100))}%` }}
-                              />
-                            </div>
-                          </div>
-                          <div className="p-2.5 bg-[#080e1a] border border-[#1c283c] rounded space-y-1">
-                            <span className="text-slate-400 block text-[11px]">Innovation</span>
-                            <span className="font-mono text-emerald-400 font-bold text-sm block">
-                              {teamEvaluation.scores?.innovation || 0} / 25
-                            </span>
-                            <div className="w-full h-1 bg-[#111E31] rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-[#2878F0] rounded-full transition-all duration-300"
-                                style={{ width: `${Math.min(100, Math.round(((teamEvaluation.scores?.innovation || 0) / 25) * 100))}%` }}
-                              />
-                            </div>
-                          </div>
-                          <div className="p-2.5 bg-[#080e1a] border border-[#1c283c] rounded space-y-1">
-                            <span className="text-slate-400 block text-[11px]">Completeness</span>
-                            <span className="font-mono text-emerald-400 font-bold text-sm block">
-                              {teamEvaluation.scores?.completeness || 0} / 20
-                            </span>
-                            <div className="w-full h-1 bg-[#111E31] rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-[#2878F0] rounded-full transition-all duration-300"
-                                style={{ width: `${Math.min(100, Math.round(((teamEvaluation.scores?.completeness || 0) / 20) * 100))}%` }}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Judge Feedback */}
-                      {teamEvaluation.feedback && (
-                        <div className="p-3 bg-[#080e1a] border border-[#1c283c] rounded-lg space-y-1">
-                          <span className="text-[10px] font-mono text-slate-500 uppercase block">JUDGE PANEL FEEDBACK</span>
-                          <p className="text-slate-300 leading-relaxed italic">"{teamEvaluation.feedback}"</p>
-                          <span className="text-[10px] text-slate-500 font-mono block mt-1">Evaluated by: {teamEvaluation.judgeName || "Expert Panel"}</span>
-                        </div>
-                      )}
+                      <Badge tone="success">
+                        <Trophy className="h-3 w-3" aria-hidden="true" />
+                        Results published
+                      </Badge>
                     </div>
-                  ) : (
-                    <div className="py-8 px-4 bg-[#080e1a] border border-dashed border-[#253247] rounded-xl text-center space-y-2 text-xs text-slate-400">
-                      <span className="text-amber-400 block font-semibold">Judging & Scoring In Progress</span>
-                      <p className="max-w-xs mx-auto leading-relaxed">
-                        Evaluations are scored privately by assigned judges. Results and certificates will unlock here when officially certified by the Platform Administrator.
-                      </p>
-                    </div>
-                  )}
-                </section>
-              </div>
 
-            </div>
+                    <div className="space-y-3">
+                      <h3 className="text-sm font-semibold text-fg">Criteria breakdown</h3>
+                      <ul className="space-y-3">
+                        {RUBRIC_CRITERIA.map((c) => {
+                          const score = teamEvaluation.scores?.[c.key] || 0;
+                          const pct = Math.min(100, Math.round((score / c.max) * 100));
+                          return (
+                            <li key={c.key} className="space-y-1.5">
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="text-fg-muted">{c.label}</span>
+                                <span className="font-medium tabular-nums text-fg">
+                                  {score} <span className="text-fg-subtle">/ {c.max}</span>
+                                </span>
+                              </div>
+                              <div
+                                className="h-1.5 w-full overflow-hidden rounded-full bg-sunken"
+                                role="progressbar"
+                                aria-label={c.label}
+                                aria-valuenow={score}
+                                aria-valuemin={0}
+                                aria-valuemax={c.max}
+                              >
+                                <div
+                                  className="h-full rounded-full bg-accent transition-all duration-300"
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+
+                    {teamEvaluation.feedback && (
+                      <figure className="space-y-1 rounded-lg bg-raised/50 p-3">
+                        <p className="eyebrow">Judge panel feedback</p>
+                        <blockquote className="text-sm italic leading-relaxed text-fg-muted">
+                          "{teamEvaluation.feedback}"
+                        </blockquote>
+                        <figcaption className="text-xs text-fg-subtle">
+                          Evaluated by: {teamEvaluation.judgeName || "Expert Panel"}
+                        </figcaption>
+                      </figure>
+                    )}
+                  </>
+                ) : (
+                  <EmptyState
+                    icon={Trophy}
+                    title="Judging and scoring in progress"
+                    description="Evaluations are scored privately by assigned judges. Results and certificates will unlock here when officially certified by the Platform Administrator."
+                  />
+                )}
+              </CardContent>
+            </Card>
           </div>
-        )}
+        </TabPanel>
 
         {/* ========================================================= */}
         {/* TAB 4: CERTIFICATES */}
         {/* ========================================================= */}
-        {activeTab === "certificates" && (
-          <div className="space-y-6">
-            <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-5 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-[#253247] pb-3">
-                <div>
-                  <span className="text-xs font-mono text-emerald-400 uppercase font-semibold block">VERIFIED CREDENTIALS</span>
-                  <h3 className="text-base font-bold text-white mt-0.5">Issued Certificates of Excellence & Participation</h3>
-                </div>
-                <span className="text-xs font-mono text-slate-400">
-                  {certificates.length} Verified Document(s)
-                </span>
-              </div>
+        <TabPanel value="certificates" activeValue={activeTab} idPrefix="student" className="space-y-4 focus:outline-none">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="space-y-0.5">
+              <h2 className="text-base font-semibold text-fg">Certificates</h2>
+              <p className="text-sm text-fg-muted">Issued certificates of excellence and participation.</p>
+            </div>
+            <span className="text-sm text-fg-subtle">
+              <span className="tabular-nums">{certificates.length}</span> verified document(s)
+            </span>
+          </div>
 
-              {certificates.length === 0 ? (
-                <div className="py-10 text-center text-xs text-slate-400 space-y-2">
-                  <span className="text-slate-300 font-semibold block">No Certificates Available Yet</span>
-                  <p className="max-w-md mx-auto">
-                    Certificates are automatically generated upon official release of hackathon leaderboard results.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {certificates.length === 0 ? (
+            <Card>
+              <EmptyState
+                icon={Award}
+                title="No certificates available yet"
+                description="Certificates are automatically generated upon official release of hackathon leaderboard results."
+              />
+            </Card>
+          ) : (
+            <TableContainer>
+              <table className={tableClasses.table}>
+                <thead className={tableClasses.thead}>
+                  <tr>
+                    <th scope="col" className={tableClasses.th}>Award</th>
+                    <th scope="col" className={tableClasses.th}>Hackathon</th>
+                    <th scope="col" className={tableClasses.th}>Team</th>
+                    <th scope="col" className={tableClasses.th}>Issued</th>
+                    <th scope="col" className={tableClasses.th}>Certificate ID</th>
+                    <th scope="col" className={cn(tableClasses.th, "text-right")}>
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
                   {certificates.map((cert) => (
-                    <div
-                      key={cert.certificateId}
-                      className="p-5 bg-[#080e1a] border border-[#1c283c] rounded-xl space-y-3 relative overflow-hidden"
-                    >
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <span className="px-2 py-0.5 rounded bg-amber-400/10 border border-amber-400/30 text-amber-400 text-[10px] font-mono font-bold block w-fit mb-1">
-                            {cert.awardTitle || "Certificate of Excellence"}
-                          </span>
-                          <h4 className="text-sm font-bold text-white">{cert.hackathonTitle}</h4>
-                          <span className="text-[11px] text-slate-400">Track: {cert.track}</span>
-                        </div>
-                        <span className="text-[10px] font-mono text-slate-500">{cert.issueDate}</span>
-                      </div>
-
-                      <div className="py-2 border-y border-[#1c283c] text-xs space-y-1">
-                        <div className="flex justify-between text-slate-400">
-                          <span>Recipient:</span>
-                          <span className="text-slate-200 font-semibold">{cert.recipientName}</span>
-                        </div>
-                        <div className="flex justify-between text-slate-400">
-                          <span>Squad:</span>
-                          <span className="text-emerald-400 font-mono">{cert.teamName}</span>
-                        </div>
-                        <div className="flex justify-between text-slate-400">
-                          <span>Certificate ID:</span>
-                          <span className="text-slate-300 font-mono text-[11px]">{cert.certificateId}</span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between pt-1 text-xs">
-                        <span className="text-[10px] font-mono text-emerald-400">✓ Cryptographically Verified</span>
-                        <button
-                          onClick={() => setPreviewCert(cert)}
-                          className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition-colors"
-                        >
-                          View Certificate
-                        </button>
-                      </div>
-                    </div>
+                    <tr key={cert.certificateId} className={tableClasses.tr}>
+                      <td className={tableClasses.td}>
+                        <Badge tone="accent">{cert.awardTitle || "Certificate of Excellence"}</Badge>
+                      </td>
+                      <td className={tableClasses.td}>
+                        <p className="font-medium text-fg">{cert.hackathonTitle}</p>
+                        <p className="text-xs text-fg-subtle">Track: {cert.track}</p>
+                      </td>
+                      <td className={tableClasses.td}>
+                        <p className="text-fg">{cert.teamName}</p>
+                        <p className="text-xs text-fg-subtle">{cert.recipientName}</p>
+                      </td>
+                      <td className={cn(tableClasses.td, "whitespace-nowrap tabular-nums")}>{cert.issueDate}</td>
+                      <td className={cn(tableClasses.td, "font-mono text-xs")}>{cert.certificateId}</td>
+                      <td className={cn(tableClasses.td, "text-right")}>
+                        <Button size="sm" variant="secondary" onClick={() => setPreviewCert(cert)}>
+                          View certificate
+                        </Button>
+                      </td>
+                    </tr>
                   ))}
-                </div>
-              )}
-            </section>
-          </div>
-        )}
+                </tbody>
+              </table>
+            </TableContainer>
+          )}
+        </TabPanel>
 
         {/* ========================================================= */}
-        {/* TAB 5: NOTIFICATIONS & TIMELINES */}
+        {/* TAB 5: NOTIFICATIONS */}
         {/* ========================================================= */}
-        {activeTab === "notifications" && (
-          <div className="space-y-6">
-            <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-5 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-[#253247] pb-3">
-                <div>
-                  <span className="text-xs font-mono text-emerald-400 uppercase font-semibold block">NOTIFICATION FEED</span>
-                  <h3 className="text-base font-bold text-white mt-0.5">Platform Activity & Competition Updates</h3>
-                </div>
-                {unreadNotifsCount > 0 && (
-                  <button
-                    onClick={() => { markAllAsRead(userEmail); setRefreshKey((k) => k + 1); }}
-                    className="text-xs text-emerald-400 hover:underline font-mono"
-                  >
-                    Mark All as Read
-                  </button>
-                )}
+        <TabPanel value="notifications" activeValue={activeTab} idPrefix="student" className="focus:outline-none">
+          <Card>
+            <CardHeader className="flex-row flex-wrap items-start justify-between gap-3 pb-4">
+              <div className="min-w-0 space-y-1">
+                <CardTitle as="h2">Notifications</CardTitle>
+                <CardDescription>Platform activity and competition updates. Select one to mark it as read.</CardDescription>
               </div>
+              {unreadNotifsCount > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { markAllAsRead(userEmail); setRefreshKey((k) => k + 1); }}
+                >
+                  <Check aria-hidden="true" />
+                  Mark all as read
+                </Button>
+              )}
+            </CardHeader>
 
-              {notifications.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-400">
-                  No notifications yet.
-                </div>
-              ) : (
-                <div className="divide-y divide-[#1c283c]">
-                  {notifications.map((n) => (
-                    <div
-                      key={n.id}
+            {notifications.length === 0 ? (
+              <EmptyState
+                icon={Bell}
+                title="No notifications yet"
+                description="Updates about your registrations, team and results will appear here."
+              />
+            ) : (
+              <ul className="divide-y divide-line border-t border-line">
+                {notifications.map((n) => (
+                  <li key={n.id}>
+                    <button
+                      type="button"
                       onClick={() => { markAsRead(n.id); setRefreshKey((k) => k + 1); }}
-                      className={`p-3.5 flex items-start justify-between gap-3 cursor-pointer transition-colors ${
-                        !n.read ? "bg-[#121c32]" : "hover:bg-[#0f172a]"
-                      }`}
+                      className={cn(
+                        "flex w-full items-start justify-between gap-3 px-5 py-4 text-left transition-colors last:rounded-b-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                        !n.read ? "bg-accent/5 hover:bg-accent/10" : "hover:bg-raised/50"
+                      )}
                     >
-                      <div className="flex items-start gap-2.5">
-                        <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
-                          !n.read ? "bg-emerald-400" : "bg-slate-600"
-                        }`} />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-white">{n.title}</span>
-                            <span className="text-[10px] font-mono text-slate-500">{n.date}</span>
+                      <div className="flex min-w-0 items-start gap-3">
+                        <span
+                          className={cn(
+                            "mt-1.5 h-2 w-2 shrink-0 rounded-full",
+                            !n.read ? "bg-accent" : "bg-line-strong"
+                          )}
+                          aria-hidden="true"
+                        />
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-baseline gap-x-2">
+                            <span className={cn("text-sm text-fg", !n.read ? "font-semibold" : "font-medium")}>{n.title}</span>
+                            <span className="text-xs text-fg-subtle">{n.date}</span>
                           </div>
-                          <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">{n.message}</p>
+                          <p className="mt-0.5 text-sm leading-relaxed text-fg-muted">{n.message}</p>
                         </div>
                       </div>
-
-                      {!n.read && (
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-500/30 shrink-0">
-                          NEW
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          </div>
-        )}
+                      {!n.read && <Badge tone="accent" className="shrink-0">New</Badge>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </TabPanel>
 
         {/* ========================================================= */}
         {/* TAB 6: DISCOVER HACKATHONS */}
         {/* ========================================================= */}
-        {activeTab === "discover" && (
-          <div className="space-y-6">
-            <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-5 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-[#253247] pb-3">
-                <div>
-                  <span className="text-xs font-mono text-emerald-400 uppercase font-semibold block">SPRINT DIRECTORY</span>
-                  <h3 className="text-base font-bold text-white mt-0.5">Explore Active & Upcoming Competitions</h3>
-                </div>
-                <Link to="/hackathons" className="text-xs text-emerald-400 hover:underline font-mono">
-                  Browse All Public Pages →
-                </Link>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {allHackathons.map((h) => {
-                  const isReg = registrations.some((r) => r.hackathonId === h.id);
-
-                  return (
-                    <div
-                      key={h.id}
-                      className="p-5 bg-[#080e1a] border border-[#1c283c] rounded-xl flex flex-col justify-between space-y-3"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="px-2 py-0.5 rounded bg-[#121c32] border border-[#253247] text-[10px] font-mono text-slate-300">{h.stage}</span>
-                          <span className="text-xs font-mono text-emerald-400 font-bold">{h.prizePool}</span>
-                        </div>
-                        <h4 className="text-sm font-bold text-white">{h.title}</h4>
-                        <p className="text-xs text-slate-400 mt-1 line-clamp-2">{h.summary}</p>
-                      </div>
-
-                      <div className="pt-2 border-t border-[#1c283c] flex items-center justify-between text-xs">
-                        <span className="text-[10px] font-mono text-slate-500">Deadline: {h.deadline}</span>
-
-                        {isReg ? (
-                          <span className="px-2.5 py-1 rounded bg-emerald-950 border border-emerald-500/40 text-emerald-400 font-mono text-[10px] font-bold">
-                            ✓ Enrolled
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => handleRegisterDirect(h.id, h.title)}
-                            className="px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded text-xs transition-colors"
-                          >
-                            Register
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
+        <TabPanel value="discover" activeValue={activeTab} idPrefix="student" className="space-y-4 focus:outline-none">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="space-y-0.5">
+              <h2 className="text-base font-semibold text-fg">Discover hackathons</h2>
+              <p className="text-sm text-fg-muted">Explore active and upcoming competitions and register in one click.</p>
+            </div>
+            <Button as={Link} to="/hackathons" variant="link" className="px-0">
+              Browse all public pages
+            </Button>
           </div>
-        )}
+
+          {allHackathons.length === 0 ? (
+            <Card>
+              <EmptyState
+                icon={Compass}
+                title="No hackathons listed"
+                description="New competitions will appear here as organizers publish them."
+              />
+            </Card>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {allHackathons.map((h) => {
+                const isReg = registrations.some((r) => r.hackathonId === h.id);
+
+                return (
+                  <Card key={h.id} className="flex h-full flex-col p-5">
+                    <div className="flex items-center justify-between gap-3">
+                      <Badge tone={stageTone(h.stage)} dot>{h.stage}</Badge>
+                      {h.category && <span className="text-xs text-fg-subtle">{h.category}</span>}
+                    </div>
+                    <h3 className="mt-4 text-base font-semibold leading-snug text-fg">{h.title}</h3>
+                    {h.track && <p className="mt-0.5 text-sm text-fg-muted">{h.track}</p>}
+                    <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-fg-muted">{h.summary}</p>
+
+                    <dl className="mt-auto flex flex-wrap gap-x-4 gap-y-1.5 pt-5 text-sm text-fg-subtle">
+                      <div className="flex items-center gap-1.5">
+                        <dt><CalendarDays className="h-4 w-4" aria-label="Deadline" /></dt>
+                        <dd>{h.deadline}</dd>
+                      </div>
+                      {h.prizePool && (
+                        <div className="flex items-center gap-1.5">
+                          <dt><Trophy className="h-4 w-4" aria-label="Prize pool" /></dt>
+                          <dd className="font-medium text-fg">{h.prizePool}</dd>
+                        </div>
+                      )}
+                    </dl>
+
+                    <div className="mt-4 flex items-center justify-end border-t border-line pt-4">
+                      {isReg ? (
+                        <Badge tone="success">
+                          <Check className="h-3 w-3" aria-hidden="true" />
+                          Registered
+                        </Badge>
+                      ) : (
+                        <Button size="sm" onClick={() => handleRegisterDirect(h.id, h.title)}>
+                          Register
+                        </Button>
+                      )}
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </TabPanel>
 
       </div>
 
-      {/* MODAL: FREEZE & FINALIZE CONFIRMATION */}
-      {showFinalizeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#060a12]/80 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-[#0d1526] border border-[#253247] rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-950/80 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0">
-                <Icons.AlertCircle />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-white tracking-tight">
-                  Freeze & Finalize Project Submission
-                </h3>
-                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                  Once finalized, your submission cannot be edited. Continue?
-                </p>
-              </div>
-            </div>
+      {/* DIALOG: FINALIZE CONFIRMATION */}
+      <Dialog
+        open={showFinalizeModal}
+        onClose={() => setShowFinalizeModal(false)}
+        title="Finalize project submission"
+        description="Once finalized, your submission cannot be edited. Continue?"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg bg-raised/50 px-3">
+            <DescriptionList
+              items={[
+                { label: "Competition", value: activeSprint?.title || "—" },
+                { label: "Team", value: currentTeam?.name || "—" },
+                { label: "Project title", value: formValues.projectTitle },
+                {
+                  label: "Deliverable files",
+                  value: <span className="tabular-nums">{formValues.submissionFiles?.length || 0} file(s) attached</span>
+                }
+              ]}
+            />
+          </div>
 
-            <div className="p-3 bg-[#080e1a] border border-[#1c283c] rounded-xl space-y-2 text-xs">
-              <div className="flex justify-between items-center text-slate-400 font-mono text-[11px]">
-                <span>COMPETITION</span>
-                <span className="text-slate-200 font-medium truncate max-w-[200px]">{activeSprint?.title}</span>
-              </div>
-              <div className="flex justify-between items-center text-slate-400 font-mono text-[11px]">
-                <span>SQUAD</span>
-                <span className="text-emerald-400 font-bold">{currentTeam?.name}</span>
-              </div>
-              <div className="flex justify-between items-center text-slate-400 font-mono text-[11px]">
-                <span>PROJECT TITLE</span>
-                <span className="text-slate-200 truncate max-w-[200px]">{formValues.projectTitle}</span>
-              </div>
-              <div className="flex justify-between items-center text-slate-400 font-mono text-[11px]">
-                <span>DELIVERABLE FILES</span>
-                <span className="text-slate-200 font-mono">{formValues.submissionFiles?.length || 0} file(s) attached</span>
-              </div>
-            </div>
+          <Alert tone="warning" title="This action is irreversible">
+            All links and uploaded documentation will be locked and immediately forwarded to the Screening Committee review board.
+          </Alert>
 
-            <div className="p-2.5 bg-rose-950/30 border border-rose-800/40 rounded-lg text-[11px] text-rose-300 leading-normal">
-              <strong>Warning:</strong> This action is irreversible. All links and uploaded documentation will be locked and immediately forwarded to the Screening Committee review board.
-            </div>
-
-            <div className="flex gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowFinalizeModal(false)}
-                className="flex-1 py-2 px-3 bg-[#121c32] hover:bg-[#1a2744] border border-[#253247] text-slate-300 rounded-lg text-xs font-semibold transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmFinalize}
-                className="flex-1 py-2 px-3 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-colors shadow-sm"
-              >
-                Yes, Finalize & Lock
-              </button>
-            </div>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={() => setShowFinalizeModal(false)}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={handleConfirmFinalize}>
+              <Lock aria-hidden="true" />
+              Yes, finalize and lock
+            </Button>
           </div>
         </div>
-      )}
+      </Dialog>
 
-      {/* MODAL: DIGITAL CERTIFICATE VIEWER */}
-      {previewCert && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#060a12]/85 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="bg-[#0d1526] border border-[#253247] rounded-2xl max-w-2xl w-full p-8 shadow-2xl relative space-y-6">
-            <button
-              onClick={() => setPreviewCert(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white text-xs"
-            >
-              ✕ Close
-            </button>
-
-            {/* Certificate Canvas Mock */}
-            <div className="border-4 border-double border-amber-500/40 p-8 rounded-xl bg-[#080e1a] text-center space-y-4">
-              <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400">
-                <Icons.Terminal />
-              </div>
+      {/* DIALOG: DIGITAL CERTIFICATE VIEWER */}
+      <Dialog
+        open={Boolean(previewCert)}
+        onClose={() => setPreviewCert(null)}
+        title="Certificate"
+        size="xl"
+      >
+        {previewCert && (
+          <div className="space-y-5">
+            <div className="space-y-4 rounded-xl border-4 border-double border-line-strong bg-raised/50 p-6 text-center sm:p-8">
+              <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-line bg-surface text-accent-text">
+                <Award className="h-6 w-6" aria-hidden="true" />
+              </span>
 
               <div className="space-y-1">
-                <span className="text-[11px] font-mono tracking-widest text-amber-400 uppercase">
-                  HACKTRACK CERTIFICATE OF ACCOMPLISHMENT
-                </span>
-                <h2 className="text-2xl font-bold text-white tracking-tight">{previewCert.awardTitle}</h2>
+                <p className="eyebrow">HackTrack certificate of accomplishment</p>
+                <p className="text-2xl font-semibold tracking-tight text-fg">{previewCert.awardTitle}</p>
               </div>
 
-              <p className="text-xs text-slate-400">This official credential certifies that</p>
+              <p className="text-sm text-fg-muted">This official credential certifies that</p>
 
-              <h3 className="text-xl font-bold text-emerald-400 tracking-wide font-mono">
-                {previewCert.recipientName}
-              </h3>
+              <p className="text-xl font-semibold text-accent-text">{previewCert.recipientName}</p>
 
-              <p className="text-xs text-slate-300 max-w-md mx-auto leading-relaxed">
-                has successfully competed with squad <strong className="text-white">{previewCert.teamName}</strong> in the{" "}
-                <strong className="text-white">{previewCert.hackathonTitle}</strong> ({previewCert.track}) submitting project <strong className="text-white">"{previewCert.projectTitle}"</strong>.
+              <p className="mx-auto max-w-md text-sm leading-relaxed text-fg-muted">
+                has successfully competed with team <strong className="text-fg">{previewCert.teamName}</strong> in the{" "}
+                <strong className="text-fg">{previewCert.hackathonTitle}</strong> ({previewCert.track}) submitting project{" "}
+                <strong className="text-fg">"{previewCert.projectTitle}"</strong>.
               </p>
 
-              <div className="pt-4 border-t border-[#1c283c] flex flex-wrap items-center justify-between gap-4 text-left text-xs font-mono">
+              <dl className="grid gap-4 border-t border-line pt-4 text-left text-sm sm:grid-cols-3">
                 <div>
-                  <span className="text-[10px] text-slate-500 block">ISSUANCE DATE</span>
-                  <span className="text-slate-300">{previewCert.issueDate}</span>
+                  <dt className="eyebrow">Issuance date</dt>
+                  <dd className="mt-0.5 tabular-nums text-fg">{previewCert.issueDate}</dd>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-500 block">CERTIFICATE ID</span>
-                  <span className="text-emerald-400">{previewCert.certificateId}</span>
+                  <dt className="eyebrow">Certificate ID</dt>
+                  <dd className="mt-0.5 break-all font-mono text-xs text-fg">{previewCert.certificateId}</dd>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-500 block">VERIFICATION SIGNATURE</span>
-                  <span className="text-slate-300">{previewCert.signedBy}</span>
+                  <dt className="eyebrow">Verification signature</dt>
+                  <dd className="mt-0.5 text-fg">{previewCert.signedBy}</dd>
                 </div>
-              </div>
+              </dl>
             </div>
 
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => window.print()}
-                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs"
-              >
-                Print / Download PDF
-              </button>
+            <div className="flex justify-end">
+              <Button onClick={() => window.print()}>
+                <Printer aria-hidden="true" />
+                Print / download PDF
+              </Button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Dialog>
 
     </DashboardLayout>
   );

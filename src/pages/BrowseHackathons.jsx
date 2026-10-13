@@ -1,14 +1,21 @@
 import React, { useState, useMemo } from 'react';
-import { useNavigate, useOutletContext } from 'react-router-dom';
+import { useOutletContext } from 'react-router-dom';
+import { SearchX } from 'lucide-react';
 import FilterBar from '../components/FilterBar';
 import HackathonCard from '../components/HackathonCard';
+import { Button, EmptyState, PageHeader } from '../components/ui';
 import { getStoredHackathons } from '../utils/hackathonService';
+
+// Deadlines are stored as display strings ("Oct 18, 2026"); compare them as dates.
+const toTime = (value) => {
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? Number.POSITIVE_INFINITY : time;
+};
 
 export default function BrowseHackathons({
   onOpenTeamModal: propOpenTeamModal,
   setTeamCodeInput: propSetTeamCodeInput
 }) {
-  const navigate = useNavigate();
   const outletContext = useOutletContext() || {};
   const onOpenTeamModal = propOpenTeamModal || outletContext.onOpenTeamModal || (() => {});
   const setTeamCodeInput = propSetTeamCodeInput || outletContext.setTeamCodeInput || (() => {});
@@ -34,60 +41,65 @@ export default function BrowseHackathons({
 
       return matchSearch && matchCategory && matchStage;
     }).sort((a, b) => {
-      if (sortBy === "deadline") return a.deadline.localeCompare(b.deadline);
+      if (sortBy === "deadline") return toTime(a.deadline) - toTime(b.deadline);
       if (sortBy === "title") return a.title.localeCompare(b.title);
       return 0;
     });
   }, [searchTerm, selectedCategory, selectedStage, sortBy]);
 
+  const resetFilters = () => {
+    setSearchTerm("");
+    setSelectedCategory("All");
+    setSelectedStage("All");
+  };
+  const isFiltered = searchTerm || selectedCategory !== "All" || selectedStage !== "All";
+
   return (
-    <div className="py-12">
-      <div className="max-w-6xl mx-auto px-4">
-        
-        {/* Header Title */}
-        <div className="mb-8">
-          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-[11px] font-mono text-emerald-400 mb-3">
-            <span>PUBLIC DIRECTORY</span>
-          </div>
-          <h1 className="text-3xl font-extrabold text-white">Browse Active Hackathons</h1>
-          <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-            Discover sanctioned sprints, review eligibility and screening criteria, and join existing team rosters.
-          </p>
+    <div className="container-page space-y-8 py-10 sm:py-14">
+      <PageHeader
+        title="Hackathons"
+        description="Find a competition, review its rules and judging criteria, then register or join your team with an invite code."
+      />
+
+      <FilterBar
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        selectedStage={selectedStage}
+        onStageChange={setSelectedStage}
+        stages={stages}
+        sortBy={sortBy}
+        onSortChange={setSortBy}
+        selectedCategory={selectedCategory}
+        onCategoryChange={setSelectedCategory}
+        categories={categories}
+      />
+
+      <div className="space-y-4">
+        <div className="flex items-center justify-between text-sm text-fg-subtle" aria-live="polite">
+          <h2 className="text-sm font-normal text-fg-subtle">
+            {filteredHackathons.length} {filteredHackathons.length === 1 ? "hackathon" : "hackathons"}
+          </h2>
+          {isFiltered && filteredHackathons.length > 0 && (
+            <Button variant="link" size="sm" onClick={resetFilters}>Clear filters</Button>
+          )}
         </div>
 
-        {/* Filter Controls Bar */}
-        <FilterBar
-          searchTerm={searchTerm}
-          onSearchChange={setSearchTerm}
-          selectedStage={selectedStage}
-          onStageChange={setSelectedStage}
-          stages={stages}
-          sortBy={sortBy}
-          onSortChange={setSortBy}
-          selectedCategory={selectedCategory}
-          onCategoryChange={setSelectedCategory}
-          categories={categories}
-        />
-
-        {/* Hackathon Listing Cards */}
         {filteredHackathons.length === 0 ? (
-          <div className="text-center py-16 bg-slate-900/30 border border-dashed border-slate-800 rounded-xl">
-            <p className="text-slate-400 text-sm">No hackathons match your current search and filter settings.</p>
-            <button
-              onClick={() => { setSearchTerm(""); setSelectedCategory("All"); setSelectedStage("All"); }}
-              className="mt-3 text-xs text-emerald-400 underline"
-            >
-              Reset Filters
-            </button>
+          <div className="rounded-xl border border-dashed border-line">
+            <EmptyState
+              icon={SearchX}
+              title="No hackathons match these filters"
+              description="Try a different keyword, or widen the stage and track filters."
+              action={<Button variant="secondary" onClick={resetFilters}>Clear filters</Button>}
+            />
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {filteredHackathons.map((hackathon) => (
               <HackathonCard
                 key={hackathon.id}
                 hackathon={hackathon}
                 variant="detailed"
-                onNavigate={(id) => navigate(`/hackathons/${id}`)}
                 onOpenTeamCode={(h) => {
                   const code = h.id === "devpulse-2026" ? "HT-DEV-42" : "HT-AI-99";
                   setTeamCodeInput(code);
@@ -97,7 +109,6 @@ export default function BrowseHackathons({
             ))}
           </div>
         )}
-
       </div>
     </div>
   );

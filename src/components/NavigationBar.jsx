@@ -1,9 +1,13 @@
 import React, { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { Icons } from './Icons';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { ArrowRight, KeyRound, Menu, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getRoleDashboardPath } from '../utils/auth';
 import ThemeToggle from './ThemeToggle';
+import { Button, Logo, cn } from './ui';
+
+const navItemClass =
+  'inline-flex h-8 items-center whitespace-nowrap rounded-md px-3 text-sm font-medium text-fg-muted transition-colors hover:bg-raised hover:text-fg touch:h-10';
 
 export default function NavigationBar({ onOpenTeamModal }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -12,195 +16,146 @@ export default function NavigationBar({ onOpenTeamModal }) {
   const { user, isAuthenticated, logout } = useAuth();
   const currentPath = location.pathname;
 
+  // Close the mobile drawer whenever the route changes.
+  const [prevPath, setPrevPath] = useState(currentPath);
+  if (prevPath !== currentPath) {
+    setPrevPath(currentPath);
+    setMobileMenuOpen(false);
+  }
+
   const scrollToSection = (sectionId) => {
+    setMobileMenuOpen(false);
+    const scroll = () => document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' });
     if (currentPath !== '/') {
       navigate('/');
-      setTimeout(() => {
-        const el = document.getElementById(sectionId);
-        if (el) el.scrollIntoView({ behavior: 'smooth' });
-      }, 100);
+      setTimeout(scroll, 100);
     } else {
-      const el = document.getElementById(sectionId);
-      if (el) el.scrollIntoView({ behavior: 'smooth' });
+      scroll();
     }
   };
 
+  const dashboardPath = user ? getRoleDashboardPath(user.role) : '/login';
+  const firstName = user?.fullName?.split(' ')[0] || 'User';
+
   return (
-    <header className="sticky top-0 z-40 bg-slate-950/85 backdrop-blur-md border-b border-slate-800">
-      <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-        
-        {/* Brand */}
-        <button
-          onClick={() => { navigate('/'); setMobileMenuOpen(false); }}
-          className="flex items-center space-x-2.5 text-left group focus:outline-none"
-        >
-          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center transition-colors group-hover:border-emerald-400">
-            <Icons.Terminal />
-          </div>
-          <div className="flex flex-col">
-            <span className="font-bold text-lg text-white tracking-tight leading-none">HackTrack</span>
-            <span className="text-[10px] text-slate-400 font-mono tracking-wider">MANAGEMENT SYSTEM</span>
-          </div>
-        </button>
+    <header className="sticky top-0 z-40 border-b border-line bg-canvas/80 backdrop-blur-md supports-[backdrop-filter]:bg-canvas/70">
+      <div className="container-page flex h-14 items-center justify-between gap-4">
+        <div className="flex items-center gap-6">
+          <Link to="/" className="inline-flex min-h-10 items-center rounded-md" aria-label="HackTrack home">
+            <Logo />
+          </Link>
 
-        {/* Desktop Navigation */}
-        <nav className="hidden md:flex items-center space-x-6 text-sm">
-          <button
-            onClick={() => navigate('/hackathons')}
-            className={`transition-colors ${currentPath.startsWith('/hackathons') ? 'text-emerald-400 font-semibold' : 'text-slate-300 hover:text-white'}`}
-          >
-            Browse Hackathons
-          </button>
-          <button
-            onClick={() => scrollToSection('how-it-works')}
-            className="text-slate-300 hover:text-white transition-colors"
-          >
-            How It Works
-          </button>
-          <button
-            onClick={() => scrollToSection('roles')}
-            className="text-slate-300 hover:text-white transition-colors"
-          >
-            Roles
-          </button>
-        </nav>
+          <nav aria-label="Main" className="hidden items-center gap-1 lg:flex">
+            <NavLink
+              to="/hackathons"
+              className={({ isActive }) => cn(navItemClass, isActive && 'bg-raised text-fg')}
+            >
+              Hackathons
+            </NavLink>
+            <button type="button" onClick={() => scrollToSection('how-it-works')} className={navItemClass}>
+              How it works
+            </button>
+            <button type="button" onClick={() => scrollToSection('roles')} className={navItemClass}>
+              Roles
+            </button>
+          </nav>
+        </div>
 
-        {/* Action CTAs */}
-        <div className="hidden md:flex items-center space-x-3">
+        <div className="hidden items-center gap-2 lg:flex">
+          <Button variant="ghost" size="sm" onClick={onOpenTeamModal}>
+            <KeyRound aria-hidden="true" />
+            Team code
+          </Button>
           <ThemeToggle />
-          <button
-            onClick={onOpenTeamModal}
-            className="flex items-center space-x-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 hover:border-slate-500 hover:text-white transition-colors"
-          >
-            <Icons.Key />
-            <span>Enter Team Code</span>
-          </button>
+          <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
 
           {isAuthenticated && user ? (
             <>
-              <button
-                onClick={() => navigate(getRoleDashboardPath(user.role))}
-                className="text-xs font-semibold px-3 py-2 rounded-lg bg-emerald-950 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-900/60 transition-colors flex items-center gap-1.5"
-              >
-                <span>Dashboard ({user.fullName?.split(' ')[0] || 'User'})</span>
-                <Icons.ArrowRight />
-              </button>
-              <button
-                onClick={logout}
-                className="text-xs font-semibold px-2.5 py-2 rounded-lg border border-slate-800 text-slate-400 hover:text-rose-400 hover:border-rose-900/50 transition-colors"
-                title="Log Out"
-              >
-                Log Out
-              </button>
+              <Button variant="ghost" size="sm" onClick={logout}>
+                Log out
+              </Button>
+              <Button as={Link} to={dashboardPath} size="sm">
+                Dashboard · {firstName}
+                <ArrowRight aria-hidden="true" />
+              </Button>
             </>
           ) : (
             <>
-              <button
-                onClick={() => navigate('/login')}
-                className={`text-xs font-semibold px-3 py-2 rounded-lg border transition-colors ${
-                  currentPath === '/login'
-                    ? 'bg-slate-800 border-slate-600 text-white'
-                    : 'border-transparent text-slate-300 hover:text-white'
-                }`}
-              >
-                Log In
-              </button>
-              <button
-                onClick={() => navigate('/register')}
-                className="text-xs font-semibold px-3.5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition-colors shadow-sm"
-              >
-                Sign Up
-              </button>
+              <Button as={Link} to="/login" variant="ghost" size="sm">
+                Log in
+              </Button>
+              <Button as={Link} to="/register" size="sm">
+                Sign up
+              </Button>
             </>
           )}
         </div>
 
-        {/* Mobile Hamburger Button */}
-        <div className="md:hidden flex items-center gap-2">
+        {/* Mobile controls */}
+        <div className="flex items-center gap-1 lg:hidden">
+          <Button variant="ghost" size="icon-sm" onClick={onOpenTeamModal} aria-label="Enter team code">
+            <KeyRound aria-hidden="true" />
+          </Button>
           <ThemeToggle />
-          <button
-            onClick={onOpenTeamModal}
-            className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-200 text-xs flex items-center gap-1"
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setMobileMenuOpen((open) => !open)}
+            aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-menu"
           >
-            <Icons.Key />
-          </button>
-          <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="p-2 text-slate-400 hover:text-white focus:outline-none"
-            aria-label="Toggle menu"
-          >
-            {mobileMenuOpen ? <Icons.Close /> : <Icons.Menu />}
-          </button>
+            {mobileMenuOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
+          </Button>
         </div>
-
       </div>
 
-      {/* Mobile Menu Drawer */}
       {mobileMenuOpen && (
-        <div className="md:hidden border-b border-slate-800 bg-slate-950 px-4 pt-3 pb-5 space-y-3">
-          <button
-            onClick={() => { navigate('/hackathons'); setMobileMenuOpen(false); }}
-            className="block w-full text-left py-2 text-sm text-slate-200 font-medium"
-          >
-            Browse Hackathons
-          </button>
-          <button
-            onClick={() => {
-              setMobileMenuOpen(false);
-              scrollToSection('how-it-works');
-            }}
-            className="block w-full text-left py-2 text-sm text-slate-200 font-medium"
-          >
-            How It Works
-          </button>
-          <button
-            onClick={() => {
-              setMobileMenuOpen(false);
-              scrollToSection('roles');
-            }}
-            className="block w-full text-left py-2 text-sm text-slate-200 font-medium"
-          >
-            Roles
-          </button>
-          <div className="pt-3 border-t border-slate-800 flex flex-col gap-2">
-            {isAuthenticated && user ? (
-              <>
-                <button
-                  onClick={() => {
-                    navigate(getRoleDashboardPath(user.role));
-                    setMobileMenuOpen(false);
-                  }}
-                  className="w-full py-2.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-bold text-center"
-                >
-                  Go to {user.role?.toUpperCase()} Dashboard
-                </button>
-                <button
-                  onClick={() => {
-                    logout();
-                    setMobileMenuOpen(false);
-                  }}
-                  className="w-full py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 text-xs text-center"
-                >
-                  Log Out
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => { navigate('/login'); setMobileMenuOpen(false); }}
-                  className="w-full py-2.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-200 text-center"
-                >
-                  Log In
-                </button>
-                <button
-                  onClick={() => { navigate('/register'); setMobileMenuOpen(false); }}
-                  className="w-full py-2.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-bold text-center"
-                >
-                  Sign Up for HackTrack
-                </button>
-              </>
-            )}
-          </div>
+        <div id="mobile-menu" className="border-t border-line bg-surface lg:hidden">
+          <nav aria-label="Mobile" className="container-page flex flex-col gap-1 py-3">
+            <NavLink
+              to="/hackathons"
+              className={({ isActive }) => cn(navItemClass, 'h-11', isActive && 'bg-raised text-fg')}
+            >
+              Hackathons
+            </NavLink>
+            <button type="button" onClick={() => scrollToSection('how-it-works')} className={cn(navItemClass, 'h-11 text-left')}>
+              How it works
+            </button>
+            <button type="button" onClick={() => scrollToSection('roles')} className={cn(navItemClass, 'h-11 text-left')}>
+              Roles
+            </button>
+
+            <div className="mt-2 grid gap-2 border-t border-line pt-3 sm:grid-cols-2">
+              {isAuthenticated && user ? (
+                <>
+                  <Button as={Link} to={dashboardPath} size="lg">
+                    Go to dashboard
+                    <ArrowRight aria-hidden="true" />
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="lg"
+                    onClick={() => {
+                      logout();
+                      setMobileMenuOpen(false);
+                    }}
+                  >
+                    Log out
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button as={Link} to="/register" size="lg">
+                    Sign up
+                  </Button>
+                  <Button as={Link} to="/login" variant="secondary" size="lg">
+                    Log in
+                  </Button>
+                </>
+              )}
+            </div>
+          </nav>
         </div>
       )}
     </header>

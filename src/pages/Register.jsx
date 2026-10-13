@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { Alert, Button, Field, Input, Logo, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { getRoleDashboardPath } from '../utils/auth';
 
@@ -18,6 +19,9 @@ export default function Register({ navigate: propNavigate }) {
     confirmPassword: ""
   });
   const [statusMessage, setStatusMessage] = useState(null);
+  // True only while the real login/register call is in flight; stays true on
+  // success because the page is about to redirect.
+  const [submitting, setSubmitting] = useState(false);
 
   const roles = [
     {
@@ -67,8 +71,10 @@ export default function Register({ navigate: propNavigate }) {
       return;
     }
 
+    setSubmitting(true);
     const res = await register(formData);
     if (!res.success) {
+      setSubmitting(false);
       setStatusMessage({ type: "error", text: res.error });
       return;
     }
@@ -76,7 +82,7 @@ export default function Register({ navigate: propNavigate }) {
     const destination = getRoleDashboardPath(res.user.role);
     setStatusMessage({
       type: "success",
-      text: `Account created successfully for ${res.user.fullName} (${res.user.role.toUpperCase()})! Redirecting to dashboard...`
+      text: `Account created for ${res.user.fullName}. Opening your dashboard…`
     });
 
     setTimeout(() => {
@@ -85,162 +91,101 @@ export default function Register({ navigate: propNavigate }) {
   };
 
   return (
-    <div className="py-12 max-w-xl mx-auto px-4">
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl">
-        
-        {/* Registration Header */}
-        <div className="mb-6">
-          <span className="text-[11px] font-mono text-emerald-400 uppercase">ACADEMIC & EVALUATOR ENROLLMENT</span>
-          <h1 className="text-2xl font-bold text-white tracking-tight mt-1">Create your HackTrack ID</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Sign up to build teams, submit project repos, or participate in judging and screening.
-          </p>
-        </div>
+    <div className="container-page py-10 sm:py-16">
+      <div className="mx-auto max-w-2xl">
+        <Logo className="mb-8" />
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Create your account</h1>
+        <p className="mt-1.5 text-sm text-fg-muted">
+          Build teams and submit projects, or take part in screening and judging.
+        </p>
 
         {statusMessage && (
-          <div
-            className={`p-3 rounded-lg text-xs mb-5 leading-relaxed ${
-              statusMessage.type === "error"
-                ? "bg-rose-950/40 border border-rose-800/50 text-rose-300"
-                : "bg-emerald-950/40 border border-emerald-800/50 text-emerald-300"
-            }`}
-          >
+          <Alert tone={statusMessage.type === "error" ? "danger" : "success"} className="mt-6">
             {statusMessage.text}
-          </div>
+          </Alert>
         )}
 
-        <form onSubmit={handleRegister} className="space-y-4">
-          
-          {/* 4 Dedicated System Roles */}
-          <div>
-            <label className="text-xs font-medium text-slate-300 block mb-1.5">
-              Select User Role *
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-              {roles.map((r) => (
-                <button
-                  type="button"
-                  key={r.id}
-                  onClick={() => setFormData({ ...formData, role: r.id })}
-                  className={`p-3 rounded-lg border text-left transition-colors ${
-                    formData.role === r.id
-                      ? "bg-emerald-950/40 border-emerald-500 text-white shadow-sm"
-                      : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span className="font-bold text-white text-xs">{r.title}</span>
-                    {formData.role === r.id && (
-                      <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+        <form onSubmit={handleRegister} className="mt-8 space-y-8" noValidate>
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-medium text-fg">
+              How will you use HackTrack?<span className="ml-0.5 text-danger" aria-hidden="true">*</span>
+            </legend>
+            <div role="radiogroup" aria-label="Account role" className="grid gap-2 sm:grid-cols-2">
+              {roles.map((r) => {
+                const selected = formData.role === r.id;
+                return (
+                  <button
+                    type="button"
+                    key={r.id}
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setFormData({ ...formData, role: r.id })}
+                    className={cn(
+                      "flex gap-3 rounded-lg border p-3.5 text-left transition-colors",
+                      selected ? "border-accent/50 bg-accent/10" : "border-line hover:border-line-strong hover:bg-raised"
                     )}
-                  </div>
-                  <div className="text-[11px] text-slate-400 leading-tight">{r.desc}</div>
-                </button>
-              ))}
+                  >
+                    <span
+                      className={cn(
+                        "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
+                        selected ? "border-accent" : "border-line-strong"
+                      )}
+                      aria-hidden="true"
+                    >
+                      {selected && <span className="h-2 w-2 rounded-full bg-accent" />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-fg">{r.title}</span>
+                      <span className="mt-0.5 block text-xs leading-relaxed text-fg-subtle">{r.desc}</span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-          </div>
+          </fieldset>
 
-          {/* Full Name & Student ID */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-slate-300 block mb-1">Full Legal Name *</label>
-              <input
-                type="text"
-                name="fullName"
-                required
-                value={formData.fullName}
-                onChange={handleChange}
-                placeholder="e.g. Maya Lin"
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-              />
+          <fieldset className="space-y-4">
+            <legend className="mb-1 text-sm font-medium text-fg">Your details</legend>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Full name" required>
+                <Input name="fullName" autoComplete="name" value={formData.fullName} onChange={handleChange} placeholder="Maya Lin" />
+              </Field>
+              <Field label="Student or member ID" hint="Optional">
+                <Input name="memberId" value={formData.memberId} onChange={handleChange} placeholder="STU-88219" />
+              </Field>
+              <Field label="University or organization" required>
+                <Input name="university" autoComplete="organization" value={formData.university} onChange={handleChange} placeholder="Stanford University" />
+              </Field>
+              <Field label="Institutional email" required>
+                <Input type="email" name="email" autoComplete="email" value={formData.email} onChange={handleChange} placeholder="maya@stanford.edu" />
+              </Field>
             </div>
-            <div>
-              <label className="text-xs font-medium text-slate-300 block mb-1">Student / Member ID</label>
-              <input
-                type="text"
-                name="memberId"
-                value={formData.memberId}
-                onChange={handleChange}
-                placeholder="e.g. STU-88219"
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-          </div>
+          </fieldset>
 
-          {/* University & Academic Email */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-slate-300 block mb-1">University / Organization *</label>
-              <input
-                type="text"
-                name="university"
+          <fieldset className="space-y-4">
+            <legend className="mb-1 text-sm font-medium text-fg">Password</legend>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Password" required>
+                <Input type="password" name="password" autoComplete="new-password" value={formData.password} onChange={handleChange} />
+              </Field>
+              <Field
+                label="Confirm password"
                 required
-                value={formData.university}
-                onChange={handleChange}
-                placeholder="e.g. Stanford University"
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-              />
+                error={formData.confirmPassword && formData.password !== formData.confirmPassword ? "Passwords don't match." : undefined}
+              >
+                <Input type="password" name="confirmPassword" autoComplete="new-password" value={formData.confirmPassword} onChange={handleChange} />
+              </Field>
             </div>
-            <div>
-              <label className="text-xs font-medium text-slate-300 block mb-1">Institutional Email *</label>
-              <input
-                type="email"
-                name="email"
-                required
-                value={formData.email}
-                onChange={handleChange}
-                placeholder="maya@stanford.edu"
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-          </div>
+          </fieldset>
 
-          {/* Passwords */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-slate-300 block mb-1">Password *</label>
-              <input
-                type="password"
-                name="password"
-                required
-                value={formData.password}
-                onChange={handleChange}
-                placeholder="••••••••••••"
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-300 block mb-1">Confirm Password *</label>
-              <input
-                type="password"
-                name="confirmPassword"
-                required
-                value={formData.confirmPassword}
-                onChange={handleChange}
-                placeholder="••••••••••••"
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-              />
-            </div>
+          <div className="flex flex-col-reverse gap-4 border-t border-line pt-6 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-fg-muted">
+              Already have an account?{" "}
+              <Link to="/login" className="inline-flex min-h-10 items-center rounded-sm font-medium text-accent-text hover:underline sm:min-h-0">Sign in</Link>
+            </p>
+            <Button type="submit" size="lg" loading={submitting}>{submitting ? "Creating account…" : "Create account"}</Button>
           </div>
-
-          <button
-            type="submit"
-            className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition-colors shadow"
-          >
-            Complete Registration & Launch Dashboard
-          </button>
         </form>
-
-        <div className="mt-6 pt-5 border-t border-slate-800 text-center text-xs text-slate-400">
-          Already registered?{" "}
-          <button
-            onClick={() => navigate('/login')}
-            className="text-emerald-400 hover:underline font-semibold"
-          >
-            Sign in to your account
-          </button>
-        </div>
-
       </div>
     </div>
   );

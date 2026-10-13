@@ -1,6 +1,26 @@
 import React, { useState, useMemo } from 'react';
+import { ExternalLink, Gavel, Inbox, KeyRound, MousePointerClick, Users, CheckCircle2, Clock, Trophy } from 'lucide-react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
-import { Icons } from '../../components/Icons';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  Dialog,
+  EmptyState,
+  Field,
+  Input,
+  PageHeader,
+  Select,
+  StatCard,
+  Textarea,
+  cn,
+} from '../../components/ui';
 import { MOCK_JUDGE_DATA } from '../../data/mockDashboardData';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -10,6 +30,54 @@ import {
 } from '../../utils/hackathonService';
 import { getShortlistedSubmissions } from '../../utils/submissionService';
 import { getEvaluations, saveEvaluation, isResultsPublished } from '../../utils/evaluationService';
+
+/* Review-queue pattern (shared look with Screening and Mentor dashboards) */
+function QueueList({ title, count, children }) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
+        <h2 className="text-sm font-semibold text-fg">{title}</h2>
+        <span className="text-xs tabular-nums text-fg-subtle">{count}</span>
+      </div>
+      {children}
+    </Card>
+  );
+}
+
+function QueueItem({ selected, onSelect, title, badge, meta }) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-current={selected ? 'true' : undefined}
+        className={cn(
+          'flex w-full flex-col gap-1 border-l-2 px-5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40',
+          selected ? 'border-accent bg-raised' : 'border-transparent hover:bg-raised/50'
+        )}
+      >
+        <span className="flex items-center justify-between gap-3">
+          <span className="truncate text-sm font-medium text-fg">{title}</span>
+          {badge}
+        </span>
+        {meta && <span className="truncate text-xs text-fg-subtle">{meta}</span>}
+      </button>
+    </li>
+  );
+}
+
+function LinkButton({ href, children }) {
+  // Submissions without a URL are stored as "#" — show that plainly instead of a dead link.
+  if (!href || href === "#") {
+    return <span className="inline-flex h-8 items-center text-sm text-fg-subtle">{children}: not provided</span>;
+  }
+  return (
+    <Button as="a" href={href} target="_blank" rel="noopener noreferrer" variant="secondary" size="sm">
+      <ExternalLink aria-hidden="true" />
+      {children}
+    </Button>
+  );
+}
 
 export default function JudgeDashboard() {
   const { user } = useAuth();
@@ -116,15 +184,10 @@ export default function JudgeDashboard() {
   const selectedTeam = filteredTeams.find((t) => t.id === selectedTeamId) || filteredTeams[0] || teamsState[0];
 
   // Dynamically resolve rubrics configured for the active hackathon
-  const activeHackathon = useMemo(() => {
-    if (selectedHackathonFilter !== "all") {
-      return allHackathons.find((h) => h.id === selectedHackathonFilter) || assignedHackathons[0];
-    }
-    return (
-      allHackathons.find((h) => h.id === selectedTeam?.hackathonId) ||
-      assignedHackathons[0]
-    );
-  }, [allHackathons, selectedHackathonFilter, selectedTeam?.hackathonId, assignedHackathons]);
+  // (plain derivation: cheap lookup, recomputed every render)
+  const activeHackathon = selectedHackathonFilter !== "all"
+    ? (allHackathons.find((h) => h.id === selectedHackathonFilter) || assignedHackathons[0])
+    : (allHackathons.find((h) => h.id === selectedTeam?.hackathonId) || assignedHackathons[0]);
 
   const currentRubrics = useMemo(() => {
     if (activeHackathon?.rubrics && activeHackathon.rubrics.length > 0) {
@@ -196,7 +259,7 @@ export default function JudgeDashboard() {
       setTeamsState((prev) =>
         prev.map((t) => (t.id === selectedTeam.id ? { ...t, status: "Evaluated" } : t))
       );
-      setSaveNotice(`✓ Certified score (${computeTotal(selectedTeam.scores)} / 100) saved and securely recorded for ${selectedTeam.name}.`);
+      setSaveNotice(`Certified score (${computeTotal(selectedTeam.scores)} / 100) saved and securely recorded for ${selectedTeam.name}.`);
       setTimeout(() => setSaveNotice(null), 4500);
     }
   };
@@ -210,399 +273,257 @@ export default function JudgeDashboard() {
       portalTitle="Judge & Evaluation Panel"
       roleBadgeText="JUDGE / EVALUATOR"
     >
-      <div className="space-y-6">
+      <div className="space-y-8">
+        <PageHeader
+          eyebrow={`Judging panel · ${user?.university || "ACM Expert Review Panel"}`}
+          title="Evaluation Chamber"
+          description="Score pre-screened finalists across standardized rubrics."
+        />
 
-        {/* 1. OVERVIEW */}
-        <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-5 shadow-sm">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs font-mono text-emerald-400 font-semibold uppercase tracking-wider">
-                  JUDGING PANEL
-                </span>
-                <span className="text-slate-600">•</span>
-                <span className="text-xs text-slate-400 font-mono">
-                  {user?.university || "ACM Expert Review Panel"}
-                </span>
-              </div>
-              <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-                Evaluation Chamber
-              </h1>
-            </div>
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+          <StatCard label="Assigned sprints" value={assignedHackathons.length} icon={Trophy} />
+          <StatCard label="Finalist teams" value={teamsState.length} icon={Users} />
+          <StatCard label="Completed" value={evaluatedCount} icon={CheckCircle2} />
+          <StatCard label="Pending" value={pendingCount} icon={Clock} />
+        </div>
 
-            <span className="text-xs text-slate-400">
-              Score pre-screened finalists across standardized rubrics.
-            </span>
-          </div>
-
-          {/* 4 Metric Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-[#253247]">
-            <div className="p-3 bg-[#080e1a] border border-[#1c283c] rounded-lg">
-              <span className="text-[10px] text-slate-500 font-mono uppercase block">ASSIGNED SPRINTS</span>
-              <span className="text-lg font-bold text-white mt-0.5 block">{assignedHackathons.length}</span>
-            </div>
-            <div className="p-3 bg-[#080e1a] border border-[#1c283c] rounded-lg">
-              <span className="text-[10px] text-slate-500 font-mono uppercase block">FINALIST TEAMS</span>
-              <span className="text-lg font-bold text-white mt-0.5 block">{teamsState.length}</span>
-            </div>
-            <div className="p-3 bg-[#080e1a] border border-[#1c283c] rounded-lg">
-              <span className="text-[10px] text-emerald-400 font-mono uppercase block">COMPLETED</span>
-              <span className="text-lg font-bold text-emerald-400 mt-0.5 block">{evaluatedCount}</span>
-            </div>
-            <div className="p-3 bg-[#080e1a] border border-[#1c283c] rounded-lg">
-              <span className="text-[10px] text-amber-400 font-mono uppercase block">PENDING</span>
-              <span className="text-lg font-bold text-amber-400 mt-0.5 block">{pendingCount}</span>
-            </div>
-          </div>
-        </section>
-
-        {/* Role Explanation Banner */}
-        <section className="bg-[#080e1a] border border-blue-500/20 rounded-xl p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs shadow-sm">
-          <div className="flex items-start gap-2.5">
-            <span className="text-lg">⚖️</span>
-            <div>
-              <span className="font-bold text-blue-400">Judge / Evaluator Role:</span>
-              <p className="text-slate-300 text-[11px] mt-0.5 leading-relaxed">
-                You evaluate <strong>only shortlisted teams</strong> that passed the initial screening gate. Your scores directly compile into the final certified rankings according to this hackathon's specific rubrics.
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={() => setShowCodeModal(true)}
-            className="px-3.5 py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/40 text-blue-300 font-bold rounded-lg text-xs transition-colors shrink-0 flex items-center gap-1.5"
-          >
-            <span>🔑</span> Enter Judge Access Code
-          </button>
-        </section>
+        {/* Role explanation */}
+        <Alert
+          tone="info"
+          title="Judge / Evaluator role"
+          action={
+            <Button type="button" variant="secondary" size="sm" onClick={() => setShowCodeModal(true)}>
+              <KeyRound aria-hidden="true" />
+              Enter judge access code
+            </Button>
+          }
+        >
+          You evaluate <strong className="font-medium text-fg">only shortlisted teams</strong> that passed the initial
+          screening gate. Your scores directly compile into the final certified rankings according to this
+          hackathon&apos;s specific rubrics.
+        </Alert>
 
         {codeNotice && (
-          <div className={`p-3 rounded-lg text-xs font-medium border ${
-            codeNotice.type === 'success'
-              ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
-              : 'bg-rose-950/60 border-rose-500/40 text-rose-300'
-          }`}>
+          <Alert
+            tone={codeNotice.type === 'success' ? 'success' : 'danger'}
+            title={codeNotice.type === 'success' ? 'Access code verified' : 'Access code not accepted'}
+          >
             {codeNotice.text}
-          </div>
+          </Alert>
         )}
 
-        {/* Sprint Filter Bar */}
-        <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs shadow-sm">
-          <div className="flex items-center gap-2">
-            <span className="text-slate-400 font-mono text-[11px]">ACTIVE HACKATHON:</span>
-            <select
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <Field label="Active hackathon" className="w-full sm:max-w-xs">
+            <Select
               value={selectedHackathonFilter}
               onChange={(e) => setSelectedHackathonFilter(e.target.value)}
-              className="bg-[#080e1a] border border-[#223044] text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 font-semibold"
+              className="font-medium"
             >
-              <option value="all">All Assigned Competitions ({assignedHackathons.length})</option>
+              <option value="all">All assigned competitions ({assignedHackathons.length})</option>
               {assignedHackathons.map((h) => (
                 <option key={h.id} value={h.id}>{h.title}</option>
               ))}
-            </select>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/30 text-[10px] font-mono text-blue-400">
+            </Select>
+          </Field>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="info" className="tabular-nums">
               Rubrics: {(activeHackathon?.rubrics || []).length} criteria configured
-            </span>
-            <span className="px-2 py-0.5 rounded bg-emerald-950 border border-emerald-500/30 text-[10px] font-mono text-emerald-400">
-              Screening-Cleared Finalists Only
-            </span>
+            </Badge>
+            <Badge tone="success">Screening-cleared finalists only</Badge>
           </div>
-        </section>
+        </div>
 
-        {/* 2. TWO-COLUMN LAYOUT: ASSIGNED TEAMS & EVALUATION */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-
-          {/* Left Column (4 cols): Assigned Teams Roster */}
-          <div className="lg:col-span-4 space-y-3">
-            <section className="bg-[#0d1526] border border-[#253247] rounded-xl overflow-hidden shadow-sm">
-              <div className="px-5 py-3.5 border-b border-[#253247] bg-[#121c32] flex items-center justify-between">
-                <div>
-                  <h2 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
-                    ASSIGNED TEAMS
-                  </h2>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Select a finalist to evaluate
-                  </p>
-                </div>
-                <span className="text-[11px] font-mono text-slate-400">
-                  {filteredTeams.length} Teams
-                </span>
-              </div>
-
-              <div className="p-3 space-y-2">
-                {filteredTeams.length === 0 ? (
-                  <div className="py-6 text-center text-xs text-slate-400">
-                    No shortlisted finalists for this sprint.
-                  </div>
-                ) : (
-                  filteredTeams.map((t) => {
-                    const isSelected = selectedTeam?.id === t.id;
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {/* Queue */}
+          <div>
+            <QueueList title="Assigned teams" count={`${filteredTeams.length} teams`}>
+              {filteredTeams.length === 0 ? (
+                <EmptyState
+                  icon={Inbox}
+                  title="No finalists assigned"
+                  description="No shortlisted finalists for this sprint yet. Teams appear here once screening clears them."
+                />
+              ) : (
+                <ul className="divide-y divide-line">
+                  {filteredTeams.map((t) => {
                     const isEvaluated = t.status === "Evaluated";
-                    const totalScore = computeTotal(t.scores);
-
                     return (
-                      <button
+                      <QueueItem
                         key={t.id}
-                        type="button"
-                        onClick={() => setSelectedTeamId(t.id)}
-                        className={`w-full text-left p-3.5 rounded-lg border transition-all text-xs ${
-                          isSelected
-                            ? "bg-[#121c32] border-emerald-500/80 shadow-sm"
-                            : "bg-[#080e1a] border-[#1c283c] hover:border-[#354866]"
-                        }`}
-                      >
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="font-bold text-white text-sm">{t.name}</span>
-                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold ${
-                            isEvaluated
-                              ? "bg-emerald-950 text-emerald-300 border border-emerald-500/30"
-                              : "bg-amber-950/60 text-amber-300 border border-amber-500/30"
-                          }`}>
-                            {isEvaluated ? `${totalScore} pts ✓` : "Pending"}
-                          </span>
-                        </div>
-
-                        <div className="text-[11px] text-slate-400 space-y-0.5">
-                          <div className="truncate">{t.hackathon}</div>
-                          <div className="text-slate-500 truncate">{t.track}</div>
-                        </div>
-                      </button>
+                        selected={selectedTeam?.id === t.id}
+                        onSelect={() => setSelectedTeamId(t.id)}
+                        title={t.name}
+                        badge={
+                          isEvaluated ? (
+                            <Badge tone="success" className="tabular-nums">{computeTotal(t.scores)} pts</Badge>
+                          ) : (
+                            <Badge tone="warning">Pending</Badge>
+                          )
+                        }
+                        meta={[t.hackathon, t.track].filter(Boolean).join(' · ')}
+                      />
                     );
-                  })
-                )}
-              </div>
-            </section>
+                  })}
+                </ul>
+              )}
+            </QueueList>
           </div>
 
-          {/* Right Column (8 cols): Single Unified Evaluation Section */}
-          <div className="lg:col-span-8">
+          {/* Review panel */}
+          <div className="lg:col-span-2">
             {selectedTeam ? (
-              <section className="bg-[#0d1526] border border-[#253247] rounded-xl overflow-hidden shadow-sm">
-
-                {/* Section Header */}
-                <div className="px-5 py-4 border-b border-[#253247] flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#121c32]">
-                  <div>
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <h2 className="text-xs font-mono font-bold text-emerald-400 uppercase tracking-wider">
-                        RUBRIC EVALUATION
-                      </h2>
-                      <span className="text-slate-600">•</span>
-                      <span className="text-xs text-slate-400">{selectedTeam.hackathon}</span>
-                    </div>
-                    <h3 className="text-lg font-bold text-white">{selectedTeam.name}</h3>
+              <Card>
+                <CardHeader className="flex-row flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-xs text-fg-subtle">Rubric evaluation · {selectedTeam.hackathon}</p>
+                    <CardTitle as="h2" className="text-lg">{selectedTeam.name}</CardTitle>
+                    <CardDescription>Track: {selectedTeam.track}</CardDescription>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <div className="px-3 py-1 bg-[#080e1a] border border-[#1c283c] rounded-lg text-right">
-                      <span className="text-[10px] font-mono text-slate-500 block uppercase">TOTAL SCORE</span>
-                      <span className="text-base font-extrabold font-mono text-white">
-                        {computeTotal(selectedTeam.scores)} <span className="text-xs text-slate-500 font-normal">/ 100</span>
-                      </span>
-                    </div>
+                  <div className="rounded-lg bg-raised/50 px-3 py-2 text-right">
+                    <p className="text-xs text-fg-subtle">Total score</p>
+                    <p className="text-xl font-semibold tabular-nums text-fg">
+                      {computeTotal(selectedTeam.scores)}
+                      <span className="text-sm font-normal text-fg-subtle"> / 100</span>
+                    </p>
                   </div>
-                </div>
+                </CardHeader>
 
-                <div className="p-5 space-y-5 text-xs">
-
-                  {/* External Deliverable Links */}
-                  <div className="p-3 bg-[#080e1a] border border-[#1c283c] rounded-lg flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded bg-emerald-950/70 border border-emerald-500/30 text-emerald-400 text-[10px] font-mono">
-                        Gate Cleared [4/4]
-                      </span>
-                      <span className="text-slate-400 text-xs">Track: {selectedTeam.track}</span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <a
-                        href={selectedTeam.repo}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-2.5 py-1 bg-[#121c32] border border-[#253247] hover:border-slate-500 text-slate-200 rounded text-xs flex items-center gap-1 transition-colors"
-                      >
-                        <Icons.ExternalLink />
-                        <span>Repository</span>
-                      </a>
-                      <a
-                        href={selectedTeam.demo}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-2.5 py-1 bg-[#121c32] border border-[#253247] hover:border-slate-500 text-emerald-400 rounded text-xs flex items-center gap-1 transition-colors"
-                      >
-                        <Icons.ExternalLink />
-                        <span>Live Demo</span>
-                      </a>
+                <CardContent className="space-y-5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone="success" dot>Gate cleared 4/4</Badge>
+                    <div className="flex flex-wrap gap-2 sm:ml-auto">
+                      <LinkButton href={selectedTeam.repo}>Repository</LinkButton>
+                      <LinkButton href={selectedTeam.demo}>Live demo</LinkButton>
                     </div>
                   </div>
 
-                  {/* Public Release Notice */}
-                  <div className="p-2.5 rounded-lg border text-xs flex items-center justify-between gap-2 bg-[#080e1a] border-[#1c283c]">
-                    <div className="flex items-center gap-2">
-                      <span className="text-slate-400">Score Visibility:</span>
-                      <span className={`font-mono text-[11px] font-semibold ${resultsPublished ? "text-emerald-400" : "text-amber-400"}`}>
-                        {resultsPublished ? "● Published to Participants" : "🔒 Confidential (Private until Admin release)"}
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-mono text-slate-500">Evaluator: {user?.fullName || "ACM Judge"}</span>
-                  </div>
-
-                  {saveNotice && (
-                    <div className="p-2.5 bg-emerald-950/40 border border-emerald-800/50 text-emerald-300 rounded-lg text-xs">
-                      {saveNotice}
-                    </div>
+                  {resultsPublished ? (
+                    <Alert tone="info" title="Results published">
+                      Scores for this hackathon are visible to participants. Evaluator: {user?.fullName || "ACM Judge"}.
+                    </Alert>
+                  ) : (
+                    <Alert tone="warning" title="Confidential">
+                      Scores stay private until an admin releases results. Evaluator: {user?.fullName || "ACM Judge"}.
+                    </Alert>
                   )}
 
-                  {/* Rubric Form */}
-                  <form onSubmit={handleSaveEvaluation} className="space-y-4">
-                    <div className="space-y-3">
-                      <span className="text-[11px] font-mono text-slate-400 uppercase font-semibold block">
-                        SCORE BREAKDOWN
-                      </span>
+                  {saveNotice && <Alert tone="success" title="Evaluation saved">{saveNotice}</Alert>}
 
-                      {currentRubrics.map((r) => {
-                        const currentVal = selectedTeam.scores[r.key] !== undefined
-                          ? selectedTeam.scores[r.key]
-                          : (selectedTeam.scores[r.legacyKey] || 0);
+                  <form id="judge-evaluation-form" onSubmit={handleSaveEvaluation} className="space-y-5">
+                    <fieldset className="space-y-3">
+                      <legend className="eyebrow mb-2">Score breakdown</legend>
+                      <div className="divide-y divide-line rounded-lg bg-raised/50 px-4">
+                        {currentRubrics.map((r) => {
+                          const currentVal = selectedTeam.scores[r.key] !== undefined
+                            ? selectedTeam.scores[r.key]
+                            : (selectedTeam.scores[r.legacyKey] || 0);
 
-                        return (
-                          <div key={r.key} className="p-3 bg-[#080e1a] border border-[#1c283c] rounded-lg space-y-1.5">
-                            <div className="flex justify-between items-center">
-                              <div>
-                                <span className="font-semibold text-slate-200">{r.name}</span>
-                                {r.desc && (
-                                  <p className="text-[10px] text-slate-400 mt-0.5">{r.desc}</p>
-                                )}
-                              </div>
-                              <span className="font-mono text-amber-400 text-[11px] shrink-0 ml-2">
-                                Weight {r.weight} (Max {r.max} pts)
-                              </span>
-                            </div>
-
-                            <div className="flex items-center gap-4 pt-1">
-                              <input
-                                type="range"
-                                min={0}
-                                max={r.max}
-                                value={currentVal}
-                                onChange={(e) => handleScoreChange(r.key, e.target.value, r.max)}
-                                className="flex-1 accent-emerald-500 cursor-pointer"
-                              />
-                              <div className="flex items-center gap-1 font-mono text-xs">
+                          return (
+                            <Field
+                              key={r.key}
+                              label={r.name}
+                              hint={`Weight ${r.weight} · max ${r.max} pts`}
+                              className="py-3"
+                            >
+                              {r.desc && <p className="text-xs text-fg-muted">{r.desc}</p>}
+                              <div className="flex items-center gap-4 pt-1">
                                 <input
-                                  type="number"
+                                  type="range"
                                   min={0}
                                   max={r.max}
                                   value={currentVal}
                                   onChange={(e) => handleScoreChange(r.key, e.target.value, r.max)}
-                                  className="w-12 bg-[#121c32] border border-[#253247] rounded px-2 py-1 text-center text-white focus:outline-none focus:border-emerald-500 font-bold"
+                                  aria-label={`${r.name} slider`}
+                                  className="h-2 min-w-0 flex-1 cursor-pointer accent-accent"
                                 />
-                                <span className="text-slate-500 text-[11px]">/{r.max}</span>
+                                <div className="flex shrink-0 items-center gap-1.5">
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    max={r.max}
+                                    value={currentVal}
+                                    onChange={(e) => handleScoreChange(r.key, e.target.value, r.max)}
+                                    className="w-16 text-center font-mono tabular-nums"
+                                  />
+                                  <span className="text-xs tabular-nums text-fg-subtle">/ {r.max}</span>
+                                </div>
                               </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                            </Field>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
 
-                    {/* Constructive Feedback */}
-                    <div>
-                      <label className="text-[11px] font-mono text-slate-400 uppercase font-semibold block mb-1">
-                        Constructive Feedback & Notes
-                      </label>
-                      <textarea
+                    <Field label="Constructive feedback & notes">
+                      <Textarea
                         rows={3}
                         value={selectedTeam.feedback || ""}
                         onChange={(e) => handleFeedbackChange(e.target.value)}
                         placeholder="Add specific comments on architecture, implementation, and strengths..."
-                        className="w-full bg-[#080e1a] border border-[#223044] rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                       />
-                    </div>
-
-                    {/* Submission Row */}
-                    <div className="pt-3 border-t border-[#1c283c] flex items-center justify-between">
-                      <span className="text-[11px] text-slate-500 font-mono">
-                        Evaluation Status: <span className="text-slate-300 font-semibold">{selectedTeam.status}</span>
-                      </span>
-
-                      <button
-                        type="submit"
-                        className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition-colors shadow-sm"
-                      >
-                        Commit & Certify Score →
-                      </button>
-                    </div>
+                    </Field>
                   </form>
+                </CardContent>
 
-                </div>
-              </section>
+                <CardFooter className="flex-wrap justify-between gap-3">
+                  <span className="flex items-center gap-2 text-xs text-fg-subtle">
+                    Status
+                    <Badge tone={selectedTeam.status === "Evaluated" ? "success" : "warning"}>{selectedTeam.status}</Badge>
+                  </span>
+                  <Button type="submit" form="judge-evaluation-form">
+                    <Gavel aria-hidden="true" />
+                    Commit & certify score
+                  </Button>
+                </CardFooter>
+              </Card>
             ) : (
-              <div className="p-8 bg-[#0d1526] border border-[#253247] rounded-xl text-center text-slate-400 text-xs">
-                No team selected.
-              </div>
+              <Card>
+                <EmptyState
+                  icon={MousePointerClick}
+                  title="Select a submission"
+                  description="Choose a finalist from the queue to open its rubric."
+                />
+              </Card>
             )}
           </div>
-
         </div>
 
         {/* Modal: Enter Judge Access Code */}
-        {showCodeModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
-            <div className="bg-[#0d1526] border border-[#253247] rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-              <div className="flex items-center justify-between border-b border-[#253247] pb-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-base">🔑</span>
-                  <h3 className="text-sm font-bold text-white">Enter Judge Access Code</h3>
-                </div>
-                <button
-                  onClick={() => setShowCodeModal(false)}
-                  className="text-slate-400 hover:text-white text-xs"
-                >
-                  ✕
-                </button>
-              </div>
+        <Dialog
+          open={showCodeModal}
+          onClose={() => setShowCodeModal(false)}
+          title="Enter judge access code"
+          description="Hackathon organizers generate unique judge access codes. Enter your assigned code once to unlock and evaluate submissions for that hackathon."
+        >
+          <form onSubmit={handleRedeemCode} className="space-y-5">
+            <Field
+              label="Access code"
+              hint="e.g. JUDGE-DEVPULSE-7X9K"
+              error={codeNotice?.type === 'error' ? codeNotice.text : undefined}
+              required
+            >
+              <Input
+                type="text"
+                required
+                autoComplete="off"
+                value={accessCodeInput}
+                onChange={(e) => setAccessCodeInput(e.target.value.toUpperCase())}
+                placeholder="e.g. JUDGE-DEVPULSE-7X9K"
+                className="font-mono font-semibold uppercase tracking-wider"
+              />
+            </Field>
 
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Hackathon organizers generate unique judge access codes (e.g. <span className="font-mono text-blue-400">JUDGE-DEVPULSE-7X9K</span>). Enter your assigned code once to unlock and evaluate submissions for that hackathon.
-              </p>
-
-              <form onSubmit={handleRedeemCode} className="space-y-4 text-xs">
-                <div>
-                  <label className="text-[11px] font-mono text-slate-400 block mb-1 uppercase font-semibold">
-                    ACCESS CODE
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={accessCodeInput}
-                    onChange={(e) => setAccessCodeInput(e.target.value.toUpperCase())}
-                    placeholder="e.g. JUDGE-DEVPULSE-7X9K"
-                    className="w-full bg-[#080e1a] border border-[#253247] rounded-lg p-3 text-sm font-mono font-bold text-blue-400 placeholder-slate-600 focus:outline-none focus:border-blue-500 tracking-wider uppercase"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2 border-t border-[#253247]">
-                  <button
-                    type="button"
-                    onClick={() => setShowCodeModal(false)}
-                    className="px-4 py-2 bg-[#121c32] hover:bg-[#1a2744] text-slate-300 rounded-lg text-xs"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-5 py-2 bg-blue-500 hover:bg-blue-400 text-white font-bold rounded-lg text-xs transition-colors shadow"
-                  >
-                    Verify & Unlock Hackathon
-                  </button>
-                </div>
-              </form>
+            <div className="flex flex-col-reverse gap-2 border-t border-line pt-4 sm:flex-row sm:justify-end">
+              <Button type="button" variant="ghost" onClick={() => setShowCodeModal(false)}>
+                Cancel
+              </Button>
+              <Button type="submit">
+                <KeyRound aria-hidden="true" />
+                Verify & unlock hackathon
+              </Button>
             </div>
-          </div>
-        )}
-
+          </form>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

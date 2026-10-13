@@ -1,109 +1,83 @@
 import React from 'react';
-import { Icons } from './Icons';
+import { Link } from 'react-router-dom';
+import { ArrowUpRight, CalendarDays, KeyRound, Trophy, Users } from 'lucide-react';
+import { Badge, Button, Card, stageTone } from './ui';
 
+/**
+ * Hackathon listing card. The title is a link stretched over the whole card,
+ * so the card is one large click target while nested buttons stay usable.
+ * `featured` is the compact variant used on the home page.
+ */
 export default function HackathonCard({
   hackathon,
-  onNavigate,
   onOpenTeamCode,
   variant = "detailed" // "featured" | "detailed"
 }) {
-  if (variant === "featured") {
-    return (
-      <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 flex flex-col justify-between hover:border-slate-700 transition-colors">
-        <div>
-          <div className="flex items-center justify-between mb-3 text-xs">
-            <span className="px-2 py-0.5 rounded bg-slate-800 text-emerald-400 font-medium">
-              {hackathon.stage}
-            </span>
-            <span className="text-slate-400 flex items-center gap-1 font-mono">
-              <Icons.Calendar /> {hackathon.deadline}
-            </span>
-          </div>
-
-          <h3 className="text-base font-bold text-white mb-2">{hackathon.title}</h3>
-          <p className="text-xs text-slate-400 leading-relaxed mb-4">{hackathon.summary}</p>
-
-          <div className="text-[11px] text-slate-400 space-y-1 mb-4">
-            <div className="flex items-center gap-1.5">
-              <Icons.UserGroup />
-              <span>{hackathon.teamSize}</span>
-            </div>
-            <div className="text-slate-300 font-medium">
-              Track: <span className="text-slate-400 font-normal">{hackathon.track}</span>
-            </div>
-          </div>
-        </div>
-
-        <button
-          onClick={() => onNavigate(hackathon.id)}
-          className="w-full mt-2 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5"
-        >
-          <span>View Details</span>
-          <Icons.ArrowRight />
-        </button>
-      </div>
-    );
-  }
+  const detailed = variant === "detailed";
+  const href = `/hackathons/${hackathon.id}`;
 
   return (
-    <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 flex flex-col justify-between hover:border-slate-700 transition-colors">
-      <div>
-        <div className="flex items-center justify-between mb-3 text-xs">
-          <span className="px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-emerald-400 font-medium">
-            {hackathon.stage}
-          </span>
-          <span className="text-slate-400 flex items-center gap-1 font-mono text-[11px]">
-            <Icons.Calendar /> {hackathon.deadline}
-          </span>
-        </div>
-
-        <h3 className="text-lg font-bold text-white mb-1.5">{hackathon.title}</h3>
-        <p className="text-xs text-slate-400 leading-relaxed mb-4 line-clamp-3">
-          {hackathon.summary}
-        </p>
-
-        <div className="space-y-2 py-3 border-t border-b border-slate-800 text-xs mb-4">
-          <div className="flex justify-between items-center text-slate-300">
-            <span className="text-slate-500">Track:</span>
-            <span className="font-medium text-right truncate max-w-[180px]">{hackathon.track}</span>
-          </div>
-          <div className="flex justify-between items-center text-slate-300">
-            <span className="text-slate-500">Team Allowance:</span>
-            <span>{hackathon.teamSize}</span>
-          </div>
-          <div className="flex justify-between items-center text-slate-300">
-            <span className="text-slate-500">Prize Recognition:</span>
-            <span className="font-mono text-amber-400 font-semibold">{hackathon.prizePool}</span>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-1.5 mb-4">
-          {hackathon.tags?.map((t, idx) => (
-            <span key={idx} className="text-[10px] bg-slate-950 px-2 py-0.5 rounded border border-slate-800 text-slate-400">
-              {t}
-            </span>
-          ))}
-        </div>
+    <Card interactive className="group relative flex h-full flex-col p-5">
+      <div className="flex items-center justify-between gap-3">
+        <Badge tone={stageTone(hackathon.stage)} dot>{hackathon.stage}</Badge>
+        {hackathon.category && <span className="text-xs text-fg-subtle">{hackathon.category}</span>}
       </div>
 
-      <div className="pt-2 flex items-center gap-2">
-        <button
-          onClick={() => onNavigate(hackathon.id)}
-          className="flex-1 py-2 px-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5"
+      <h3 className="mt-4 text-base font-semibold leading-snug text-fg">
+        <Link
+          to={href}
+          className="rounded-sm after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:outline-none focus-visible:after:outline focus-visible:after:outline-2 focus-visible:after:outline-ring"
         >
-          <span>View Specifications</span>
-          <Icons.ArrowRight />
-        </button>
-        {onOpenTeamCode && (
-          <button
-            onClick={() => onOpenTeamCode(hackathon)}
-            title="Enter Team Code"
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors"
-          >
-            <Icons.Key />
-          </button>
+          {hackathon.title}
+        </Link>
+        <ArrowUpRight
+          className="ml-1 inline h-4 w-4 -translate-y-px text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100"
+          aria-hidden="true"
+        />
+      </h3>
+      {hackathon.track && <p className="mt-0.5 text-sm text-fg-muted">{hackathon.track}</p>}
+
+      <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-fg-muted">{hackathon.summary}</p>
+
+      <dl className="mt-auto flex flex-wrap gap-x-4 gap-y-1.5 pt-5 text-sm text-fg-subtle">
+        <div className="flex items-center gap-1.5">
+          <dt><CalendarDays className="h-4 w-4" aria-label="Dates" /></dt>
+          <dd>{hackathon.dates || hackathon.deadline}</dd>
+        </div>
+        {hackathon.teamSize && (
+          <div className="flex items-center gap-1.5">
+            <dt><Users className="h-4 w-4" aria-label="Team size" /></dt>
+            <dd>{hackathon.teamSize}</dd>
+          </div>
         )}
-      </div>
-    </div>
+        {detailed && hackathon.prizePool && (
+          <div className="flex items-center gap-1.5">
+            <dt><Trophy className="h-4 w-4" aria-label="Prize pool" /></dt>
+            <dd className="font-medium text-fg">{hackathon.prizePool}</dd>
+          </div>
+        )}
+      </dl>
+
+      {detailed && (hackathon.tags?.length > 0 || onOpenTeamCode) && (
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
+          <ul className="flex min-w-0 flex-wrap gap-1.5" aria-label="Tags">
+            {hackathon.tags?.slice(0, 3).map((tag) => (
+              <li key={tag} className="rounded-md bg-raised px-2 py-0.5 text-xs text-fg-muted">{tag}</li>
+            ))}
+          </ul>
+          {onOpenTeamCode && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="relative z-10 shrink-0"
+              onClick={() => onOpenTeamCode(hackathon)}
+            >
+              <KeyRound aria-hidden="true" />
+              Team code
+            </Button>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
