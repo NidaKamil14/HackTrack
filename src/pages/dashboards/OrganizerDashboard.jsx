@@ -5,7 +5,9 @@ import {
   getStoredHackathons,
   createNewHackathon,
   advanceHackathonStage,
-  updateHackathon
+  updateHackathon,
+  generateHackathonCode,
+  getHackathonCommittee
 } from '../../utils/hackathonService';
 import { getAllTeams } from '../../utils/teamService';
 import { getSubmissions } from '../../utils/submissionService';
@@ -75,6 +77,34 @@ export default function OrganizerDashboard() {
 
   // Modal State: Configure Rubric / Settings
   const [configTarget, setConfigTarget] = useState(null);
+
+  // Modal State: Committee & Access Codes
+  const [manageTarget, setManageTarget] = useState(null);
+  const [copiedCode, setCopiedCode] = useState(null);
+
+  const openManageModal = (hackathon) => {
+    setManageTarget(hackathon);
+    setCopiedCode(null);
+  };
+
+  const handleRegenerateCode = (role) => {
+    if (!manageTarget) return;
+    const res = generateHackathonCode(manageTarget.id, role, user?.email || "organizer@hacktrack.io");
+    if (res.success) {
+      setRefreshKey((k) => k + 1);
+      setNotice(`Generated new ${role.toUpperCase()} code: ${res.codeRecord.code}`);
+      setTimeout(() => setNotice(null), 3500);
+    }
+  };
+
+  const handleCopyCode = (code) => {
+    if (!code) return;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(code);
+    }
+    setCopiedCode(code);
+    setTimeout(() => setCopiedCode(null), 2500);
+  };
 
   // Modal State: Rubric Editor
   const [rubricTarget, setRubricTarget] = useState(null);
@@ -478,6 +508,13 @@ export default function OrganizerDashboard() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => openManageModal(h)}
+                            className="px-2.5 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 hover:text-blue-300 rounded text-xs transition-colors font-medium flex items-center gap-1.5"
+                            title="Manage judge & screening access codes"
+                          >
+                            <span>🔑</span> Codes & Committee
+                          </button>
                           <button
                             onClick={() => openRubricEditor(h)}
                             className="px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 hover:text-amber-300 rounded text-xs transition-colors font-medium"
@@ -1052,6 +1089,229 @@ export default function OrganizerDashboard() {
             </div>
           </div>
         )}
+
+        {/* Modal: Committee & Access Codes Management */}
+        {manageTarget && (() => {
+          const committee = getHackathonCommittee(manageTarget.id);
+          const judgeCodeRecord = (committee.codes || []).find((c) => c.role === "judge");
+          const screeningCodeRecord = (committee.codes || []).find((c) => c.role === "screening");
+
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm overflow-y-auto">
+              <div className="bg-[#0d1526] border border-[#253247] rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-5 my-8">
+                {/* Modal Header */}
+                <div className="flex items-center justify-between border-b border-[#253247] pb-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/30 text-blue-400 font-mono text-[11px] font-semibold">
+                        ACCESS CODES & COMMITTEE
+                      </span>
+                      <span className="text-slate-500">•</span>
+                      <span className="text-xs text-slate-400 font-mono">{manageTarget.stage}</span>
+                    </div>
+                    <h3 className="text-lg font-bold text-white mt-1">
+                      {manageTarget.title}
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => setManageTarget(null)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-[#121c32] transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Explanatory Banner: Screening vs Judges */}
+                <div className="p-3.5 bg-[#080e1a] border border-[#1e2a3e] rounded-xl grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div className="p-2.5 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-400 mb-1">
+                      <span>🛡️</span>
+                      <span>Screening Committee (Gatekeeper)</span>
+                    </div>
+                    <p className="text-slate-300 text-[11px] leading-relaxed">
+                      Operates <strong>first</strong> right after submission deadline. Verifies commit authenticity, documentation, live URL. Makes binary decision: <strong>Shortlist ✓</strong> or <strong>Reject ✗</strong>.
+                    </p>
+                  </div>
+
+                  <div className="p-2.5 bg-blue-500/5 border border-blue-500/20 rounded-lg">
+                    <div className="flex items-center gap-1.5 font-bold text-blue-400 mb-1">
+                      <span>⚖️</span>
+                      <span>Judges (Final Scoring)</span>
+                    </div>
+                    <p className="text-slate-300 text-[11px] leading-relaxed">
+                      Operates <strong>second</strong> after screening. Evaluates <em>only shortlisted</em> teams against your configured rubrics ({manageTarget.rubrics?.length || 4} criteria) to determine final rank and leaderboard.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Access Codes Section */}
+                <div className="space-y-4">
+                  {/* Screening Committee Code Card */}
+                  <div className="p-4 bg-[#080e1a] border border-[#1c283c] rounded-xl space-y-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wide">
+                            🛡️ SCREENING COMMITTEE ACCESS CODE
+                          </span>
+                          <span className="text-[10px] bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20 font-mono">
+                            Shortlisting
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Share this code with committee reviewers. They enter it once on their dashboard to unlock this hackathon.
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={() => handleRegenerateCode('screening')}
+                        className="px-2.5 py-1 bg-[#121c32] hover:bg-[#1a2744] text-slate-300 hover:text-white border border-[#253247] rounded text-[11px] transition-colors shrink-0"
+                      >
+                        🔄 Regenerate
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 bg-[#050911] border border-[#253247] rounded-lg px-3.5 py-2 font-mono text-sm font-bold text-amber-300 tracking-wider">
+                        {screeningCodeRecord?.code || "NOT GENERATED"}
+                      </div>
+                      <button
+                        onClick={() => handleCopyCode(screeningCodeRecord?.code)}
+                        className={`px-4 py-2 rounded-lg text-xs font-bold transition-all shrink-0 ${
+                          copiedCode === screeningCodeRecord?.code
+                            ? "bg-emerald-500 text-slate-950"
+                            : "bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40"
+                        }`}
+                      >
+                        {copiedCode === screeningCodeRecord?.code ? "✓ Copied!" : "Copy Code"}
+                      </button>
+                    </div>
+
+                    {/* Redeemed Screeners */}
+                    <div className="pt-2 border-t border-[#192334]">
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2 font-mono">
+                        <span>BOUND SCREENING REVIEWERS ({committee.screeners.length})</span>
+                      </div>
+                      {committee.screeners.length === 0 ? (
+                        <p className="text-xs text-slate-500 italic py-1">No screeners have redeemed this code yet. Share the code above.</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {committee.screeners.map((s, idx) => (
+                            <div key={idx} className="flex items-center justify-between text-xs px-2.5 py-1.5 bg-[#0d1526] rounded border border-[#1e2a3e]">
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-white">{s.fullName || "Screening Reviewer"}</span>
+                                <span className="text-slate-400 font-mono text-[11px]">{s.email}</span>
+                              </div>
+                              <span className="text-[10px] text-emerald-400 font-mono">Active</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Judge Access Code Card */}
+                  <div className="p-4 bg-[#080e1a] border border-[#1c283c] rounded-xl space-y-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono font-bold text-blue-400 uppercase tracking-wide">
+                            ⚖️ JUDGE ACCESS CODE
+                          </span>
+                          <span className="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20 font-mono">
+                            Final Rubric Scoring
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Share this code with your evaluators. They enter it once on their Judge dashboard to score submissions against your rubrics.
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={() => handleRegenerateCode('judge')}
+                        className="px-2.5 py-1 bg-[#121c32] hover:bg-[#1a2744] text-slate-300 hover:text-white border border-[#253247] rounded text-[11px] transition-colors shrink-0"
+                      >
+                        🔄 Regenerate
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 bg-[#050911] border border-[#253247] rounded-lg px-3.5 py-2 font-mono text-sm font-bold text-blue-300 tracking-wider">
+                        {judgeCodeRecord?.code || "NOT GENERATED"}
+                      </div>
+                      <button
+                        onClick={() => handleCopyCode(judgeCodeRecord?.code)}
+                        className={`px-4 py-2 rounded-lg text-xs font-bold transition-all shrink-0 ${
+                          copiedCode === judgeCodeRecord?.code
+                            ? "bg-emerald-500 text-slate-950"
+                            : "bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40"
+                        }`}
+                      >
+                        {copiedCode === judgeCodeRecord?.code ? "✓ Copied!" : "Copy Code"}
+                      </button>
+                    </div>
+
+                    {/* Redeemed Judges */}
+                    <div className="pt-2 border-t border-[#192334]">
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2 font-mono">
+                        <span>BOUND JUDGES / EVALUATORS ({committee.judges.length})</span>
+                      </div>
+                      {committee.judges.length === 0 ? (
+                        <p className="text-xs text-slate-500 italic py-1">No judges have redeemed this code yet. Share the code above.</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {committee.judges.map((j, idx) => (
+                            <div key={idx} className="flex items-center justify-between text-xs px-2.5 py-1.5 bg-[#0d1526] rounded border border-[#1e2a3e]">
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-white">{j.fullName || "Judge Evaluator"}</span>
+                                <span className="text-slate-400 font-mono text-[11px]">{j.email}</span>
+                              </div>
+                              <span className="text-[10px] text-emerald-400 font-mono">Active</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer Controls */}
+                <div className="flex items-center justify-between pt-4 border-t border-[#253247]">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        const h = manageTarget;
+                        setManageTarget(null);
+                        openRubricEditor(h);
+                      }}
+                      className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 rounded-lg text-xs font-medium transition-colors"
+                    >
+                      ✦ Edit Rubrics ({(manageTarget.rubrics || []).length})
+                    </button>
+                    <button
+                      onClick={() => {
+                        const h = manageTarget;
+                        setManageTarget(null);
+                        setConfigTarget(h);
+                      }}
+                      className="px-3 py-1.5 bg-[#121c32] hover:bg-[#1a2744] border border-[#253247] text-slate-300 rounded-lg text-xs transition-colors"
+                    >
+                      ⚙️ Hackathon Rules & Settings
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => setManageTarget(null)}
+                    className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition-colors shadow"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
 
       </div>
     </DashboardLayout>

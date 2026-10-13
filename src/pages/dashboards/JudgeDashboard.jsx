@@ -3,15 +3,57 @@ import DashboardLayout from '../../components/dashboard/DashboardLayout';
 import { Icons } from '../../components/Icons';
 import { MOCK_JUDGE_DATA } from '../../data/mockDashboardData';
 import { useAuth } from '../../context/AuthContext';
-import { getStoredHackathons } from '../../utils/hackathonService';
+import {
+  getStoredHackathons,
+  getUserAssignedHackathonIds,
+  redeemAccessCode
+} from '../../utils/hackathonService';
 import { getShortlistedSubmissions } from '../../utils/submissionService';
 import { getEvaluations, saveEvaluation, isResultsPublished } from '../../utils/evaluationService';
 
 export default function JudgeDashboard() {
   const { user } = useAuth();
-  const assignedHackathons = getStoredHackathons();
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const allHackathons = useMemo(() => {
+    if (refreshKey) { /* trigger */ }
+    return getStoredHackathons();
+  }, [refreshKey]);
+
+  const assignedIds = useMemo(() => {
+    if (refreshKey) { /* trigger */ }
+    return getUserAssignedHackathonIds(user);
+  }, [user, refreshKey]);
+
+  const assignedHackathons = useMemo(() => {
+    const list = allHackathons.filter((h) => assignedIds.includes(h.id));
+    return list.length > 0 ? list : allHackathons.slice(0, 1);
+  }, [allHackathons, assignedIds]);
+
   const [selectedHackathonFilter, setSelectedHackathonFilter] = useState("all");
   const [saveNotice, setSaveNotice] = useState(null);
+
+  // Access Code Modal & State
+  const [showCodeModal, setShowCodeModal] = useState(false);
+  const [accessCodeInput, setAccessCodeInput] = useState("");
+  const [codeNotice, setCodeNotice] = useState(null);
+
+  const handleRedeemCode = (e) => {
+    e.preventDefault();
+    if (!accessCodeInput.trim()) return;
+    const res = redeemAccessCode(accessCodeInput, user);
+    if (res.success) {
+      setCodeNotice({ type: 'success', text: res.message });
+      setSelectedHackathonFilter(res.hackathonId);
+      setAccessCodeInput("");
+      setShowCodeModal(false);
+      setRefreshKey((k) => k + 1);
+      setTimeout(() => setCodeNotice(null), 4500);
+    } else {
+      setCodeNotice({ type: 'error', text: res.error });
+      setTimeout(() => setCodeNotice(null), 4500);
+    }
+  };
 
   // Combine static shortlisted teams with dynamically shortlisted submissions from submissionService
   const dynamicShortlisted = getShortlistedSubmissions();
@@ -72,6 +114,39 @@ export default function JudgeDashboard() {
   });
 
   const selectedTeam = filteredTeams.find((t) => t.id === selectedTeamId) || filteredTeams[0] || teamsState[0];
+
+  // Dynamically resolve rubrics configured for the active hackathon
+  const activeHackathon = useMemo(() => {
+    if (selectedHackathonFilter !== "all") {
+      return allHackathons.find((h) => h.id === selectedHackathonFilter) || assignedHackathons[0];
+    }
+    return (
+      allHackathons.find((h) => h.id === selectedTeam?.hackathonId) ||
+      assignedHackathons[0]
+    );
+  }, [allHackathons, selectedHackathonFilter, selectedTeam?.hackathonId, assignedHackathons]);
+
+  const currentRubrics = useMemo(() => {
+    if (activeHackathon?.rubrics && activeHackathon.rubrics.length > 0) {
+      return activeHackathon.rubrics.map((r, i) => {
+        const weightNum = parseInt(r.weight || '25', 10) || 25;
+        const legacyKeys = ['architecture', 'usability', 'innovation', 'completeness'];
+        return {
+          key: `crit_${i}`,
+          legacyKey: legacyKeys[i] || `crit_${i}`,
+          name: r.name,
+          weight: r.weight || `${weightNum}%`,
+          max: weightNum,
+          desc: r.desc || r.description || ''
+        };
+      });
+    }
+    return MOCK_JUDGE_DATA.rubrics.map((r) => ({
+      ...r,
+      legacyKey: r.key,
+      max: r.max || 25
+    }));
+  }, [activeHackathon]);
 
   const handleScoreChange = (rubricKey, val, maxVal = 35) => {
     const num = Math.max(0, Math.min(maxVal, Number(val) || 0));
@@ -181,16 +256,46 @@ export default function JudgeDashboard() {
           </div>
         </section>
 
+        {/* Role Explanation Banner */}
+        <section className="bg-[#080e1a] border border-blue-500/20 rounded-xl p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs shadow-sm">
+          <div className="flex items-start gap-2.5">
+            <span className="text-lg">⚖️</span>
+            <div>
+              <span className="font-bold text-blue-400">Judge / Evaluator Role:</span>
+              <p className="text-slate-300 text-[11px] mt-0.5 leading-relaxed">
+                You evaluate <strong>only shortlisted teams</strong> that passed the initial screening gate. Your scores directly compile into the final certified rankings according to this hackathon's specific rubrics.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setShowCodeModal(true)}
+            className="px-3.5 py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/40 text-blue-300 font-bold rounded-lg text-xs transition-colors shrink-0 flex items-center gap-1.5"
+          >
+            <span>🔑</span> Enter Judge Access Code
+          </button>
+        </section>
+
+        {codeNotice && (
+          <div className={`p-3 rounded-lg text-xs font-medium border ${
+            codeNotice.type === 'success'
+              ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+              : 'bg-rose-950/60 border-rose-500/40 text-rose-300'
+          }`}>
+            {codeNotice.text}
+          </div>
+        )}
+
         {/* Sprint Filter Bar */}
         <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs shadow-sm">
           <div className="flex items-center gap-2">
-            <span className="text-slate-400">Filter Assigned Hackathon:</span>
+            <span className="text-slate-400 font-mono text-[11px]">ACTIVE HACKATHON:</span>
             <select
               value={selectedHackathonFilter}
               onChange={(e) => setSelectedHackathonFilter(e.target.value)}
-              className="bg-[#080e1a] border border-[#223044] text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-emerald-500"
+              className="bg-[#080e1a] border border-[#223044] text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 font-semibold"
             >
-              <option value="all">All Assigned Competitions</option>
+              <option value="all">All Assigned Competitions ({assignedHackathons.length})</option>
               {assignedHackathons.map((h) => (
                 <option key={h.id} value={h.id}>{h.title}</option>
               ))}
@@ -198,8 +303,11 @@ export default function JudgeDashboard() {
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded bg-[#080e1a] border border-[#1c283c] text-[10px] font-mono text-slate-400">
-              Only Screening-Cleared Finalists Visible
+            <span className="px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/30 text-[10px] font-mono text-blue-400">
+              Rubrics: {(activeHackathon?.rubrics || []).length} criteria configured
+            </span>
+            <span className="px-2 py-0.5 rounded bg-emerald-950 border border-emerald-500/30 text-[10px] font-mono text-emerald-400">
+              Screening-Cleared Finalists Only
             </span>
           </div>
         </section>
@@ -354,18 +462,26 @@ export default function JudgeDashboard() {
                         SCORE BREAKDOWN
                       </span>
 
-                      {MOCK_JUDGE_DATA.rubrics.map((r) => {
-                        const currentVal = selectedTeam.scores[r.key] || 0;
+                      {currentRubrics.map((r) => {
+                        const currentVal = selectedTeam.scores[r.key] !== undefined
+                          ? selectedTeam.scores[r.key]
+                          : (selectedTeam.scores[r.legacyKey] || 0);
+
                         return (
                           <div key={r.key} className="p-3 bg-[#080e1a] border border-[#1c283c] rounded-lg space-y-1.5">
                             <div className="flex justify-between items-center">
-                              <span className="font-semibold text-slate-200">{r.name}</span>
-                              <span className="font-mono text-emerald-400 text-[11px]">
+                              <div>
+                                <span className="font-semibold text-slate-200">{r.name}</span>
+                                {r.desc && (
+                                  <p className="text-[10px] text-slate-400 mt-0.5">{r.desc}</p>
+                                )}
+                              </div>
+                              <span className="font-mono text-amber-400 text-[11px] shrink-0 ml-2">
                                 Weight {r.weight} (Max {r.max} pts)
                               </span>
                             </div>
 
-                            <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-4 pt-1">
                               <input
                                 type="range"
                                 min={0}
@@ -430,6 +546,62 @@ export default function JudgeDashboard() {
           </div>
 
         </div>
+
+        {/* Modal: Enter Judge Access Code */}
+        {showCodeModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
+            <div className="bg-[#0d1526] border border-[#253247] rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-[#253247] pb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">🔑</span>
+                  <h3 className="text-sm font-bold text-white">Enter Judge Access Code</h3>
+                </div>
+                <button
+                  onClick={() => setShowCodeModal(false)}
+                  className="text-slate-400 hover:text-white text-xs"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Hackathon organizers generate unique judge access codes (e.g. <span className="font-mono text-blue-400">JUDGE-DEVPULSE-7X9K</span>). Enter your assigned code once to unlock and evaluate submissions for that hackathon.
+              </p>
+
+              <form onSubmit={handleRedeemCode} className="space-y-4 text-xs">
+                <div>
+                  <label className="text-[11px] font-mono text-slate-400 block mb-1 uppercase font-semibold">
+                    ACCESS CODE
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={accessCodeInput}
+                    onChange={(e) => setAccessCodeInput(e.target.value.toUpperCase())}
+                    placeholder="e.g. JUDGE-DEVPULSE-7X9K"
+                    className="w-full bg-[#080e1a] border border-[#253247] rounded-lg p-3 text-sm font-mono font-bold text-blue-400 placeholder-slate-600 focus:outline-none focus:border-blue-500 tracking-wider uppercase"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-[#253247]">
+                  <button
+                    type="button"
+                    onClick={() => setShowCodeModal(false)}
+                    className="px-4 py-2 bg-[#121c32] hover:bg-[#1a2744] text-slate-300 rounded-lg text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-blue-500 hover:bg-blue-400 text-white font-bold rounded-lg text-xs transition-colors shadow"
+                  >
+                    Verify & Unlock Hackathon
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
       </div>
     </DashboardLayout>

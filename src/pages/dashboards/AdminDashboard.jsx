@@ -5,7 +5,8 @@ import {
   getStoredHackathons,
   createNewHackathon,
   advanceHackathonStage,
-  updateHackathon
+  updateHackathon,
+  getHackathonCommittee
 } from '../../utils/hackathonService';
 import { getUsers, updateUserRole } from '../../utils/auth';
 import { getAllTeams } from '../../utils/teamService';
@@ -48,6 +49,20 @@ export default function AdminDashboard() {
   }, [refreshKey]);
 
   const [adminNotice, setAdminNotice] = useState(null);
+
+  // Hackathon-Scoped Inspection State
+  const [selectedHackathonId, setSelectedHackathonId] = useState("all");
+  const [hackathonViewTab, setHackathonViewTab] = useState("teams"); // 'teams' | 'screening' | 'judges' | 'submissions'
+  const [copiedCode, setCopiedCode] = useState(null);
+
+  const handleCopyCode = (code) => {
+    if (!code) return;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(code);
+    }
+    setCopiedCode(code);
+    setTimeout(() => setCopiedCode(null), 2500);
+  };
 
   // Modal: Create Hackathon
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -234,8 +249,429 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* 2. COMPETITION MANAGEMENT CARD */}
-        <section className="bg-[#0d1526] border border-[#253247] rounded-xl overflow-hidden shadow-sm">
+        {/* HACKATHON SELECTOR TABS BAR */}
+        <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-3 shadow-sm">
+          <div className="flex items-center justify-between gap-3 mb-2 px-1">
+            <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider font-semibold">
+              HACKATHON-SPECIFIC INSPECTION
+            </span>
+            <span className="text-[11px] text-slate-500 font-mono">
+              Switch context to view dedicated teams, committee & submissions
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+            <button
+              onClick={() => setSelectedHackathonId("all")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                selectedHackathonId === "all"
+                  ? "bg-emerald-500 text-slate-950 shadow-sm"
+                  : "bg-[#080e1a] text-slate-300 hover:text-white border border-[#1e2a3e] hover:border-[#2a3c58]"
+              }`}
+            >
+              <span>🌐</span> All Platform Overview
+            </button>
+
+            {hackathons.map((h) => {
+              const isSelected = selectedHackathonId === h.id;
+              return (
+                <button
+                  key={h.id}
+                  onClick={() => {
+                    setSelectedHackathonId(h.id);
+                    setHackathonViewTab("teams");
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                    isSelected
+                      ? "bg-[#2878F0] text-white shadow-sm"
+                      : "bg-[#080e1a] text-slate-300 hover:text-white border border-[#1e2a3e] hover:border-[#2a3c58]"
+                  }`}
+                >
+                  <span>⚡</span> {h.title}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* CONDITION 1: SPECIFIC HACKATHON SELECTED */}
+        {selectedHackathonId !== "all" && (() => {
+          const activeH = hackathons.find((h) => h.id === selectedHackathonId) || hackathons[0];
+          if (!activeH) return null;
+
+          const committee = getHackathonCommittee(activeH.id);
+          const judgeCodeRecord = (committee.codes || []).find((c) => c.role === "judge");
+          const screenCodeRecord = (committee.codes || []).find((c) => c.role === "screening");
+
+          const hackTeams = Object.entries(allTeams)
+            .filter(([, t]) =>
+              t.hackathonId === activeH.id ||
+              (t.hackathon && t.hackathon.toLowerCase().includes(activeH.title.toLowerCase()))
+            )
+            .map(([code, t]) => ({ ...t, code }));
+
+          const hackSubs = allSubmissions.filter((s) =>
+            s.hackathonId === activeH.id ||
+            (s.hackathonTitle && s.hackathonTitle.toLowerCase().includes(activeH.title.toLowerCase()))
+          );
+
+          return (
+            <div className="space-y-6 animate-in fade-in">
+              {/* Hackathon Header Card */}
+              <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-5 shadow-sm space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/30 text-blue-400 font-mono text-[10px] font-semibold">
+                        HACKATHON SCOPED VIEW
+                      </span>
+                      <span className="text-slate-600">•</span>
+                      <span className="text-xs font-mono text-emerald-400 font-bold">{activeH.stage}</span>
+                      <span className="text-slate-600">•</span>
+                      <span className="text-xs text-slate-400 font-mono">{activeH.track}</span>
+                    </div>
+                    <h2 className="text-xl font-bold text-white tracking-tight">{activeH.title}</h2>
+                    <p className="text-xs text-slate-400 mt-1 max-w-2xl">{activeH.summary || activeH.headline}</p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => setConfigTarget(activeH)}
+                      className="px-3 py-1.5 bg-[#121c32] hover:bg-[#1a2744] border border-[#253247] text-slate-300 rounded text-xs transition-colors"
+                    >
+                      ⚙️ Config
+                    </button>
+                    <button
+                      onClick={() => handleAdvanceStage(activeH.id)}
+                      className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded text-xs transition-colors"
+                    >
+                      Advance Stage →
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quick Access Codes & Metrics Bar */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-3 border-t border-[#1e2a3e]">
+                  {/* Screening Code */}
+                  <div className="p-3 bg-[#080e1a] border border-[#1e2a3e] rounded-lg space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono text-amber-400 uppercase font-semibold">🛡️ SCREENING CODE</span>
+                      <button
+                        onClick={() => handleCopyCode(screenCodeRecord?.code)}
+                        className="text-[10px] text-amber-300 hover:underline font-mono"
+                      >
+                        {copiedCode === screenCodeRecord?.code ? "✓ Copied" : "Copy"}
+                      </button>
+                    </div>
+                    <div className="font-mono text-xs text-white font-bold tracking-wide">
+                      {screenCodeRecord?.code || "NOT GENERATED"}
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      {committee.screeners.length} reviewer(s) bound
+                    </div>
+                  </div>
+
+                  {/* Judge Code */}
+                  <div className="p-3 bg-[#080e1a] border border-[#1e2a3e] rounded-lg space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono text-blue-400 uppercase font-semibold">⚖️ JUDGE CODE</span>
+                      <button
+                        onClick={() => handleCopyCode(judgeCodeRecord?.code)}
+                        className="text-[10px] text-blue-300 hover:underline font-mono"
+                      >
+                        {copiedCode === judgeCodeRecord?.code ? "✓ Copied" : "Copy"}
+                      </button>
+                    </div>
+                    <div className="font-mono text-xs text-white font-bold tracking-wide">
+                      {judgeCodeRecord?.code || "NOT GENERATED"}
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      {committee.judges.length} evaluator(s) bound
+                    </div>
+                  </div>
+
+                  {/* Registered Teams */}
+                  <div className="p-3 bg-[#080e1a] border border-[#1e2a3e] rounded-lg space-y-1">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block">ENROLLED SQUADS</span>
+                    <span className="text-base font-bold text-white block">{hackTeams.length} Teams</span>
+                    <span className="text-[10px] text-slate-500">{hackSubs.length} deliverable(s) submitted</span>
+                  </div>
+
+                  {/* Rubric Criteria */}
+                  <div className="p-3 bg-[#080e1a] border border-[#1e2a3e] rounded-lg space-y-1">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block">RUBRICS CRITERIA</span>
+                    <span className="text-base font-bold text-amber-400 block">{(activeH.rubrics || []).length} Criteria</span>
+                    <span className="text-[10px] text-slate-500">{activeH.prizePool || activeH.prize || "Prizes set"}</span>
+                  </div>
+                </div>
+              </section>
+
+              {/* Sub-Tabs: Teams | Screeners | Judges | Deliverables */}
+              <section className="bg-[#0d1526] border border-[#253247] rounded-xl overflow-hidden shadow-sm">
+                <div className="px-5 py-3 border-b border-[#253247] bg-[#121c32] flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setHackathonViewTab("teams")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        hackathonViewTab === "teams"
+                          ? "bg-emerald-500 text-slate-950 font-bold"
+                          : "text-slate-300 hover:text-white hover:bg-[#1a2744]"
+                      }`}
+                    >
+                      👥 Teams & Participants ({hackTeams.length})
+                    </button>
+                    <button
+                      onClick={() => setHackathonViewTab("screening")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        hackathonViewTab === "screening"
+                          ? "bg-amber-500 text-slate-950 font-bold"
+                          : "text-slate-300 hover:text-white hover:bg-[#1a2744]"
+                      }`}
+                    >
+                      🛡️ Screening Committee ({committee.screeners.length})
+                    </button>
+                    <button
+                      onClick={() => setHackathonViewTab("judges")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        hackathonViewTab === "judges"
+                          ? "bg-blue-500 text-white font-bold"
+                          : "text-slate-300 hover:text-white hover:bg-[#1a2744]"
+                      }`}
+                    >
+                      ⚖️ Judges & Evaluators ({committee.judges.length})
+                    </button>
+                    <button
+                      onClick={() => setHackathonViewTab("submissions")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        hackathonViewTab === "submissions"
+                          ? "bg-purple-500 text-white font-bold"
+                          : "text-slate-300 hover:text-white hover:bg-[#1a2744]"
+                      }`}
+                    >
+                      📦 Deliverables ({hackSubs.length})
+                    </button>
+                  </div>
+
+                  <span className="text-[11px] font-mono text-slate-400">
+                    Scoped to {activeH.title}
+                  </span>
+                </div>
+
+                <div className="p-5">
+                  {/* TAB 1: TEAMS */}
+                  {hackathonViewTab === "teams" && (
+                    <div>
+                      {hackTeams.length === 0 ? (
+                        <div className="py-8 text-center text-slate-500 text-xs">
+                          No squads currently enrolled in this specific sprint.
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead className="text-[11px] font-mono text-slate-400 border-b border-[#253247] pb-2">
+                              <tr>
+                                <th className="pb-2.5 font-semibold">Team Code</th>
+                                <th className="pb-2.5 font-semibold">Squad Name</th>
+                                <th className="pb-2.5 font-semibold">Team Lead</th>
+                                <th className="pb-2.5 font-semibold">Members Roster</th>
+                                <th className="pb-2.5 font-semibold">Track</th>
+                                <th className="pb-2.5 font-semibold text-right">Screening Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#1c283c]">
+                              {hackTeams.map((t, idx) => (
+                                <tr key={idx} className="hover:bg-[#121c32]/50 transition-colors">
+                                  <td className="py-3 font-mono font-bold text-emerald-400">{t.code}</td>
+                                  <td className="py-3 font-semibold text-white">{t.name}</td>
+                                  <td className="py-3 text-slate-300">{t.lead || "Lead Member"}</td>
+                                  <td className="py-3 text-slate-400">
+                                    {(t.members || []).map((m) => (typeof m === 'string' ? m : m.name || m.email)).join(', ')}
+                                  </td>
+                                  <td className="py-3 text-slate-400">{t.track || activeH.track}</td>
+                                  <td className="py-3 text-right">
+                                    <span className="px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/30 text-emerald-400 font-mono text-[10px]">
+                                      {t.screeningStatus || "Registered"}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB 2: SCREENING COMMITTEE */}
+                  {hackathonViewTab === "screening" && (
+                    <div className="space-y-4">
+                      <div className="p-3 bg-[#080e1a] border border-amber-500/20 rounded-lg text-xs text-slate-300 flex items-start gap-2.5">
+                        <span className="text-base">🛡️</span>
+                        <div>
+                          <strong className="text-amber-400">Screening Committee Role:</strong> Operates immediately after the submission deadline. Reviewers inspect raw GitHub repos, verify live deployment links, and make gatekeeping decisions: <strong>Shortlist ✓</strong> or <strong>Reject ✗</strong>. Only shortlisted teams advance to judging.
+                        </div>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="text-[11px] font-mono text-slate-400 border-b border-[#253247] pb-2">
+                            <tr>
+                              <th className="pb-2.5 font-semibold">Reviewer Name</th>
+                              <th className="pb-2.5 font-semibold">Email</th>
+                              <th className="pb-2.5 font-semibold">Role</th>
+                              <th className="pb-2.5 font-semibold">Assignment Method</th>
+                              <th className="pb-2.5 font-semibold text-right">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#1c283c]">
+                            {committee.screeners.length === 0 ? (
+                              <tr>
+                                <td colSpan="5" className="py-6 text-center text-slate-500 italic">
+                                  No screening reviewers bound yet. Share code <span className="font-mono text-amber-400">{screenCodeRecord?.code}</span> with your review team.
+                                </td>
+                              </tr>
+                            ) : (
+                              committee.screeners.map((s, idx) => (
+                                <tr key={idx} className="hover:bg-[#121c32]/50 transition-colors">
+                                  <td className="py-3 font-semibold text-white">{s.fullName || "Screening Reviewer"}</td>
+                                  <td className="py-3 text-slate-300 font-mono text-[11px]">{s.email}</td>
+                                  <td className="py-3">
+                                    <span className="px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400 font-mono text-[10px]">
+                                      Screening Gatekeeper
+                                    </span>
+                                  </td>
+                                  <td className="py-3 text-slate-400 font-mono text-[11px]">
+                                    Code Redemption ({screenCodeRecord?.code || "Direct"})
+                                  </td>
+                                  <td className="py-3 text-right">
+                                    <span className="text-emerald-400 font-mono text-[10px]">● Active</span>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 3: JUDGES */}
+                  {hackathonViewTab === "judges" && (
+                    <div className="space-y-4">
+                      <div className="p-3 bg-[#080e1a] border border-blue-500/20 rounded-lg text-xs text-slate-300 flex items-start gap-2.5">
+                        <span className="text-base">⚖️</span>
+                        <div>
+                          <strong className="text-blue-400">Judge / Evaluator Role:</strong> Evaluates only shortlisted submissions after screening clearance. Judges score projects across {(activeH.rubrics || []).length} rubric criteria to calculate the final weighted score and rank.
+                        </div>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="text-[11px] font-mono text-slate-400 border-b border-[#253247] pb-2">
+                            <tr>
+                              <th className="pb-2.5 font-semibold">Judge Name</th>
+                              <th className="pb-2.5 font-semibold">Email</th>
+                              <th className="pb-2.5 font-semibold">Assigned Rubrics</th>
+                              <th className="pb-2.5 font-semibold">Assignment Method</th>
+                              <th className="pb-2.5 font-semibold text-right">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#1c283c]">
+                            {committee.judges.length === 0 ? (
+                              <tr>
+                                <td colSpan="5" className="py-6 text-center text-slate-500 italic">
+                                  No judges bound yet. Share code <span className="font-mono text-blue-400">{judgeCodeRecord?.code}</span> with your evaluator panel.
+                                </td>
+                              </tr>
+                            ) : (
+                              committee.judges.map((j, idx) => (
+                                <tr key={idx} className="hover:bg-[#121c32]/50 transition-colors">
+                                  <td className="py-3 font-semibold text-white">{j.fullName || "Judge Evaluator"}</td>
+                                  <td className="py-3 text-slate-300 font-mono text-[11px]">{j.email}</td>
+                                  <td className="py-3 text-slate-400">
+                                    {(activeH.rubrics || []).map((r) => r.name).slice(0, 2).join(', ') || "Standard Rubrics"}...
+                                  </td>
+                                  <td className="py-3 text-slate-400 font-mono text-[11px]">
+                                    Code Redemption ({judgeCodeRecord?.code || "Direct"})
+                                  </td>
+                                  <td className="py-3 text-right">
+                                    <span className="text-emerald-400 font-mono text-[10px]">● Active</span>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 4: DELIVERABLES */}
+                  {hackathonViewTab === "submissions" && (
+                    <div>
+                      {hackSubs.length === 0 ? (
+                        <div className="py-8 text-center text-slate-500 text-xs">
+                          No project deliverables uploaded for this hackathon yet.
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead className="text-[11px] font-mono text-slate-400 border-b border-[#253247] pb-2">
+                              <tr>
+                                <th className="pb-2.5 font-semibold">Project Title</th>
+                                <th className="pb-2.5 font-semibold">Squad</th>
+                                <th className="pb-2.5 font-semibold">Repository</th>
+                                <th className="pb-2.5 font-semibold">Live Preview</th>
+                                <th className="pb-2.5 font-semibold text-right">Screening Decision</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#1c283c]">
+                              {hackSubs.map((s, idx) => (
+                                <tr key={idx} className="hover:bg-[#121c32]/50 transition-colors">
+                                  <td className="py-3 font-bold text-white pr-4">
+                                    {s.projectTitle || "Project Deliverable"}
+                                  </td>
+                                  <td className="py-3 text-slate-300 pr-4">{s.teamName || s.teamId}</td>
+                                  <td className="py-3 text-blue-400 font-mono text-[11px] pr-4">
+                                    <a href={s.repositoryUrl || s.repoUrl || "#"} target="_blank" rel="noreferrer" className="hover:underline">
+                                      {s.repositoryUrl ? "GitHub ↗" : "None"}
+                                    </a>
+                                  </td>
+                                  <td className="py-3 text-emerald-400 font-mono text-[11px] pr-4">
+                                    <a href={s.liveDemoUrl || s.demoUrl || "#"} target="_blank" rel="noreferrer" className="hover:underline">
+                                      {s.liveDemoUrl ? "Live Demo ↗" : "None"}
+                                    </a>
+                                  </td>
+                                  <td className="py-3 text-right">
+                                    <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] ${
+                                      s.screeningStatus === "Shortlisted"
+                                        ? "bg-emerald-950 border border-emerald-500/30 text-emerald-400"
+                                        : s.screeningStatus === "Rejected"
+                                        ? "bg-rose-950 border border-rose-500/30 text-rose-400"
+                                        : "bg-amber-950 border border-amber-500/30 text-amber-400"
+                                    }`}>
+                                      {s.screeningStatus || "Pending Review"}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </section>
+            </div>
+          );
+        })()}
+
+        {/* CONDITION 2: GLOBAL PLATFORM OVERVIEW (WHEN ALL IS SELECTED) */}
+        {selectedHackathonId === "all" && (
+          <>
+            {/* 2. COMPETITION MANAGEMENT CARD */}
+            <section className="bg-[#0d1526] border border-[#253247] rounded-xl overflow-hidden shadow-sm">
           <div className="px-5 py-3.5 border-b border-[#253247] bg-[#121c32] flex items-center justify-between">
             <div>
               <h2 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
@@ -442,6 +878,8 @@ export default function AdminDashboard() {
             </div>
           </div>
         </section>
+          </>
+        )}
 
         {/* MODAL: CREATE NEW HACKATHON */}
         {showCreateModal && (

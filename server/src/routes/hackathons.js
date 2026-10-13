@@ -210,4 +210,56 @@ router.post('/:id/criteria', requireAuth, requireRole('admin', 'organizer'), (re
   }
 });
 
+// POST /api/v1/hackathons/:id/codes: Organizer generates a judge or screening access code
+router.post('/:id/codes', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
+  const { role } = req.body || {};
+  if (!['judge', 'screening'].includes(role)) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: "Role must be 'judge' or 'screening'.",
+    });
+  }
+
+  try {
+    const codeRecord = store.generateHackathonCode(req.params.id, role, req.user.id);
+    return res.status(201).json({
+      status: 201,
+      message: `Access code generated for ${role} role.`,
+      codeRecord,
+    });
+  } catch (err) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: err.message,
+    });
+  }
+});
+
+// GET /api/v1/hackathons/:id/codes: Get all access codes and redeemers for a hackathon
+router.get('/:id/codes', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
+  const hackathon = store.getHackathonById(req.params.id);
+  if (!hackathon) {
+    return res.status(404).json({ status: 404, error: 'Not Found', message: 'Hackathon not found.' });
+  }
+  const codes = store.getCodesForHackathon(req.params.id);
+  const judges = store.getHackathonAssignedUsers(req.params.id, 'judge');
+  const screeners = store.getHackathonAssignedUsers(req.params.id, 'screening');
+  return res.json({
+    status: 200,
+    hackathonId: req.params.id,
+    codes,
+    assignedJudges: judges,
+    assignedScreeners: screeners,
+  });
+});
+
+// GET /api/v1/hackathons/:id/assigned-users: Admin view of all assigned judges+screeners
+router.get('/:id/assigned-users', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
+  const { role } = req.query;
+  const users = store.getHackathonAssignedUsers(req.params.id, role || null);
+  return res.json({ status: 200, users });
+});
+
 export default router;

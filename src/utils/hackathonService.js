@@ -140,3 +140,277 @@ export function advanceHackathonStage(id) {
   saveStoredHackathons(list);
   return { success: true, hackathon: list[index] };
 }
+
+// -------------------------------------------------------------
+// Hackathon Access Code & Committee Management
+// -------------------------------------------------------------
+const CODES_STORAGE_KEY = "hacktrack_access_codes";
+const ASSIGNMENTS_STORAGE_KEY = "hacktrack_user_hackathons";
+
+const DEFAULT_CODES = [
+  {
+    id: "code-devp-judge",
+    hackathonId: "devpulse-2026",
+    hackathonTitle: "DevPulse National Sprint",
+    role: "judge",
+    code: "JUDGE-DEVPULSE-7X9K",
+    createdBy: "organizer@hacktrack.io",
+    createdAt: new Date().toISOString(),
+    redeemedBy: [
+      { userId: "usr-judge-005", email: "judge@hacktrack.io", fullName: "Prof. Elena Rostova", redeemedAt: new Date().toISOString() }
+    ]
+  },
+  {
+    id: "code-devp-screen",
+    hackathonId: "devpulse-2026",
+    hackathonTitle: "DevPulse National Sprint",
+    role: "screening",
+    code: "SCREEN-DEVPULSE-3M2P",
+    createdBy: "organizer@hacktrack.io",
+    createdAt: new Date().toISOString(),
+    redeemedBy: [
+      { userId: "usr-screening-004", email: "screening@hacktrack.io", fullName: "Dr. Marcus Vance", redeemedAt: new Date().toISOString() }
+    ]
+  },
+  {
+    id: "code-aicat-judge",
+    hackathonId: "ai-catalyst-2026",
+    hackathonTitle: "AI Catalyst Challenge",
+    role: "judge",
+    code: "JUDGE-AICAT-8K4T",
+    createdBy: "organizer@hacktrack.io",
+    createdAt: new Date().toISOString(),
+    redeemedBy: []
+  },
+  {
+    id: "code-aicat-screen",
+    hackathonId: "ai-catalyst-2026",
+    hackathonTitle: "AI Catalyst Challenge",
+    role: "screening",
+    code: "SCREEN-AICAT-2N9L",
+    createdBy: "organizer@hacktrack.io",
+    createdAt: new Date().toISOString(),
+    redeemedBy: []
+  },
+  {
+    id: "code-campus-judge",
+    hackathonId: "smart-campus-2026",
+    hackathonTitle: "Smart Campus Hack",
+    role: "judge",
+    code: "JUDGE-CAMPUS-5W1Q",
+    createdBy: "organizer@hacktrack.io",
+    createdAt: new Date().toISOString(),
+    redeemedBy: []
+  },
+  {
+    id: "code-campus-screen",
+    hackathonId: "smart-campus-2026",
+    hackathonTitle: "Smart Campus Hack",
+    role: "screening",
+    code: "SCREEN-CAMPUS-9Y4R",
+    createdBy: "organizer@hacktrack.io",
+    createdAt: new Date().toISOString(),
+    redeemedBy: []
+  }
+];
+
+export function getAllAccessCodes() {
+  try {
+    const raw = localStorage.getItem(CODES_STORAGE_KEY);
+    if (!raw) {
+      localStorage.setItem(CODES_STORAGE_KEY, JSON.stringify(DEFAULT_CODES));
+      return DEFAULT_CODES;
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_CODES;
+  } catch {
+    return DEFAULT_CODES;
+  }
+}
+
+export function saveAllAccessCodes(codes) {
+  try {
+    localStorage.setItem(CODES_STORAGE_KEY, JSON.stringify(codes));
+  } catch (err) {
+    console.error("Failed to save access codes:", err);
+  }
+}
+
+export function getCodesForHackathon(hackathonId) {
+  const all = getAllAccessCodes();
+  return all.filter((c) => c.hackathonId === hackathonId);
+}
+
+export function generateHackathonCode(hackathonId, role, createdBy = "organizer@hacktrack.io") {
+  const hackathon = getHackathonById(hackathonId);
+  if (!hackathon) return { success: false, error: "Hackathon not found" };
+
+  const prefix = role.toUpperCase();
+  const abbrev = (hackathon.title || "HACK")
+    .replace(/[^a-zA-Z0-9 ]/g, '')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w.substring(0, 4).toUpperCase())
+    .join('');
+  const suffix = Math.random().toString(36).substring(2, 6).toUpperCase();
+  const code = `${prefix}-${abbrev || 'HACK'}-${suffix}`;
+
+  const all = getAllAccessCodes();
+  // Filter out any previous code for the same hackathon + role
+  const filtered = all.filter((c) => !(c.hackathonId === hackathonId && c.role === role));
+
+  const newRecord = {
+    id: `code-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+    hackathonId,
+    hackathonTitle: hackathon.title,
+    role,
+    code,
+    createdBy,
+    createdAt: new Date().toISOString(),
+    redeemedBy: []
+  };
+
+  const updated = [...filtered, newRecord];
+  saveAllAccessCodes(updated);
+  return { success: true, codeRecord: newRecord };
+}
+
+export function redeemAccessCode(rawCode, user) {
+  if (!rawCode || !rawCode.trim()) {
+    return { success: false, error: "Please enter an access code." };
+  }
+  const cleanCode = rawCode.trim().toUpperCase();
+  const allCodes = getAllAccessCodes();
+  const record = allCodes.find((c) => c.code.toUpperCase() === cleanCode);
+
+  if (!record) {
+    return { success: false, error: "Invalid access code. Please check with the hackathon organizer." };
+  }
+
+  // Role validation
+  if (user?.role && user.role !== 'admin' && user.role !== record.role) {
+    return {
+      success: false,
+      error: `This code is intended for the '${record.role.toUpperCase()}' role. You are logged in as '${user.role}'.`
+    };
+  }
+
+  // Record redemption in the code record
+  const userIdentifier = user?.id || user?.email || "anonymous";
+  const userEmail = user?.email || "user@hacktrack.io";
+  const userName = user?.fullName || user?.name || "Committee Member";
+
+  const alreadyRedeemed = (record.redeemedBy || []).some(
+    (r) => r.userId === userIdentifier || r.email === userEmail
+  );
+
+  if (!alreadyRedeemed) {
+    record.redeemedBy = record.redeemedBy || [];
+    record.redeemedBy.push({
+      userId: userIdentifier,
+      email: userEmail,
+      fullName: userName,
+      redeemedAt: new Date().toISOString()
+    });
+    saveAllAccessCodes(allCodes);
+  }
+
+  // Store user assignment in localStorage
+  saveUserHackathonAssignment(userIdentifier, record.hackathonId);
+
+  return {
+    success: true,
+    hackathonId: record.hackathonId,
+    hackathonTitle: record.hackathonTitle,
+    role: record.role,
+    message: `Successfully bound to "${record.hackathonTitle}" as ${record.role.toUpperCase()}!`
+  };
+}
+
+export function getUserAssignedHackathonIds(user) {
+  const userIdentifier = user?.id || user?.email;
+  if (!userIdentifier) return ["devpulse-2026"];
+
+  try {
+    const raw = localStorage.getItem(`${ASSIGNMENTS_STORAGE_KEY}_${userIdentifier}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {
+    // fallback
+  }
+
+  // Default pre-assigned hackathons for demo roles
+  if (user?.role === 'judge' || user?.role === 'screening') {
+    return ["devpulse-2026"];
+  }
+
+  return ["devpulse-2026"];
+}
+
+export function saveUserHackathonAssignment(userIdentifier, hackathonId) {
+  if (!userIdentifier || !hackathonId) return;
+  try {
+    const key = `${ASSIGNMENTS_STORAGE_KEY}_${userIdentifier}`;
+    const raw = localStorage.getItem(key);
+    let list = [];
+    if (raw) {
+      try { list = JSON.parse(raw); } catch { list = []; }
+    }
+    if (!list.includes(hackathonId)) {
+      list.push(hackathonId);
+    }
+    localStorage.setItem(key, JSON.stringify(list));
+  } catch (err) {
+    console.error("Failed to save user assignment:", err);
+  }
+}
+
+export function getHackathonCommittee(hackathonId) {
+  const allCodes = getAllAccessCodes();
+  const hackCodes = allCodes.filter((c) => c.hackathonId === hackathonId);
+
+  const judges = [];
+  const screeners = [];
+
+  hackCodes.forEach((c) => {
+    if (c.role === "judge") {
+      (c.redeemedBy || []).forEach((u) => {
+        if (!judges.some((j) => j.email === u.email)) judges.push(u);
+      });
+    } else if (c.role === "screening") {
+      (c.redeemedBy || []).forEach((u) => {
+        if (!screeners.some((s) => s.email === u.email)) screeners.push(u);
+      });
+    }
+  });
+
+  // Include default seeded demo committee if devpulse-2026
+  if (hackathonId === "devpulse-2026") {
+    if (!judges.some((j) => j.email === "judge@hacktrack.io")) {
+      judges.push({
+        userId: "usr-judge-005",
+        email: "judge@hacktrack.io",
+        fullName: "Prof. Elena Rostova",
+        redeemedAt: new Date().toISOString()
+      });
+    }
+    if (!screeners.some((s) => s.email === "screening@hacktrack.io")) {
+      screeners.push({
+        userId: "usr-screening-004",
+        email: "screening@hacktrack.io",
+        fullName: "Dr. Marcus Vance",
+        redeemedAt: new Date().toISOString()
+      });
+    }
+  }
+
+  return {
+    codes: hackCodes,
+    judges,
+    screeners
+  };
+}
+

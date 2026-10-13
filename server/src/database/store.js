@@ -345,6 +345,7 @@ class HackTrackStore {
     this.certificates = [];
     this.notifications = [];
     this.announcements = [];
+    this.hackathonCodes = []; // Access codes for judge/screening assignment
     this.resetTokens = new Map();
 
     this.init();
@@ -366,6 +367,56 @@ class HackTrackStore {
     this.evaluations = JSON.parse(JSON.stringify(INITIAL_EVALUATIONS));
     this.certificates = JSON.parse(JSON.stringify(INITIAL_CERTIFICATES));
     this.announcements = JSON.parse(JSON.stringify(INITIAL_ANNOUNCEMENTS));
+
+    // Seed default access codes
+    this.hackathonCodes = [
+      {
+        id: 'code-demo-1',
+        hackathonId: 'hack-001',
+        hackathonTitle: 'CodeSprint Global 2026',
+        role: 'judge',
+        code: 'JUDGE-CODE-7X9K',
+        createdBy: 'usr-organizer-007',
+        createdAt: new Date().toISOString(),
+        redeemedBy: [{ userId: 'usr-judge-005', redeemedAt: new Date().toISOString() }],
+      },
+      {
+        id: 'code-demo-2',
+        hackathonId: 'hack-001',
+        hackathonTitle: 'CodeSprint Global 2026',
+        role: 'screening',
+        code: 'SCREEN-CODE-3M2P',
+        createdBy: 'usr-organizer-007',
+        createdAt: new Date().toISOString(),
+        redeemedBy: [{ userId: 'usr-screening-004', redeemedAt: new Date().toISOString() }],
+      },
+      {
+        id: 'code-demo-3',
+        hackathonId: 'hack-002',
+        hackathonTitle: 'PCCOE InnovateX 2026',
+        role: 'judge',
+        code: 'JUDGE-PCCO-8A4B',
+        createdBy: 'usr-organizer-007',
+        createdAt: new Date().toISOString(),
+        redeemedBy: [],
+      },
+      {
+        id: 'code-demo-4',
+        hackathonId: 'hack-002',
+        hackathonTitle: 'PCCOE InnovateX 2026',
+        role: 'screening',
+        code: 'SCREEN-PCCO-5N1W',
+        createdBy: 'usr-organizer-007',
+        createdAt: new Date().toISOString(),
+        redeemedBy: [],
+      },
+    ];
+
+    // Pre-assign demo users to hack-001
+    const judgeUser = this.users.find((u) => u.id === 'usr-judge-005');
+    if (judgeUser) judgeUser.assignedHackathonIds = ['hack-001'];
+    const screenUser = this.users.find((u) => u.id === 'usr-screening-004');
+    if (screenUser) screenUser.assignedHackathonIds = ['hack-001'];
   }
 
   // --- Users & Auth ---
@@ -985,6 +1036,101 @@ class HackTrackStore {
       totalEvaluations: this.evaluations.length,
       totalCertificates: this.certificates.length,
     };
+  }
+
+  // --- Hackathon Access Codes (Judge / Screening assignment) ---
+
+  generateHackathonCode(hackathonId, role, createdBy) {
+    const hackathon = this.getHackathonById(hackathonId);
+    if (!hackathon) throw new Error('Hackathon not found.');
+    if (!['judge', 'screening'].includes(role)) throw new Error('Role must be judge or screening.');
+
+    // Revoke previous unused code for same hackathon+role if organizer regenerates
+    this.hackathonCodes = this.hackathonCodes.filter(
+      (c) => !(c.hackathonId === hackathonId && c.role === role)
+    );
+
+    const abbrev = hackathon.title
+      .replace(/[^a-zA-Z0-9 ]/g, '')
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w.substring(0, 4).toUpperCase())
+      .join('');
+    const suffix = crypto.randomBytes(3).toString('hex').toUpperCase();
+    const code = `${role.toUpperCase()}-${abbrev}-${suffix}`;
+
+    const record = {
+      id: `code-${crypto.randomBytes(4).toString('hex')}`,
+      hackathonId,
+      hackathonTitle: hackathon.title,
+      role,
+      code,
+      createdBy,
+      createdAt: new Date().toISOString(),
+      redeemedBy: [], // [{ userId, redeemedAt }]
+    };
+
+    this.hackathonCodes.push(record);
+    return record;
+  }
+
+  redeemHackathonCode(code, userId) {
+    const clean = (code || '').trim().toUpperCase();
+    const record = this.hackathonCodes.find((c) => c.code.toUpperCase() === clean);
+    if (!record) throw new Error('Invalid access code. Please check the code and try again.');
+
+    const user = this.findUserById(userId);
+    if (!user) throw new Error('User not found.');
+
+    // Check role matches — judge code for judge role, etc.
+    if (user.role !== record.role) {
+      throw new Error(`This code is for the '${record.role}' role but you are logged in as '${user.role}'.`);
+    }
+
+    // Check if already redeemed by this user
+    const alreadyRedeemed = record.redeemedBy.some((r) => r.userId === userId);
+    if (!alreadyRedeemed) {
+      record.redeemedBy.push({ userId, redeemedAt: new Date().toISOString() });
+    }
+
+    // Attach hackathon assignment to user
+    if (!user.assignedHackathonIds) user.assignedHackathonIds = [];
+    if (!user.assignedHackathonIds.includes(record.hackathonId)) {
+      user.assignedHackathonIds.push(record.hackathonId);
+    }
+
+    return {
+      hackathonId: record.hackathonId,
+      hackathonTitle: record.hackathonTitle,
+      role: record.role,
+      redeemedAt: new Date().toISOString(),
+    };
+  }
+
+  getCodesForHackathon(hackathonId) {
+    return this.hackathonCodes.filter((c) => c.hackathonId === hackathonId);
+  }
+
+  getUserAssignedHackathons(userId) {
+    const user = this.findUserById(userId);
+    if (!user || !user.assignedHackathonIds) return [];
+    return user.assignedHackathonIds
+      .map((id) => this.getHackathonById(id))
+      .filter(Boolean);
+  }
+
+  getHackathonAssignedUsers(hackathonId, role) {
+    const codes = this.hackathonCodes.filter(
+      (c) => c.hackathonId === hackathonId && (!role || c.role === role)
+    );
+    const userIds = new Set(
+      codes.flatMap((c) => c.redeemedBy.map((r) => r.userId))
+    );
+    return [...userIds]
+      .map((id) => this.findUserById(id))
+      .filter(Boolean)
+      .map(({ passwordHash: _p, ...safe }) => safe);
   }
 }
 

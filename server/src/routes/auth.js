@@ -183,4 +183,41 @@ router.get('/demo-users', (req, res) => {
   });
 });
 
+// Redeem access code to bind judge or screening member to a hackathon
+router.post('/redeem-code', requireAuth, (req, res) => {
+  const { code } = req.body || {};
+  if (!code) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: 'Access code is required.',
+    });
+  }
+
+  try {
+    const result = store.redeemHackathonCode(code, req.user.id);
+    return res.json({
+      status: 200,
+      message: `Successfully bound to ${result.hackathonTitle} as ${result.role}.`,
+      assignment: result,
+      user: req.user,
+    });
+  } catch (err) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: err.message,
+    });
+  }
+});
+
+// Get hackathons assigned to current user
+router.get('/my-hackathons', requireAuth, (req, res) => {
+  const hackathons = store.getUserAssignedHackathons(req.user.id);
+  return res.json({
+    status: 200,
+    hackathons,
+  });
+});
+
 export default router;

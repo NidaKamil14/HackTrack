@@ -1,13 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
 import { Icons } from '../../components/Icons';
 import { useAuth } from '../../context/AuthContext';
 import { getFinalizedSubmissions, updateScreeningDecision } from '../../utils/submissionService.js';
-import { getStoredHackathons } from '../../utils/hackathonService.js';
+import {
+  getStoredHackathons,
+  getUserAssignedHackathonIds,
+  redeemAccessCode
+} from '../../utils/hackathonService.js';
 
 export default function ScreeningDashboard() {
   const { user } = useAuth();
-  const hackathonsList = getStoredHackathons();
 
   const loadSubmissions = () => {
     const finalized = getFinalizedSubmissions();
@@ -40,9 +43,48 @@ export default function ScreeningDashboard() {
   };
 
   const [submissions, setSubmissions] = useState(loadSubmissions);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const allHackathons = useMemo(() => {
+    if (refreshKey) { /* trigger */ }
+    return getStoredHackathons();
+  }, [refreshKey]);
+
+  const assignedIds = useMemo(() => {
+    if (refreshKey) { /* trigger */ }
+    return getUserAssignedHackathonIds(user);
+  }, [user, refreshKey]);
+
+  const assignedHackathons = useMemo(() => {
+    const list = allHackathons.filter((h) => assignedIds.includes(h.id));
+    return list.length > 0 ? list : allHackathons.slice(0, 1);
+  }, [allHackathons, assignedIds]);
+
   const [filterHackathon, setFilterHackathon] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [feedbackNotice, setFeedbackNotice] = useState(null);
+
+  // Access Code Modal & State
+  const [showCodeModal, setShowCodeModal] = useState(false);
+  const [accessCodeInput, setAccessCodeInput] = useState("");
+  const [codeNotice, setCodeNotice] = useState(null);
+
+  const handleRedeemCode = (e) => {
+    e.preventDefault();
+    if (!accessCodeInput.trim()) return;
+    const res = redeemAccessCode(accessCodeInput, user);
+    if (res.success) {
+      setCodeNotice({ type: 'success', text: res.message });
+      setFilterHackathon(res.hackathonId);
+      setAccessCodeInput("");
+      setShowCodeModal(false);
+      setRefreshKey((k) => k + 1);
+      setTimeout(() => setCodeNotice(null), 4500);
+    } else {
+      setCodeNotice({ type: 'error', text: res.error });
+      setTimeout(() => setCodeNotice(null), 4500);
+    }
+  };
 
   // Active remarks editing
   const [remarksState, setRemarksState] = useState({});
@@ -206,18 +248,48 @@ export default function ScreeningDashboard() {
           </div>
         </section>
 
+        {/* Role Explanation Banner */}
+        <section className="bg-[#080e1a] border border-amber-500/20 rounded-xl p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs shadow-sm">
+          <div className="flex items-start gap-2.5">
+            <span className="text-lg">🛡️</span>
+            <div>
+              <span className="font-bold text-amber-400">Screening Committee (Gatekeeper):</span>
+              <p className="text-slate-300 text-[11px] mt-0.5 leading-relaxed">
+                You review <strong>all raw submissions</strong> right after the deadline. Verify commit freshness, live URL health, and documentation to mark entries as <strong>Shortlisted ✓</strong> (which sends them to Judges) or <strong>Rejected ✗</strong>.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setShowCodeModal(true)}
+            className="px-3.5 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold rounded-lg text-xs transition-colors shrink-0 flex items-center gap-1.5"
+          >
+            <span>🔑</span> Enter Screening Access Code
+          </button>
+        </section>
+
+        {codeNotice && (
+          <div className={`p-3 rounded-lg text-xs font-medium border ${
+            codeNotice.type === 'success'
+              ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+              : 'bg-rose-950/60 border-rose-500/40 text-rose-300'
+          }`}>
+            {codeNotice.text}
+          </div>
+        )}
+
         {/* 2. FILTER & QUEUE HEADER */}
         <section className="bg-[#0d1526] border border-[#253247] rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-sm">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
-              <span className="text-slate-400">Hackathon:</span>
+              <span className="text-slate-400 font-mono text-[11px]">ACTIVE HACKATHON:</span>
               <select
                 value={filterHackathon}
                 onChange={(e) => setFilterHackathon(e.target.value)}
-                className="bg-[#080e1a] border border-[#223044] text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-emerald-500"
+                className="bg-[#080e1a] border border-[#223044] text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 font-semibold"
               >
-                <option value="all">All Hackathons</option>
-                {hackathonsList.map((h) => (
+                <option value="all">All Assigned Competitions ({assignedHackathons.length})</option>
+                {assignedHackathons.map((h) => (
                   <option key={h.id} value={h.id}>{h.title}</option>
                 ))}
               </select>
@@ -526,6 +598,62 @@ export default function ScreeningDashboard() {
                   Confirm Rejection
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Enter Screening Access Code */}
+        {showCodeModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
+            <div className="bg-[#0d1526] border border-[#253247] rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-[#253247] pb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">🔑</span>
+                  <h3 className="text-sm font-bold text-white">Enter Screening Access Code</h3>
+                </div>
+                <button
+                  onClick={() => setShowCodeModal(false)}
+                  className="text-slate-400 hover:text-white text-xs"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Hackathon organizers create unique screening access codes (e.g. <span className="font-mono text-amber-400">SCREEN-DEVPULSE-3M2P</span>). Enter your assigned code once to unlock and review submissions for that hackathon.
+              </p>
+
+              <form onSubmit={handleRedeemCode} className="space-y-4 text-xs">
+                <div>
+                  <label className="text-[11px] font-mono text-slate-400 block mb-1 uppercase font-semibold">
+                    ACCESS CODE
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={accessCodeInput}
+                    onChange={(e) => setAccessCodeInput(e.target.value.toUpperCase())}
+                    placeholder="e.g. SCREEN-DEVPULSE-3M2P"
+                    className="w-full bg-[#080e1a] border border-[#253247] rounded-lg p-3 text-sm font-mono font-bold text-amber-400 placeholder-slate-600 focus:outline-none focus:border-amber-500 tracking-wider uppercase"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-[#253247]">
+                  <button
+                    type="button"
+                    onClick={() => setShowCodeModal(false)}
+                    className="px-4 py-2 bg-[#121c32] hover:bg-[#1a2744] text-slate-300 rounded-lg text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition-colors shadow"
+                  >
+                    Verify & Unlock Hackathon
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
