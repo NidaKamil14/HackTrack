@@ -161,14 +161,27 @@ npm test
 
 All accounts use the default password: `password123`
 
-| Role | Email | Capabilities |
+| Role | Email | Capabilities & Access Codes |
 |---|---|---|
-| **Platform Admin** | `admin@hacktrack.io` | Hackathon creation, criteria rubrics, judge assignment, publishing, user management |
-| **Team Leader** | `alex@university.edu` | Team creation, join request approval, project submission |
+| **Platform Admin** | `admin@hacktrack.io` | Platform overview, per-hackathon scoped inspection, user role management |
+| **Organizer** | `organizer@hacktrack.io` | Create hackathons, customize weighted rubrics, generate access codes |
+| **Team Leader** | `alex@university.edu` | Team creation, join request approval, project deliverable submission |
 | **Student** | `priya@university.edu` | Browse hackathons, join teams via Team Code, view certificates |
-| **Judge** | `marcus@techcorp.io` | Evaluate assigned projects, submit rubric scores and feedback |
-| **Screening** | `elena@university.edu` | Preliminary project screening and eligibility checks |
-| **Mentor** | `david@startuphub.io` | Review student submissions and offer guidance |
+| **Judge** | `judge@hacktrack.io` | Evaluate shortlisted finalists; unlock via code `JUDGE-DEVPULSE-7X9K` |
+| **Screening** | `screening@hacktrack.io` | Verify git freshness & live URLs; unlock via code `SCREEN-DEVPULSE-3M2P` |
+| **Mentor** | `mentor@hacktrack.io` | Review student submissions and offer guidance |
+
+---
+
+## 🔒 Core Business Rules & Integrity Constraints
+
+* **BR-1 (Team Creation Exclusivity)**: Only users registered with the Team Leader role can sanction and create squads.
+* **BR-2 (Single Team per Hackathon)**: A participant or leader cannot join or create multiple teams within the same competition. (Cross-hackathon participation is allowed).
+* **BR-3 (Team Leader Roster Guard)**: Join requests submitted with team codes require explicit leader authorization.
+* **BR-4 (Stage-Gated Evaluation Workflow)**:
+  1. **Stage 1 (Screening Committee)**: Evaluates raw submissions for git commit freshness, documentation, and live preview URLs. Decisions: `Shortlist ✓` or `Reject ✗`.
+  2. **Stage 2 (Judges & Evaluators)**: Evaluates *only shortlisted finalists* against that hackathon's specific weighted rubrics criteria (0–100 total score).
+* **BR-5 (Access Code Binding)**: Organizers generate distinct access codes for judges and screening committee members. Entering the code once binds the reviewer to that competition.
 
 ---
 
