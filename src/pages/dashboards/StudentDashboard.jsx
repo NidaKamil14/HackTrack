@@ -1,26 +1,9 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import {
-  Award,
-  Bell,
-  CalendarDays,
-  Check,
-  ClipboardCheck,
-  Compass,
-  Copy,
-  FolderOpen,
-  Lock,
-  LockOpen,
-  Paperclip,
-  Printer,
-  Rocket,
-  Trophy,
-  Upload,
-  UserPlus,
-  Users,
-  X
-} from 'lucide-react';
+import { Award, Bell, CalendarDays, Check, ClipboardCheck, Compass, Copy, FileText, Flag, FolderOpen, Gavel, KeyRound, Link2, Lock, LockOpen, Paperclip, Printer, Rocket, ShieldCheck, Trophy, Upload, UserPlus, Users, X, Mail } from 'lucide-react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
+import EmailActivity from '../../components/notifications/EmailActivity';
+import EventCover from '../../components/art/EventCover';
 import {
   Alert,
   Badge,
@@ -38,12 +21,13 @@ import {
   PageHeader,
   Select,
   TabPanel,
-  TableContainer,
   Tabs,
   Textarea,
   cn,
-  stageTone,
-  tableClasses
+  STAGE_ORDER,
+  stagePhase,
+  stageProgress,
+  stageTone
 } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { getStoredHackathons } from '../../utils/hackathonService';
@@ -104,14 +88,70 @@ function screeningTone(status) {
   return "warning";
 }
 
+const STAGE_PHASE_LABELS = { upcoming: "Upcoming", active: "In progress", completed: "Completed" };
+
+const TILE_TONES = {
+  accent: "bg-accent/15 text-accent-text ring-accent/25",
+  success: "bg-success/10 text-success ring-success/25",
+  warning: "bg-warning/10 text-warning ring-warning/25",
+  danger: "bg-danger/10 text-danger ring-danger/25",
+  info: "bg-info/10 text-info ring-info/25",
+  neutral: "bg-raised text-fg-muted ring-line"
+};
+
+/** Small icon tile used beside section headings. */
+function IconTile({ icon: Icon, tone = "accent", className }) {
+  return (
+    <span
+      className={cn(
+        "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset",
+        TILE_TONES[tone] || TILE_TONES.accent,
+        className
+      )}
+    >
+      <Icon className="h-4 w-4" aria-hidden="true" />
+    </span>
+  );
+}
+
+/** Slim gradient progress bar. */
+function ProgressBar({ value, max, label, className }) {
+  const pct = max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
+  return (
+    <div
+      className={cn("h-1.5 w-full overflow-hidden rounded-full bg-raised", className)}
+      role="progressbar"
+      aria-label={label}
+      aria-valuenow={value}
+      aria-valuemin={0}
+      aria-valuemax={max}
+    >
+      <div
+        className="h-full rounded-full bg-gradient-to-r from-accent to-accent-2 transition-[width] duration-300"
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  );
+}
+
+/** Initials for avatar circles (presentation only). */
+function initialsOf(name) {
+  const parts = String(name || "").replace(/\(.*?\)/g, "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return ((parts[0][0] || "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
+
 /** Small labelled sub-section used inside cards. */
-function FormSection({ title, description, actions, children, className }) {
+function FormSection({ title, description, actions, icon, children, className }) {
   return (
     <section className={cn("space-y-4", className)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-fg">{title}</h3>
-          {description && <p className="mt-0.5 text-sm text-fg-muted">{description}</p>}
+        <div className="flex min-w-0 items-start gap-3">
+          {icon && <IconTile icon={icon} />}
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-fg">{title}</h3>
+            {description && <p className="mt-0.5 text-sm text-fg-muted">{description}</p>}
+          </div>
         </div>
         {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </div>
@@ -549,6 +589,9 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
 
   const copyButtonLabel = copied ? "Copied" : "Copy code";
 
+  // Presentation only: position of the active hackathon in the lifecycle.
+  const activeStageIndex = activeSprint?.stage ? STAGE_ORDER.indexOf(activeSprint.stage) : -1;
+
   return (
     <DashboardLayout
       portalTitle={isLeader ? "Team Leader Portal" : "Student Participant Portal"}
@@ -558,6 +601,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
 
         {/* HEADER */}
         <PageHeader
+          icon={Rocket}
           eyebrow={isLeader ? "Team leader workspace" : "Participant workspace"}
           title={`Welcome back, ${user?.fullName || "Developer"}`}
           description="Register for hackathons, build your team, submit your project and follow it through screening, judging and certificates."
@@ -586,20 +630,86 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
         />
 
         <div className="space-y-4">
-          {/* Multi-hackathon context switcher */}
-          {registeredHackathons.length > 1 && (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-              <Field label="Hackathon" hint="Submission, team and results below are for this hackathon." className="sm:w-96">
-                <Select
-                  value={activeSprint?.id || ""}
-                  onChange={(e) => setSelectedHackathonId(e.target.value)}
-                >
-                  {registeredHackathons.map((h) => (
-                    <option key={h.id} value={h.id}>{h.title}</option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
+          {/* Current competition strip */}
+          {activeSprint && (
+            <section
+              aria-labelledby="student-current-competition"
+              className="surface-card relative isolate overflow-hidden rounded-xl border border-line p-4 sm:p-5 [&>div]:relative"
+            >
+              <span
+                className="pointer-events-none absolute inset-y-0 left-0 w-0.5 bg-gradient-to-b from-accent to-accent-2"
+                aria-hidden="true"
+              />
+              {/* Event cover art fading in from the right (decorative) */}
+              <span className="pointer-events-none absolute right-0 top-0 -z-10 hidden h-28 w-1/2 opacity-70 [mask-image:linear-gradient(to_left,black_30%,transparent)] md:block">
+                <EventCover hackathon={activeSprint} className="h-full w-full" />
+              </span>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div className="flex min-w-0 items-start gap-3">
+                  <IconTile icon={Flag} />
+                  <div className="min-w-0 space-y-1">
+                    <p className="eyebrow">Current competition</p>
+                    <h2 id="student-current-competition" className="text-base font-semibold leading-snug text-fg">
+                      {activeSprint.title}
+                    </h2>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-fg-subtle">
+                      {activeSprint.stage && (
+                        <Badge tone={stageTone(activeSprint.stage)} dot>{activeSprint.stage}</Badge>
+                      )}
+                      {activeSprint.track && <span>{activeSprint.track}</span>}
+                      <span className="flex items-center gap-1.5">
+                        <CalendarDays className="h-4 w-4" aria-hidden="true" />
+                        Deadline: <span className="font-medium text-fg-muted">{activeSprint.deadline || "TBD"}</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Multi-hackathon context switcher */}
+                {registeredHackathons.length > 1 && (
+                  <Field label="Hackathon" hint="Submission, team and results below are for this hackathon." className="w-full lg:w-80">
+                    <Select
+                      value={activeSprint?.id || ""}
+                      onChange={(e) => setSelectedHackathonId(e.target.value)}
+                    >
+                      {registeredHackathons.map((h) => (
+                        <option key={h.id} value={h.id}>{h.title}</option>
+                      ))}
+                    </Select>
+                  </Field>
+                )}
+              </div>
+
+              {activeStageIndex >= 0 && (
+                <div className="mt-4 space-y-2 border-t border-line pt-4">
+                  <div className="flex items-center justify-between gap-3 text-xs text-fg-subtle">
+                    <span>
+                      Competition progress
+                      <span className="text-fg-muted"> · {STAGE_PHASE_LABELS[stagePhase(activeSprint.stage)]}</span>
+                    </span>
+                    <span className="tabular-nums">{stageProgress(activeSprint.stage)}%</span>
+                  </div>
+                  <ProgressBar
+                    value={stageProgress(activeSprint.stage)}
+                    max={100}
+                    label={`Competition stage: ${activeSprint.stage}`}
+                  />
+                  <ol className="hidden grid-cols-7 gap-2 text-xs lg:grid" aria-hidden="true">
+                    {STAGE_ORDER.map((stage, i) => (
+                      <li
+                        key={stage}
+                        className={cn(
+                          "truncate",
+                          i === activeStageIndex ? "font-medium text-accent-text" : i < activeStageIndex ? "text-fg-muted" : "text-fg-subtle"
+                        )}
+                      >
+                        {stage}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+            </section>
           )}
 
           <Tabs
@@ -624,24 +734,28 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
         <TabPanel value="workspace" activeValue={activeTab} idPrefix="student" className="focus:outline-none">
           <div className="grid gap-6 lg:grid-cols-3">
             {/* Primary submission workspace */}
-            <Card className="lg:col-span-2">
+            <Card className={cn("lg:col-span-2", isFinalized && "border-success/30")}>
               <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 space-y-1">
-                  <CardTitle as="h2">Project submission</CardTitle>
-                  <CardDescription>
-                    {activeSprint
-                      ? `Deliverables for ${activeSprint.title}${currentTeam ? ` · Team ${currentTeam.name}` : ''}`
-                      : "Select a hackathon to submit"}
-                  </CardDescription>
-                  {activeSprint && (
-                    <p className="flex items-center gap-1.5 pt-1 text-xs text-fg-subtle">
-                      <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
-                      Deadline: <span className="font-medium text-fg-muted">{activeSprint.deadline || "TBD"}</span>
-                    </p>
-                  )}
+                <div className="flex min-w-0 items-start gap-3">
+                  <IconTile icon={isFinalized ? Lock : Rocket} tone={isFinalized ? "success" : "accent"} />
+                  <div className="min-w-0 space-y-1">
+                    <CardTitle as="h2">Project submission</CardTitle>
+                    <CardDescription>
+                      {activeSprint
+                        ? `Deliverables for ${activeSprint.title}${currentTeam ? ` · Team ${currentTeam.name}` : ''}`
+                        : "Select a hackathon to submit"}
+                    </CardDescription>
+                    {activeSprint && (
+                      <p className="flex items-center gap-1.5 pt-1 text-xs text-fg-subtle">
+                        <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
+                        Deadline: <span className="font-medium text-fg-muted">{activeSprint.deadline || "TBD"}</span>
+                      </p>
+                    )}
+                  </div>
                 </div>
                 {currentTeam && (
                   <Badge tone={isFinalized ? "success" : "warning"} dot>
+                    {isFinalized && <Lock className="h-3 w-3" aria-hidden="true" />}
                     {isFinalized ? "Submitted · locked" : "Draft · not submitted"}
                   </Badge>
                 )}
@@ -650,6 +764,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
               <CardContent className="space-y-6">
                 {!activeSprint ? (
                   <EmptyState
+                    illustration="calendar"
                     icon={FolderOpen}
                     title="No hackathon selected"
                     description="Please select or register for a hackathon to manage project deliverables."
@@ -662,6 +777,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                   />
                 ) : !currentTeam ? (
                   <EmptyState
+                    illustration="team"
                     icon={Users}
                     title="A team is required to submit"
                     description="Deliverables belong to a team. Create a new team or enter an invite code in the Team & roster tab."
@@ -689,7 +805,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                     ) : null}
 
                     <form onSubmit={handleSaveSubmission} className="space-y-6">
-                      <FormSection title="Project details">
+                      <FormSection title="Project details" icon={FileText}>
                         <Field label="Project title" required>
                           <Input
                             type="text"
@@ -711,7 +827,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                         </Field>
                       </FormSection>
 
-                      <FormSection title="Links" className="border-t border-line pt-6">
+                      <FormSection title="Links" icon={Link2} className="border-t border-line pt-6">
                         <div className="grid gap-4 sm:grid-cols-2">
                           <Field label="Repository URL" required>
                             <Input
@@ -739,6 +855,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
 
                       <FormSection
                         title="Documentation & files"
+                        icon={Paperclip}
                         description="System architecture PDFs, whitepapers or pitch decks (staged for AWS S3)."
                         className="border-t border-line pt-6"
                       >
@@ -842,7 +959,10 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
             <div className="space-y-6">
               <Card>
                 <CardHeader className="flex-row items-center justify-between gap-3">
-                  <CardTitle as="h2">Your team</CardTitle>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <IconTile icon={Users} />
+                    <CardTitle as="h2">Your team</CardTitle>
+                  </div>
                   {currentTeam && (
                     <Badge className="font-mono tabular-nums">{currentTeam.capacity}</Badge>
                   )}
@@ -854,10 +974,10 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                         <p className="text-sm font-semibold text-fg">{currentTeam.name}</p>
                         <p className="text-sm text-fg-muted">Leader: {currentTeam.lead}</p>
                       </div>
-                      <div className="flex items-center justify-between gap-3 rounded-lg bg-raised/50 p-3">
+                      <div className="flex items-center justify-between gap-3 rounded-lg border border-accent/25 bg-accent/5 p-3">
                         <div className="min-w-0">
                           <p className="eyebrow">Invite code</p>
-                          <p className="truncate font-mono text-sm font-semibold text-fg">{currentTeam.code}</p>
+                          <p className="truncate font-mono text-sm font-semibold tracking-wider text-accent-text">{currentTeam.code}</p>
                         </div>
                         <Button
                           variant="secondary"
@@ -889,7 +1009,8 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
 
               {activeSprint && (
                 <Card>
-                  <CardHeader>
+                  <CardHeader className="flex-row items-center gap-3">
+                    <IconTile icon={CalendarDays} />
                     <CardTitle as="h2">Hackathon details</CardTitle>
                   </CardHeader>
                   <CardContent className="pt-2">
@@ -922,11 +1043,14 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
           <div className="grid gap-6 lg:grid-cols-3">
             <Card className="lg:col-span-2">
               <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 space-y-1">
-                  <CardTitle as="h2">Team roster</CardTitle>
-                  <CardDescription>
-                    {currentTeam ? `${currentTeam.name} · ${activeSprint?.title}` : "No team assigned"}
-                  </CardDescription>
+                <div className="flex min-w-0 items-start gap-3">
+                  <IconTile icon={Users} />
+                  <div className="min-w-0 space-y-1">
+                    <CardTitle as="h2">Team roster</CardTitle>
+                    <CardDescription>
+                      {currentTeam ? `${currentTeam.name} · ${activeSprint?.title}` : "No team assigned"}
+                    </CardDescription>
+                  </div>
                 </div>
                 {currentTeam && (
                   <Badge tone={currentTeam.rosterLocked ? "warning" : "success"} dot>
@@ -938,12 +1062,15 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
               <CardContent className="space-y-6">
                 {currentTeam ? (
                   <>
-                    <div className="flex flex-col gap-3 rounded-lg bg-raised/50 p-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="eyebrow">Shareable invite code</p>
-                        <p className="break-all font-mono text-lg font-semibold tracking-wider text-fg">
-                          {currentTeam.code}
-                        </p>
+                    <div className="flex flex-col gap-4 rounded-xl border border-accent/25 bg-accent/5 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <IconTile icon={KeyRound} />
+                        <div className="min-w-0">
+                          <p className="eyebrow">Shareable invite code</p>
+                          <p className="mt-1 inline-block break-all rounded-md border border-line-strong bg-sunken px-3 py-1.5 font-mono text-xl font-semibold tracking-widest text-accent-text">
+                            {currentTeam.code}
+                          </p>
+                        </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <Button
@@ -981,14 +1108,27 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
 
                           return (
                             <li key={idx} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="text-sm font-medium text-fg">{mName}</span>
-                                  <Badge tone={isThisMemberLead ? "accent" : "neutral"}>
-                                    {isThisMemberLead ? "Leader" : "Member"}
-                                  </Badge>
+                              <div className="flex min-w-0 items-center gap-3">
+                                <span
+                                  className={cn(
+                                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold ring-1 ring-inset",
+                                    isThisMemberLead
+                                      ? "bg-gradient-to-br from-accent to-accent-deep text-accent-fg ring-accent/40"
+                                      : "bg-raised text-fg-muted ring-line-strong"
+                                  )}
+                                  aria-hidden="true"
+                                >
+                                  {initialsOf(mName)}
+                                </span>
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-sm font-medium text-fg">{mName}</span>
+                                    <Badge tone={isThisMemberLead ? "accent" : "neutral"}>
+                                      {isThisMemberLead ? "Leader" : "Member"}
+                                    </Badge>
+                                  </div>
+                                  {mEmail && <p className="mt-0.5 truncate font-mono text-xs text-fg-subtle">{mEmail}</p>}
                                 </div>
-                                {mEmail && <p className="mt-0.5 truncate font-mono text-xs text-fg-subtle">{mEmail}</p>}
                               </div>
                               <div className="flex items-center gap-2">
                                 <Badge tone="success">Active</Badge>
@@ -1010,6 +1150,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                   </>
                 ) : (
                   <EmptyState
+                    illustration="team"
                     icon={Users}
                     title="No team yet"
                     description={`No team formed for ${activeSprint?.title || "this hackathon"}. Create a new team or enter an invite code to join an existing one.`}
@@ -1022,7 +1163,10 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
               {!currentTeam && (
                 <Card>
                   <CardHeader>
-                    <CardTitle as="h2">Create a team</CardTitle>
+                    <div className="flex items-center gap-3">
+                      <IconTile icon={UserPlus} />
+                      <CardTitle as="h2">Create a team</CardTitle>
+                    </div>
                     <CardDescription>
                       Start a team for <span className="text-fg">{activeSprint?.title}</span>. You will be the team leader.
                     </CardDescription>
@@ -1048,7 +1192,10 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
 
               <Card>
                 <CardHeader>
-                  <CardTitle as="h2">Join with an invite code</CardTitle>
+                  <div className="flex items-center gap-3">
+                    <IconTile icon={KeyRound} />
+                    <CardTitle as="h2">Join with an invite code</CardTitle>
+                  </div>
                   <CardDescription>
                     Enter the unique invite code provided by your team leader.
                   </CardDescription>
@@ -1083,9 +1230,12 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
             {/* Stage 1: screening */}
             <Card>
               <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 space-y-1">
-                  <p className="eyebrow">Stage 1 · Screening</p>
-                  <CardTitle as="h2">Automated & technical compliance</CardTitle>
+                <div className="flex min-w-0 items-start gap-3">
+                  <IconTile icon={ShieldCheck} tone={teamSubmission?.screeningStatus ? screeningTone(teamSubmission.screeningStatus) : "accent"} />
+                  <div className="min-w-0 space-y-1">
+                    <p className="eyebrow">Stage 1 · Screening</p>
+                    <CardTitle as="h2">Automated & technical compliance</CardTitle>
+                  </div>
                 </div>
                 <Badge tone={screeningTone(teamSubmission?.screeningStatus)} dot>
                   {teamSubmission?.screeningStatus || "Pending review"}
@@ -1113,7 +1263,8 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                     </div>
 
                     {teamSubmission.screeningRemarks && (
-                      <div className="space-y-1 rounded-lg bg-raised/50 p-3">
+                      <div className="relative space-y-1 overflow-hidden rounded-lg bg-raised/50 p-3 pl-4">
+                        <span className="absolute inset-y-0 left-0 w-0.5 bg-gradient-to-b from-accent to-accent-2" aria-hidden="true" />
                         <p className="eyebrow">Reviewer remarks</p>
                         <p className="text-sm leading-relaxed text-fg-muted">{teamSubmission.screeningRemarks}</p>
                         {teamSubmission.screenedBy && (
@@ -1130,6 +1281,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                   </>
                 ) : (
                   <EmptyState
+                    illustration="review"
                     icon={ClipboardCheck}
                     title="Nothing to screen yet"
                     description="Submit deliverables first to enter the screening gateway."
@@ -1146,9 +1298,12 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
             {/* Stage 2: rubric judging */}
             <Card>
               <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 space-y-1">
-                  <p className="eyebrow">Stage 2 · Rubric evaluation</p>
-                  <CardTitle as="h2">Judge panel scorecard</CardTitle>
+                <div className="flex min-w-0 items-start gap-3">
+                  <IconTile icon={Gavel} tone={resultsReleased ? "success" : "accent"} />
+                  <div className="min-w-0 space-y-1">
+                    <p className="eyebrow">Stage 2 · Rubric evaluation</p>
+                    <CardTitle as="h2">Judge panel scorecard</CardTitle>
+                  </div>
                 </div>
                 <Badge tone={resultsReleased ? "success" : "neutral"} dot>
                   {resultsReleased ? "Officially released" : "Under evaluation"}
@@ -1157,18 +1312,25 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
               <CardContent className="space-y-5">
                 {resultsReleased && teamEvaluation ? (
                   <>
-                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-raised/50 p-4">
-                      <div>
-                        <p className="eyebrow">Certified total score</p>
-                        <p className="text-3xl font-semibold tabular-nums tracking-tight text-fg">
-                          {teamEvaluation.totalScore}
-                          <span className="ml-1 text-sm font-normal text-fg-subtle">/ 100</span>
-                        </p>
+                    <div className="space-y-3 rounded-lg border border-success/25 bg-success/5 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="eyebrow">Certified total score</p>
+                          <p className="text-4xl font-semibold tabular-nums tracking-tight text-fg sm:text-5xl">
+                            {teamEvaluation.totalScore}
+                            <span className="ml-1 text-base font-normal text-fg-subtle">/ 100</span>
+                          </p>
+                        </div>
+                        <Badge tone="success">
+                          <Trophy className="h-3 w-3" aria-hidden="true" />
+                          Results published
+                        </Badge>
                       </div>
-                      <Badge tone="success">
-                        <Trophy className="h-3 w-3" aria-hidden="true" />
-                        Results published
-                      </Badge>
+                      <ProgressBar
+                        value={Number(teamEvaluation.totalScore) || 0}
+                        max={100}
+                        label="Certified total score"
+                      />
                     </div>
 
                     <div className="space-y-3">
@@ -1186,7 +1348,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                                 </span>
                               </div>
                               <div
-                                className="h-1.5 w-full overflow-hidden rounded-full bg-sunken"
+                                className="h-1.5 w-full overflow-hidden rounded-full bg-raised"
                                 role="progressbar"
                                 aria-label={c.label}
                                 aria-valuenow={score}
@@ -1194,7 +1356,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                                 aria-valuemax={c.max}
                               >
                                 <div
-                                  className="h-full rounded-full bg-accent transition-all duration-300"
+                                  className="h-full rounded-full bg-gradient-to-r from-accent to-accent-2 transition-[width] duration-300"
                                   style={{ width: `${pct}%` }}
                                 />
                               </div>
@@ -1205,7 +1367,8 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                     </div>
 
                     {teamEvaluation.feedback && (
-                      <figure className="space-y-1 rounded-lg bg-raised/50 p-3">
+                      <figure className="relative space-y-1 overflow-hidden rounded-lg bg-raised/50 p-3 pl-4">
+                        <span className="absolute inset-y-0 left-0 w-0.5 bg-gradient-to-b from-accent to-accent-2" aria-hidden="true" />
                         <p className="eyebrow">Judge panel feedback</p>
                         <blockquote className="text-sm italic leading-relaxed text-fg-muted">
                           "{teamEvaluation.feedback}"
@@ -1218,6 +1381,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                   </>
                 ) : (
                   <EmptyState
+                    illustration="review"
                     icon={Trophy}
                     title="Judging and scoring in progress"
                     description="Evaluations are scored privately by assigned judges. Results and certificates will unlock here when officially certified by the Platform Administrator."
@@ -1233,9 +1397,12 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
         {/* ========================================================= */}
         <TabPanel value="certificates" activeValue={activeTab} idPrefix="student" className="space-y-4 focus:outline-none">
           <div className="flex flex-wrap items-end justify-between gap-3">
-            <div className="space-y-0.5">
-              <h2 className="text-base font-semibold text-fg">Certificates</h2>
-              <p className="text-sm text-fg-muted">Issued certificates of excellence and participation.</p>
+            <div className="flex min-w-0 items-start gap-3">
+              <IconTile icon={Award} />
+              <div className="space-y-0.5">
+                <h2 className="text-base font-semibold text-fg">Certificates</h2>
+                <p className="text-sm text-fg-muted">Issued certificates of excellence and participation.</p>
+              </div>
             </div>
             <span className="text-sm text-fg-subtle">
               <span className="tabular-nums">{certificates.length}</span> verified document(s)
@@ -1245,52 +1412,62 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
           {certificates.length === 0 ? (
             <Card>
               <EmptyState
+                illustration="award"
                 icon={Award}
                 title="No certificates available yet"
                 description="Certificates are automatically generated upon official release of hackathon leaderboard results."
               />
             </Card>
           ) : (
-            <TableContainer>
-              <table className={tableClasses.table}>
-                <thead className={tableClasses.thead}>
-                  <tr>
-                    <th scope="col" className={tableClasses.th}>Award</th>
-                    <th scope="col" className={tableClasses.th}>Hackathon</th>
-                    <th scope="col" className={tableClasses.th}>Team</th>
-                    <th scope="col" className={tableClasses.th}>Issued</th>
-                    <th scope="col" className={tableClasses.th}>Certificate ID</th>
-                    <th scope="col" className={cn(tableClasses.th, "text-right")}>
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {certificates.map((cert) => (
-                    <tr key={cert.certificateId} className={tableClasses.tr}>
-                      <td className={tableClasses.td}>
-                        <Badge tone="accent">{cert.awardTitle || "Certificate of Excellence"}</Badge>
-                      </td>
-                      <td className={tableClasses.td}>
-                        <p className="font-medium text-fg">{cert.hackathonTitle}</p>
-                        <p className="text-xs text-fg-subtle">Track: {cert.track}</p>
-                      </td>
-                      <td className={tableClasses.td}>
-                        <p className="text-fg">{cert.teamName}</p>
-                        <p className="text-xs text-fg-subtle">{cert.recipientName}</p>
-                      </td>
-                      <td className={cn(tableClasses.td, "whitespace-nowrap tabular-nums")}>{cert.issueDate}</td>
-                      <td className={cn(tableClasses.td, "font-mono text-xs")}>{cert.certificateId}</td>
-                      <td className={cn(tableClasses.td, "text-right")}>
-                        <Button size="sm" variant="secondary" onClick={() => setPreviewCert(cert)}>
-                          View certificate
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableContainer>
+            <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {certificates.map((cert) => (
+                <li key={cert.certificateId}>
+                  <Card as="article" className="relative flex h-full flex-col overflow-hidden p-5">
+                    <span className="hairline-gradient absolute inset-x-0 top-0 h-px" aria-hidden="true" />
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-accent/25 to-accent-2/10 text-accent-text ring-1 ring-inset ring-accent/30">
+                        <Award className="h-5 w-5" aria-hidden="true" />
+                      </span>
+                      <Badge tone="accent" className="whitespace-normal text-right">
+                        {cert.awardTitle || "Certificate of Excellence"}
+                      </Badge>
+                    </div>
+
+                    <h3 className="mt-4 text-base font-semibold leading-snug text-fg">{cert.hackathonTitle}</h3>
+                    <p className="mt-0.5 text-sm text-fg-subtle">Track: {cert.track}</p>
+
+                    <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-line pt-4 text-sm">
+                      <div className="min-w-0">
+                        <dt className="eyebrow">Team</dt>
+                        <dd className="mt-0.5 truncate text-fg">{cert.teamName}</dd>
+                        <dd className="truncate text-xs text-fg-subtle">{cert.recipientName}</dd>
+                      </div>
+                      <div className="min-w-0">
+                        <dt className="eyebrow">Issued</dt>
+                        <dd className="mt-0.5 whitespace-nowrap tabular-nums text-fg">{cert.issueDate}</dd>
+                      </div>
+                      <div className="col-span-2 min-w-0">
+                        <dt className="eyebrow">Certificate ID</dt>
+                        <dd className="mt-1 break-all rounded-md bg-sunken px-2 py-1 font-mono text-xs text-fg-muted">
+                          {cert.certificateId}
+                        </dd>
+                      </div>
+                    </dl>
+
+                    <div className="mt-auto flex justify-end pt-4">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setPreviewCert(cert)}
+                        aria-label={`View certificate for ${cert.hackathonTitle}`}
+                      >
+                        View certificate
+                      </Button>
+                    </div>
+                  </Card>
+                </li>
+              ))}
+            </ul>
           )}
         </TabPanel>
 
@@ -1300,9 +1477,12 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
         <TabPanel value="notifications" activeValue={activeTab} idPrefix="student" className="focus:outline-none">
           <Card>
             <CardHeader className="flex-row flex-wrap items-start justify-between gap-3 pb-4">
-              <div className="min-w-0 space-y-1">
-                <CardTitle as="h2">Notifications</CardTitle>
-                <CardDescription>Platform activity and competition updates. Select one to mark it as read.</CardDescription>
+              <div className="flex min-w-0 items-start gap-3">
+                <IconTile icon={Bell} />
+                <div className="min-w-0 space-y-1">
+                  <CardTitle as="h2">Notifications</CardTitle>
+                  <CardDescription>Platform activity and competition updates. Select one to mark it as read.</CardDescription>
+                </div>
               </div>
               {unreadNotifsCount > 0 && (
                 <Button
@@ -1318,6 +1498,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
 
             {notifications.length === 0 ? (
               <EmptyState
+                illustration="inbox"
                 icon={Bell}
                 title="No notifications yet"
                 description="Updates about your registrations, team and results will appear here."
@@ -1331,14 +1512,14 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                       onClick={() => { markAsRead(n.id); setRefreshKey((k) => k + 1); }}
                       className={cn(
                         "flex w-full items-start justify-between gap-3 px-5 py-4 text-left transition-colors last:rounded-b-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                        !n.read ? "bg-accent/5 hover:bg-accent/10" : "hover:bg-raised/50"
+                        !n.read ? "bg-raised/70 hover:bg-raised" : "hover:bg-raised/40"
                       )}
                     >
                       <div className="flex min-w-0 items-start gap-3">
                         <span
                           className={cn(
                             "mt-1.5 h-2 w-2 shrink-0 rounded-full",
-                            !n.read ? "bg-accent" : "bg-line-strong"
+                            !n.read ? "bg-accent ring-4 ring-accent/20" : "bg-line-strong"
                           )}
                           aria-hidden="true"
                         />
@@ -1357,6 +1538,18 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
               </ul>
             )}
           </Card>
+          <Card className="mt-6">
+            <CardHeader className="flex-row items-start gap-3 pb-4">
+              <IconTile icon={Mail} />
+              <div className="min-w-0 space-y-1">
+                <CardTitle as="h2">Email delivery</CardTitle>
+                <CardDescription>Notifications from the HackTrack server and whether each one was emailed to you.</CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <EmailActivity />
+            </CardContent>
+          </Card>
         </TabPanel>
 
         {/* ========================================================= */}
@@ -1364,9 +1557,12 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
         {/* ========================================================= */}
         <TabPanel value="discover" activeValue={activeTab} idPrefix="student" className="space-y-4 focus:outline-none">
           <div className="flex flex-wrap items-end justify-between gap-3">
-            <div className="space-y-0.5">
-              <h2 className="text-base font-semibold text-fg">Discover hackathons</h2>
-              <p className="text-sm text-fg-muted">Explore active and upcoming competitions and register in one click.</p>
+            <div className="flex min-w-0 items-start gap-3">
+              <IconTile icon={Compass} />
+              <div className="space-y-0.5">
+                <h2 className="text-base font-semibold text-fg">Discover hackathons</h2>
+                <p className="text-sm text-fg-muted">Explore active and upcoming competitions and register in one click.</p>
+              </div>
             </div>
             <Button as={Link} to="/hackathons" variant="link" className="px-0">
               Browse all public pages
@@ -1376,6 +1572,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
           {allHackathons.length === 0 ? (
             <Card>
               <EmptyState
+                illustration="calendar"
                 icon={Compass}
                 title="No hackathons listed"
                 description="New competitions will appear here as organizers publish them."
@@ -1387,7 +1584,9 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                 const isReg = registrations.some((r) => r.hackathonId === h.id);
 
                 return (
-                  <Card key={h.id} className="flex h-full flex-col p-5">
+                  <Card key={h.id} className="flex h-full flex-col overflow-hidden">
+                    <EventCover hackathon={h} className="h-24 w-full border-b border-line" />
+                    <div className="flex flex-1 flex-col p-5">
                     <div className="flex items-center justify-between gap-3">
                       <Badge tone={stageTone(h.stage)} dot>{h.stage}</Badge>
                       {h.category && <span className="text-xs text-fg-subtle">{h.category}</span>}
@@ -1420,6 +1619,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                           Register
                         </Button>
                       )}
+                    </div>
                     </div>
                   </Card>
                 );

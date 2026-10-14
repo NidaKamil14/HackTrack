@@ -1,6 +1,7 @@
 import express from 'express';
 import store from '../database/store.js';
 import { signToken, requireAuth } from '../middleware/auth.js';
+import { notifyAccessCodeRedeemed } from '../notifications/notifier.js';
 
 const router = express.Router();
 
@@ -196,6 +197,8 @@ router.post('/redeem-code', requireAuth, (req, res) => {
 
   try {
     const result = store.redeemHackathonCode(code, req.user.id);
+    const codeRecord = store.hackathonCodes.find((c) => c.code.toUpperCase() === String(code).trim().toUpperCase());
+    notifyAccessCodeRedeemed(result, req.user.id, codeRecord?.createdBy);
     return res.json({
       status: 200,
       message: `Successfully bound to ${result.hackathonTitle} as ${result.role}.`,

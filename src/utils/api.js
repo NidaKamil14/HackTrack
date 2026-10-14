@@ -293,6 +293,31 @@ class ApiClient {
 
   // ── Utility ──────────────────────────────────────────────────────────
 
+  // ── Notifications & email preferences ─────────────────────────────────
+
+  async getNotifications() {
+    return this.request('/notifications');
+  }
+
+  async markNotificationRead(id) {
+    return this.request(`/notifications/${encodeURIComponent(id)}/read`, { method: 'PATCH' });
+  }
+
+  async markAllNotificationsRead() {
+    return this.request('/notifications/read-all', { method: 'POST' });
+  }
+
+  async getEmailPreferences() {
+    return this.request('/notifications/preferences');
+  }
+
+  async updateEmailPreferences(preferences) {
+    return this.request('/notifications/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(preferences),
+    });
+  }
+
   async checkHealth() {
     try {
       const data = await this.request('/health');

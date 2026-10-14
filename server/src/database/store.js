@@ -347,6 +347,9 @@ class HackTrackStore {
     this.announcements = [];
     this.hackathonCodes = []; // Access codes for judge/screening assignment
     this.resetTokens = new Map();
+    // Email notifications: idempotency keys for notify() and the delivery outbox.
+    this.notificationKeys = new Set();
+    this.emailOutbox = [];
 
     this.init();
   }
@@ -1037,6 +1040,86 @@ class HackTrackStore {
     };
     this.announcements.unshift(ann);
     return ann;
+  }
+
+  // In-app notifications (FR-35 to FR-39) — persisted per user, with the
+  // email delivery status of the matching email recorded alongside.
+  // Returns null when `dedupeKey` was already used, so retried requests or
+  // repeated operations never create duplicate notifications or emails.
+  addNotification({ userId, type, category, title, message, link = null, dedupeKey = null }) {
+    if (dedupeKey) {
+      if (this.notificationKeys.has(dedupeKey)) return null;
+      this.notificationKeys.add(dedupeKey);
+    }
+    const notification = {
+      id: `ntf-${crypto.randomBytes(5).toString('hex')}`,
+      userId,
+      type,
+      category,
+      title,
+      message,
+      link,
+      isRead: false,
+      // queued | sent | failed | skipped
+      emailStatus: 'pending',
+      emailStatusReason: null,
+      emailAttempts: 0,
+      emailSentAt: null,
+      createdAt: new Date().toISOString(),
+    };
+    this.notifications.unshift(notification);
+    return notification;
+  }
+
+  getUserNotifications(userId) {
+    return this.notifications.filter((n) => n.userId === userId);
+  }
+
+  findNotificationById(id) {
+    return this.notifications.find((n) => n.id === id) || null;
+  }
+
+  markNotificationRead(id, userId) {
+    const notification = this.notifications.find((n) => n.id === id && n.userId === userId);
+    if (!notification) return null;
+    notification.isRead = true;
+    return notification;
+  }
+
+  markAllNotificationsRead(userId) {
+    let count = 0;
+    this.notifications.forEach((n) => {
+      if (n.userId === userId && !n.isRead) {
+        n.isRead = true;
+        count += 1;
+      }
+    });
+    return count;
+  }
+
+  updateNotificationEmailStatus(id, patch) {
+    const notification = this.findNotificationById(id);
+    if (notification) Object.assign(notification, patch);
+    return notification;
+  }
+
+  // Email preferences — every category defaults to on. Unknown keys are ignored.
+  getEmailPreferences(userId, categories) {
+    const user = this.findUserById(userId);
+    if (!user) return null;
+    const saved = user.emailPreferences || {};
+    return Object.fromEntries(categories.map((c) => [c, saved[c] !== false]));
+  }
+
+  updateEmailPreferences(userId, updates, categories) {
+    const user = this.findUserById(userId);
+    if (!user) throw new Error('User not found.');
+    const next = { ...(user.emailPreferences || {}) };
+    for (const c of categories) {
+      if (typeof updates[c] === 'boolean') next[c] = updates[c];
+    }
+    user.emailPreferences = next;
+    return this.getEmailPreferences(userId, categories);
   }
 
   getSystemStats() {

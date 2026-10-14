@@ -9,6 +9,7 @@ import submissionRoutes from './routes/submissions.js';
 import evaluationRoutes from './routes/evaluations.js';
 import certificateRoutes from './routes/certificates.js';
 import adminRoutes from './routes/admin.js';
+import notificationRoutes from './routes/notifications.js';
 
 const app = express();
 
@@ -75,6 +76,7 @@ app.use('/api/v1/submissions', submissionRoutes);
 app.use('/api/v1/evaluations', evaluationRoutes);
 app.use('/api/v1/certificates', certificateRoutes);
 app.use('/api/v1/admin', adminRoutes);
+app.use('/api/v1/notifications', notificationRoutes);
 
 // 404 Route Handler for undefined endpoints
 app.use((req, res) => {

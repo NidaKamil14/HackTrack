@@ -1,6 +1,7 @@
 import express from 'express';
 import store from '../database/store.js';
 import { requireAuth } from '../middleware/auth.js';
+import { notifyJoinDecision, notifyJoinRequested, notifyTeamCreated } from '../notifications/notifier.js';
 
 const router = express.Router();
 
@@ -81,6 +82,9 @@ router.post('/', requireAuth, (req, res) => {
       track,
     });
 
+    // Notify only after the team exists (helpers never throw).
+    notifyTeamCreated(newTeam);
+
     const members = store.getTeamMembers(newTeam.id);
     return res.status(201).json({
       status: 201,
@@ -116,6 +120,8 @@ router.post('/join', requireAuth, (req, res) => {
       userId: req.user.id,
     });
 
+    notifyJoinRequested(request);
+
     return res.status(201).json({
       status: 201,
       message: 'Join request submitted successfully. Awaiting approval from Team Leader (FR-14, BR-3).',
@@ -148,6 +154,9 @@ router.put('/:id/requests/:requestId', requireAuth, (req, res) => {
       leaderId: req.user.id,
       action,
     });
+
+    // Only reached when the leader was authorised and the decision was saved.
+    notifyJoinDecision(result, req.user.id);
 
     return res.json({
       status: 200,

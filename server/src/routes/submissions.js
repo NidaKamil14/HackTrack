@@ -1,6 +1,7 @@
 import express from 'express';
 import store from '../database/store.js';
 import { requireAuth } from '../middleware/auth.js';
+import { notifySubmissionSaved } from '../notifications/notifier.js';
 
 const router = express.Router();
 
@@ -94,6 +95,7 @@ router.post('/', requireAuth, (req, res) => {
   }
 
   try {
+    const isNew = !store.getSubmissionByTeamId(teamId);
     const submission = store.createOrUpdateSubmission({
       teamId,
       submittedBy: req.user.id,
@@ -105,6 +107,8 @@ router.post('/', requireAuth, (req, res) => {
       presentationUrl,
       fileUrl,
     });
+
+    notifySubmissionSaved(submission, { isNew });
 
     return res.status(201).json({
       status: 201,

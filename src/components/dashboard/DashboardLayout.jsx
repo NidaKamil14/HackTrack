@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ExternalLink, LogOut } from 'lucide-react';
+import { ExternalLink, LogOut, Mail } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import ThemeToggle from '../ThemeToggle';
-import { Badge, Button, Logo } from '../ui';
+import EmailPreferencesDialog from '../notifications/EmailPreferencesDialog';
+import { AppBackdrop, Badge, Button, Logo, PageHeaderVariantContext } from '../ui';
 
 export default function DashboardLayout({
   portalTitle,
@@ -13,6 +14,8 @@ export default function DashboardLayout({
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
+  const [emailSettingsOpen, setEmailSettingsOpen] = useState(false);
+
   const handleLogout = () => {
     logout();
     navigate('/login');
@@ -21,12 +24,14 @@ export default function DashboardLayout({
   const initial = user?.fullName ? user.fullName.charAt(0).toUpperCase() : "U";
 
   return (
-    <div className="flex min-h-screen flex-col justify-between bg-canvas text-fg">
+    <div className="relative flex min-h-screen flex-col justify-between text-fg">
+      <AppBackdrop variant="dashboard" />
       <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-50 focus:rounded-lg focus:bg-accent focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-accent-fg">
         Skip to main content
       </a>
       <div>
-        <header className="sticky top-0 z-40 border-b border-line bg-canvas/80 backdrop-blur-md supports-[backdrop-filter]:bg-canvas/70">
+        <header className="sticky top-0 z-40 border-b border-line/70 bg-canvas/75 backdrop-blur-xl supports-[backdrop-filter]:bg-canvas/60">
+          <span className="hairline-gradient pointer-events-none absolute inset-x-0 bottom-0 h-px opacity-60" aria-hidden="true" />
           <div className="container-page flex h-14 items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <Link to="/" className="inline-flex min-h-10 items-center rounded-md" aria-label="HackTrack home">
@@ -42,6 +47,15 @@ export default function DashboardLayout({
               <Button as={Link} to="/" variant="ghost" size="sm" className="hidden md:inline-flex">
                 Public site
                 <ExternalLink aria-hidden="true" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setEmailSettingsOpen(true)}
+                aria-label="Email notification settings"
+                title="Email notification settings"
+              >
+                <Mail aria-hidden="true" />
               </Button>
               <ThemeToggle />
 
@@ -70,8 +84,11 @@ export default function DashboardLayout({
           </div>
         </header>
 
-        <main id="main-content" tabIndex={-1} className="container-page py-8 focus:outline-none">
-          {children}
+        <main id="main-content" tabIndex={-1} className="container-page py-6 focus:outline-none sm:py-8">
+          {/* Dashboards render their PageHeader as a hero panel. */}
+          <PageHeaderVariantContext.Provider value="hero">
+            <div className="rise-children">{children}</div>
+          </PageHeaderVariantContext.Provider>
         </main>
       </div>
 
@@ -86,6 +103,7 @@ export default function DashboardLayout({
           </nav>
         </div>
       </footer>
+      <EmailPreferencesDialog open={emailSettingsOpen} onClose={() => setEmailSettingsOpen(false)} />
     </div>
   );
 }

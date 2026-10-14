@@ -1,6 +1,7 @@
 import express from 'express';
 import store from '../database/store.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { notifyAnnouncement } from '../notifications/notifier.js';
 
 const router = express.Router();
 
@@ -106,6 +107,8 @@ router.post('/announcements', requireAuth, requireRole('admin'), (req, res) => {
     targetRole,
     createdBy: req.user.id,
   });
+
+  notifyAnnouncement(announcement);
 
   return res.status(201).json({
     status: 201,

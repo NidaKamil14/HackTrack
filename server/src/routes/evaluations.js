@@ -1,6 +1,7 @@
 import express from 'express';
 import store from '../database/store.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { notifyJudgeAssigned, notifyResultsPublished } from '../notifications/notifier.js';
 
 const router = express.Router();
 
@@ -18,6 +19,7 @@ router.post('/assign', requireAuth, requireRole('admin'), (req, res) => {
 
   try {
     const assignment = store.assignJudgeToSubmission({ hackathonId, judgeId, submissionId });
+    notifyJudgeAssigned({ hackathonId, judgeId, submissionId, ...assignment });
     return res.status(201).json({
       status: 201,
       message: 'Judge successfully assigned to project submission (FR-24).',
@@ -102,6 +104,8 @@ router.get('/leaderboard/:hackathonId', (req, res) => {
 router.post('/publish-results/:hackathonId', requireAuth, requireRole('admin'), (req, res) => {
   try {
     const updatedHackathon = store.publishResults(req.params.hackathonId);
+    // Results + certificates are committed at this point; emails follow.
+    notifyResultsPublished(req.params.hackathonId);
     return res.json({
       status: 200,
       message: 'Hackathon results successfully published and certificates issued to participants (FR-30, FR-31, FR-32, BR-9).',
