@@ -109,10 +109,11 @@ export function Tabs({ items, value, onValueChange, label, idPrefix = 'tab', cla
               tabIndex={selected ? 0 : -1}
               onClick={() => onValueChange(item.value)}
               className={cn(
-                'inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 text-sm font-medium transition-colors touch:h-11 [&_svg]:h-4 [&_svg]:w-4',
+                'relative inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap px-3 text-sm font-medium transition-colors touch:h-11 [&_svg]:h-4 [&_svg]:w-4',
+                "after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:transition-opacity after:content-['']",
                 selected
-                  ? 'border-accent text-fg'
-                  : 'border-transparent text-fg-muted hover:border-line-strong hover:text-fg'
+                  ? 'text-fg after:bg-gradient-to-r after:from-accent-text after:to-accent-2 after:opacity-100 [&_svg]:text-accent-text'
+                  : 'text-fg-muted after:bg-line-strong after:opacity-0 hover:text-fg hover:after:opacity-100'
               )}
             >
               {item.icon}

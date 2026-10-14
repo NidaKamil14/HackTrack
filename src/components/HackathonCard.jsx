@@ -1,7 +1,8 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, CalendarDays, KeyRound, Trophy, Users } from 'lucide-react';
-import { Badge, Button, Card, stageTone } from './ui';
+import { Badge, Button, Card, stagePhase, stageTone } from './ui';
+import EventCover from './art/EventCover';
 
 /**
  * Hackathon listing card. The title is a link stretched over the whole card,
@@ -17,13 +18,24 @@ export default function HackathonCard({
   const href = `/hackathons/${hackathon.id}`;
 
   return (
-    <Card interactive className="group relative flex h-full flex-col p-5">
-      <div className="flex items-center justify-between gap-3">
-        <Badge tone={stageTone(hackathon.stage)} dot>{hackathon.stage}</Badge>
-        {hackathon.category && <span className="text-xs text-fg-subtle">{hackathon.category}</span>}
+    <Card interactive className="group relative flex h-full flex-col overflow-hidden">
+      {/* Generated cover art for the event's category (decorative) */}
+      <div className="relative">
+        <EventCover
+          hackathon={hackathon}
+          muted={stagePhase(hackathon.stage) === 'completed'}
+          className="aspect-[5/2] w-full transition-transform duration-500 ease-out group-hover:scale-[1.03]"
+        />
+        <div className="absolute inset-x-3 top-3 flex items-center justify-between gap-2">
+          <Badge tone={stageTone(hackathon.stage)} dot className="bg-surface/85 backdrop-blur">{hackathon.stage}</Badge>
+          {hackathon.category && (
+            <span className="rounded-md bg-surface/85 px-2 py-0.5 text-xs font-medium text-fg-muted backdrop-blur">{hackathon.category}</span>
+          )}
+        </div>
       </div>
+      <div className="flex flex-1 flex-col p-5 pt-4">
 
-      <h3 className="mt-4 text-base font-semibold leading-snug text-fg">
+      <h3 className="text-base font-semibold leading-snug text-fg">
         <Link
           to={href}
           className="rounded-sm after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:outline-none focus-visible:after:outline focus-visible:after:outline-2 focus-visible:after:outline-ring"
@@ -78,6 +90,7 @@ export default function HackathonCard({
           )}
         </div>
       )}
+      </div>
     </Card>
   );
 }

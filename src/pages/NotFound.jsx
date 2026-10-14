@@ -5,7 +5,8 @@ import { Button } from '../components/ui';
 export default function NotFound() {
   return (
     <div className="container-page flex flex-col items-center py-24 text-center sm:py-32">
-      <p className="font-mono text-sm text-accent-text">404</p>
+      <p className="text-gradient font-mono text-7xl font-semibold leading-none tracking-tight sm:text-8xl" aria-hidden="true">404</p>
+      <p className="sr-only">Error 404</p>
       <h1 className="mt-3 text-3xl font-semibold tracking-tight">Page not found</h1>
       <p className="mt-2 max-w-sm text-sm text-fg-muted">
         The page you're looking for doesn't exist or has moved.

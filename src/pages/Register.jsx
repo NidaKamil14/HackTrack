@@ -92,7 +92,8 @@ export default function Register({ navigate: propNavigate }) {
 
   return (
     <div className="container-page py-10 sm:py-16">
-      <div className="mx-auto max-w-2xl">
+      <div className="surface-card relative mx-auto max-w-2xl rounded-2xl border border-line-strong p-6 sm:p-10">
+        <span className="hairline-gradient pointer-events-none absolute inset-x-12 -top-px h-px" aria-hidden="true" />
         <Logo className="mb-8" />
         <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Create your account</h1>
         <p className="mt-1.5 text-sm text-fg-muted">

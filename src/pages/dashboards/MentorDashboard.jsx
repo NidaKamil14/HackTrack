@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ExternalLink, FileText, Inbox, Layers, MessageSquare, MousePointerClick, Send, Trophy, Users } from 'lucide-react';
+import { ExternalLink, FileText, Inbox, Layers, Lightbulb, MessageSquare, MousePointerClick, PenLine, Send, Trophy, Users } from 'lucide-react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
 import {
   Alert,
@@ -45,13 +45,30 @@ function saveMentorNotes(notes) {
   }
 }
 
+/** Small icon tile used beside section headings. */
+function IconTile({ icon: Icon, tone = 'accent' }) {
+  return (
+    <span
+      className={cn(
+        'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset',
+        tone === 'success' ? 'bg-success/10 text-success ring-success/25' : 'bg-accent/15 text-accent-text ring-accent/25'
+      )}
+    >
+      <Icon className="h-4 w-4" aria-hidden="true" />
+    </span>
+  );
+}
+
 /* Review-queue pattern (shared look with Judge and Screening dashboards) */
 function QueueList({ title, count, children }) {
   return (
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
-        <h2 className="text-sm font-semibold text-fg">{title}</h2>
-        <span className="text-xs tabular-nums text-fg-subtle">{count}</span>
+        <div className="flex min-w-0 items-center gap-3">
+          <IconTile icon={Users} />
+          <h2 className="truncate text-sm font-semibold text-fg">{title}</h2>
+        </div>
+        <span className="shrink-0 text-xs tabular-nums text-fg-subtle">{count}</span>
       </div>
       {children}
     </Card>
@@ -67,11 +84,11 @@ function QueueItem({ selected, onSelect, title, badge, meta }) {
         aria-current={selected ? 'true' : undefined}
         className={cn(
           'flex w-full flex-col gap-1 border-l-2 px-5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40',
-          selected ? 'border-accent bg-raised' : 'border-transparent hover:bg-raised/50'
+          selected ? 'border-accent bg-accent/10' : 'border-transparent hover:bg-raised/50'
         )}
       >
         <span className="flex items-center justify-between gap-3">
-          <span className="truncate text-sm font-medium text-fg">{title}</span>
+          <span className={cn('truncate text-sm font-medium', selected ? 'text-accent-text' : 'text-fg')}>{title}</span>
           {badge}
         </span>
         {meta && <span className="truncate text-xs text-fg-subtle">{meta}</span>}
@@ -143,16 +160,29 @@ export default function MentorDashboard() {
     >
       <div className="space-y-8">
         <PageHeader
+          icon={Lightbulb}
           eyebrow={`Mentorship guild · ${user?.university || "Cloud & AI Guild"}`}
           title={`Welcome, ${user?.fullName || "Mentor"}`}
           description="Provide architectural guidance, review repository drafts, and conduct 1-on-1 check-ins."
         />
 
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-          <StatCard label="Assigned sprints" value={hackathons.length} icon={Trophy} />
-          <StatCard label="Assigned squads" value={teamsList.length} icon={Users} />
-          <StatCard label="Notes dispatched" value={Object.keys(notesMap).length} icon={MessageSquare} />
-          <StatCard label="Deliverables staged" value={submissions.length} icon={Layers} />
+          <StatCard tone="accent" label="Assigned sprints" value={hackathons.length} icon={Trophy} />
+          <StatCard tone="cyan" label="Assigned squads" value={teamsList.length} icon={Users} />
+          <StatCard
+            tone="success"
+            label="Notes dispatched"
+            value={Object.keys(notesMap).length}
+            icon={MessageSquare}
+            hint={teamsList.length > 0 ? `${teamsList.filter((t) => notesMap[t.code]).length} of ${teamsList.length} squads advised` : undefined}
+          />
+          <StatCard
+            tone="info"
+            label="Deliverables staged"
+            value={submissions.length}
+            icon={Layers}
+            hint={submissions.length > 0 ? `${submissions.filter((s) => s.status === 'finalized').length} finalized` : undefined}
+          />
         </div>
 
         {notice && <Alert tone="success" title="Guidance sent">{notice}</Alert>}
@@ -163,6 +193,7 @@ export default function MentorDashboard() {
             <QueueList title="Assigned squads" count={`${teamsList.length} squads`}>
               {teamsList.length === 0 ? (
                 <EmptyState
+                  illustration="team"
                   icon={Inbox}
                   title="No squads assigned"
                   description="Teams will appear here once they are formed for your hackathons."
@@ -195,19 +226,25 @@ export default function MentorDashboard() {
             {activeTeam ? (
               <Card>
                 <CardHeader className="flex-row flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0 space-y-1">
-                    <p className="font-mono text-xs text-fg-subtle">{activeTeam.code}</p>
-                    <CardTitle as="h2" className="text-lg">{activeTeam.name}</CardTitle>
-                    <CardDescription>{activeTeam.hackathon} · Track: {activeTeam.track}</CardDescription>
+                  <div className="flex min-w-0 items-start gap-3">
+                    <IconTile icon={Lightbulb} />
+                    <div className="min-w-0 space-y-1">
+                      <p className="font-mono text-xs text-fg-subtle">{activeTeam.code}</p>
+                      <CardTitle as="h2" className="text-lg">{activeTeam.name}</CardTitle>
+                      <CardDescription>{activeTeam.hackathon} · Track: {activeTeam.track}</CardDescription>
+                    </div>
                   </div>
                   <Badge tone="neutral">Leader: {activeTeam.lead}</Badge>
                 </CardHeader>
 
                 <CardContent className="space-y-5">
                   <section className="space-y-3" aria-labelledby="mentor-draft-heading">
-                    <h3 id="mentor-draft-heading" className="eyebrow">Project draft</h3>
+                    <div className="flex items-center gap-3">
+                      <IconTile icon={FileText} tone={isFinalized ? 'success' : 'accent'} />
+                      <h3 id="mentor-draft-heading" className="text-sm font-semibold text-fg">Project draft</h3>
+                    </div>
                     {activeSubmission ? (
-                      <div className="space-y-3 rounded-lg bg-raised/50 p-4">
+                      <div className="space-y-3 rounded-lg border border-line bg-raised/50 p-4">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <h4 className="text-sm font-semibold text-fg">{activeSubmission.projectTitle || "Untitled Draft"}</h4>
                           <Badge tone={isFinalized ? "success" : "warning"} dot>
@@ -230,6 +267,7 @@ export default function MentorDashboard() {
                       </div>
                     ) : (
                       <EmptyState
+                        illustration="upload"
                         icon={FileText}
                         title="No deliverables yet"
                         description="This squad has not drafted a submission."
@@ -245,15 +283,26 @@ export default function MentorDashboard() {
                   )}
 
                   {notesMap[activeTeam.code] && (
-                    <section className="space-y-2" aria-labelledby="mentor-advisory-heading">
-                      <h3 id="mentor-advisory-heading" className="eyebrow">Current mentor advisory</h3>
-                      <blockquote className="rounded-lg border-l-2 border-accent bg-raised/50 p-4 text-sm leading-relaxed text-fg">
+                    <section className="space-y-3" aria-labelledby="mentor-advisory-heading">
+                      <div className="flex items-center gap-3">
+                        <IconTile icon={MessageSquare} tone="success" />
+                        <h3 id="mentor-advisory-heading" className="text-sm font-semibold text-fg">Current mentor advisory</h3>
+                      </div>
+                      <blockquote className="relative overflow-hidden rounded-lg bg-raised/50 py-4 pl-5 pr-4 text-sm leading-relaxed text-fg">
+                        <span className="absolute inset-y-0 left-0 w-0.5 bg-gradient-to-b from-accent to-accent-2" aria-hidden="true" />
                         {notesMap[activeTeam.code]}
                       </blockquote>
                     </section>
                   )}
 
-                  <form onSubmit={handleSaveNote} className="space-y-3 border-t border-line pt-5">
+                  <form onSubmit={handleSaveNote} className="space-y-4 border-t border-line pt-5">
+                    <div className="flex items-start gap-3">
+                      <IconTile icon={PenLine} />
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-semibold text-fg">Send guidance</h3>
+                        <p className="mt-0.5 text-sm text-fg-muted">Your latest note replaces the current advisory for this squad.</p>
+                      </div>
+                    </div>
                     <Field
                       label="Post architectural guidance & office-hours advice"
                       hint={activeTeam.leadEmail ? "The team leader is notified when you send." : undefined}

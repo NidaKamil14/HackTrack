@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { SearchX } from 'lucide-react';
+import { SearchX, Trophy } from 'lucide-react';
 import FilterBar from '../components/FilterBar';
 import HackathonCard from '../components/HackathonCard';
 import { Button, EmptyState, PageHeader } from '../components/ui';
@@ -57,6 +57,9 @@ export default function BrowseHackathons({
   return (
     <div className="container-page space-y-8 py-10 sm:py-14">
       <PageHeader
+        variant="hero"
+        icon={Trophy}
+        eyebrow="Discover"
         title="Hackathons"
         description="Find a competition, review its rules and judging criteria, then register or join your team with an invite code."
       />
@@ -87,6 +90,7 @@ export default function BrowseHackathons({
         {filteredHackathons.length === 0 ? (
           <div className="rounded-xl border border-dashed border-line">
             <EmptyState
+              illustration="search"
               icon={SearchX}
               title="No hackathons match these filters"
               description="Try a different keyword, or widen the stage and track filters."

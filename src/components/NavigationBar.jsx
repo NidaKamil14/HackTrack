@@ -38,7 +38,8 @@ export default function NavigationBar({ onOpenTeamModal }) {
   const firstName = user?.fullName?.split(' ')[0] || 'User';
 
   return (
-    <header className="sticky top-0 z-40 border-b border-line bg-canvas/80 backdrop-blur-md supports-[backdrop-filter]:bg-canvas/70">
+    <header className="sticky top-0 z-40 border-b border-line/70 bg-canvas/75 backdrop-blur-xl supports-[backdrop-filter]:bg-canvas/60">
+      <span className="hairline-gradient pointer-events-none absolute inset-x-0 bottom-0 h-px opacity-60" aria-hidden="true" />
       <div className="container-page flex h-14 items-center justify-between gap-4">
         <div className="flex items-center gap-6">
           <Link to="/" className="inline-flex min-h-10 items-center rounded-md" aria-label="HackTrack home">

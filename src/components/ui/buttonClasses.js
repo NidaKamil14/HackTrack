@@ -2,13 +2,17 @@ import { cn } from './cn';
 
 const base =
   'relative inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-lg font-medium ' +
-  'transition-[background-color,border-color,color,box-shadow,transform] duration-150 ease-out ' +
-  'active:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 ' +
+  'transition-[background-color,border-color,color,box-shadow,transform,filter] duration-150 ease-out ' +
+  'active:translate-y-px active:scale-[0.99] disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 ' +
   '[&_svg]:shrink-0';
 
 const variants = {
-  primary: 'bg-accent text-accent-fg shadow-sm hover:bg-accent-hover',
-  secondary: 'border border-line bg-surface text-fg shadow-sm hover:border-line-strong hover:bg-raised',
+  // Violet→indigo gradient with an inner top highlight; glows on hover.
+  primary:
+    'bg-accent bg-gradient-to-b from-accent to-accent-deep text-accent-fg shadow-sm ' +
+    '[box-shadow:inset_0_1px_0_rgb(255_255_255/0.18),var(--shadow-sm)] ' +
+    'hover:from-accent-hover hover:[box-shadow:inset_0_1px_0_rgb(255_255_255/0.2),var(--shadow-glow)]',
+  secondary: 'border border-line bg-surface/80 text-fg shadow-sm backdrop-blur-sm hover:border-line-strong hover:bg-raised',
   ghost: 'text-fg-muted hover:bg-raised hover:text-fg',
   danger: 'bg-danger-solid text-white shadow-sm hover:bg-danger-solid/90',
   'danger-ghost': 'text-danger hover:bg-danger/10',

@@ -6,7 +6,7 @@ export function Logo({ className }) {
   return (
     <span className={cn('inline-flex items-center gap-2.5', className)}>
       <span
-        className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-accent-fg shadow-sm"
+        className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent via-accent-deep to-accent-2 text-white shadow-glow ring-1 ring-inset ring-white/20"
         aria-hidden="true"
       >
         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

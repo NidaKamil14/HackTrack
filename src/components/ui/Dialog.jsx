@@ -67,7 +67,7 @@ export function Dialog({ open, onClose, title, description, size = 'md', classNa
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center p-2 sm:items-center sm:p-4">
       <div
-        className="absolute inset-0 animate-fade-in bg-overlay/70 backdrop-blur-[2px]"
+        className="absolute inset-0 animate-fade-in bg-overlay/75 backdrop-blur-sm"
         aria-hidden="true"
         onClick={onClose}
       />
@@ -79,11 +79,12 @@ export function Dialog({ open, onClose, title, description, size = 'md', classNa
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
         className={cn(
-          'relative max-h-[calc(100dvh-1rem)] w-full animate-dialog-in overflow-y-auto overscroll-contain rounded-2xl border border-line bg-surface p-5 shadow-lg sm:max-h-[calc(100dvh-2rem)] sm:p-6',
+          'surface-card relative max-h-[calc(100dvh-1rem)] w-full animate-dialog-in overflow-y-auto overscroll-contain rounded-2xl border border-line-strong p-5 !shadow-lg sm:max-h-[calc(100dvh-2rem)] sm:p-6',
           widths[size],
           className
         )}
       >
+        <span className="hairline-gradient pointer-events-none absolute inset-x-8 top-0 h-px" aria-hidden="true" />
         <button
           type="button"
           onClick={onClose}

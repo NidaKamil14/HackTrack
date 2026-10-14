@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
+import EventCover from '../../components/art/EventCover';
 import { useAuth } from '../../context/AuthContext';
 import {
   getStoredHackathons,
@@ -17,6 +18,8 @@ import {
   ArrowDown,
   ArrowRight,
   ArrowUp,
+  CalendarClock,
+  CalendarRange,
   Check,
   Copy,
   FileText,
@@ -34,28 +37,13 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  Dialog,
-  EmptyState,
-  Field,
-  Input,
-  PageHeader,
-  Select,
-  StatCard,
-  TableContainer,
-  Textarea,
-  cn,
-  stageTone,
-  tableClasses,
-} from '../../components/ui';
+import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, EmptyState, Field, Input, PageHeader, Select, StatCard, Textarea, cn, stageTone, stageProgress, stagePhase, STAGE_ORDER, toneStyles } from '../../components/ui';
+
+const phaseAccent = {
+  active: "before:bg-gradient-to-b before:from-accent before:to-accent-2",
+  upcoming: "before:bg-info/60",
+  completed: "before:bg-line-strong",
+};
 
 export default function OrganizerDashboard() {
   const { user } = useAuth();
@@ -426,12 +414,13 @@ export default function OrganizerDashboard() {
     >
       <div className="space-y-8">
         <PageHeader
+          icon={CalendarRange}
           eyebrow={user?.university || "DevPulse Operations Committee"}
           title="Organizer workspace"
           description="Create hackathons, manage stages and rubrics, follow team formation, and broadcast updates to participants."
           meta={<span>Signed in as {user?.fullName || "Organizer"}</span>}
           actions={
-            <Button onClick={() => setShowCreateModal(true)}>
+            <Button size="lg" onClick={() => setShowCreateModal(true)}>
               <Plus aria-hidden="true" />
               Create hackathon
             </Button>
@@ -440,13 +429,15 @@ export default function OrganizerDashboard() {
 
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <StatCard
+            tone="accent"
             label={scopeFilter === "my" ? "My hackathons" : "Hackathons shown"}
             value={displayedHackathons.length}
             icon={Trophy}
+            hint={`${displayedHackathons.length} of ${allHackathons.length} on platform`}
           />
-          <StatCard label="All platform hackathons" value={allHackathons.length} icon={Layers} />
-          <StatCard label="Registered teams" value={teamsList.length} icon={Users} />
-          <StatCard label="Submissions logged" value={submissions.length} icon={FileText} />
+          <StatCard tone="cyan" label="All platform hackathons" value={allHackathons.length} icon={Layers} />
+          <StatCard tone="info" label="Registered teams" value={teamsList.length} icon={Users} />
+          <StatCard tone="success" label="Submissions logged" value={submissions.length} icon={FileText} />
         </div>
 
         {notice && (
@@ -469,12 +460,12 @@ export default function OrganizerDashboard() {
           {/* Hackathons */}
           <section className="space-y-4" aria-labelledby="org-hackathons-heading">
             <div className="flex flex-wrap items-end justify-between gap-3">
-              <div className="min-w-0 space-y-0.5">
-                <h2 id="org-hackathons-heading" className="text-base font-semibold text-fg">
-                  Hackathons
-                </h2>
-                <p className="text-sm text-fg-muted">Lifecycle stages, rubrics and team allowances.</p>
-              </div>
+              <SectionHeading
+                id="org-hackathons-heading"
+                icon={CalendarRange}
+                title="Hackathons"
+                description="Lifecycle stages, rubrics and team allowances."
+              />
               <div
                 role="group"
                 aria-label="Filter hackathons"
@@ -485,7 +476,7 @@ export default function OrganizerDashboard() {
                   aria-pressed={scopeFilter === "my"}
                   onClick={() => setScopeFilter("my")}
                   className={cn(
-                    "inline-flex h-7 items-center rounded-md px-3 text-xs font-medium transition-colors max-sm:h-10 max-sm:text-sm touch:h-10",
+                    "inline-flex h-7 items-center gap-1 rounded-md px-3 text-xs font-medium transition-colors max-sm:h-10 max-sm:text-sm touch:h-10",
                     scopeFilter === "my" ? "bg-surface text-fg shadow-sm" : "text-fg-muted hover:text-fg"
                   )}
                 >
@@ -496,7 +487,7 @@ export default function OrganizerDashboard() {
                   aria-pressed={scopeFilter === "all"}
                   onClick={() => setScopeFilter("all")}
                   className={cn(
-                    "inline-flex h-7 items-center rounded-md px-3 text-xs font-medium transition-colors max-sm:h-10 max-sm:text-sm touch:h-10",
+                    "inline-flex h-7 items-center gap-1 rounded-md px-3 text-xs font-medium transition-colors max-sm:h-10 max-sm:text-sm touch:h-10",
                     scopeFilter === "all" ? "bg-surface text-fg shadow-sm" : "text-fg-muted hover:text-fg"
                   )}
                 >
@@ -508,6 +499,7 @@ export default function OrganizerDashboard() {
             {displayedHackathons.length === 0 ? (
               <Card>
                 <EmptyState
+                  illustration="calendar"
                   icon={Trophy}
                   title="No hackathons yet"
                   description="You haven't created any hackathons yet. Create one to open registration and start configuring rubrics."
@@ -520,123 +512,152 @@ export default function OrganizerDashboard() {
                 />
               </Card>
             ) : (
-              <TableContainer>
-                <table className={cn(tableClasses.table, "min-w-[760px]")}>
-                  <thead className={tableClasses.thead}>
-                    <tr>
-                      <th scope="col" className={tableClasses.th}>Hackathon</th>
-                      <th scope="col" className={tableClasses.th}>Stage</th>
-                      <th scope="col" className={tableClasses.th}>Deadline</th>
-                      <th scope="col" className={tableClasses.th}>Activity</th>
-                      <th scope="col" className={cn(tableClasses.th, "text-right")}>
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {displayedHackathons.map((h) => {
-                      const sprintTeams = teamsList.filter((t) => t.hackathonId === h.id);
-                      const sprintSubs = submissions.filter((s) => s.hackathonId === h.id);
+              <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3" aria-label="Hackathon events">
+                {displayedHackathons.map((h) => {
+                  const sprintTeams = teamsList.filter((t) => t.hackathonId === h.id);
+                  const sprintSubs = submissions.filter((s) => s.hackathonId === h.id);
 
-                      const isMine = (h.organizerEmail && h.organizerEmail.toLowerCase() === userEmailLower) ||
-                                     (user?.email === "organizer@hacktrack.io" && h.id === "devpulse-2026");
+                  const isMine = (h.organizerEmail && h.organizerEmail.toLowerCase() === userEmailLower) ||
+                                 (user?.email === "organizer@hacktrack.io" && h.id === "devpulse-2026");
 
-                      const progress =
-                        h.stage === "Results Published" || h.stage === "Leaderboard Published" ? 100 :
-                        h.stage === "Rubric Judging" ? 85 :
-                        h.stage === "Screening Gate" ? 70 :
-                        h.stage === "Hacking Phase" ? 50 :
-                        h.stage === "Team Formation" ? 35 : 20;
+                  // Presentation only: shared lifecycle helpers (same bar on every dashboard).
+                  const stageIndex = STAGE_ORDER.indexOf(h.stage);
+                  const progress = stageProgress(h.stage);
+                  const phase = stagePhase(h.stage);
+                  const completed = phase === "completed";
 
-                      return (
-                        <tr key={h.id} className={tableClasses.tr}>
-                          <td className={tableClasses.td}>
-                            <div className="min-w-0 space-y-1">
-                              <p className="font-semibold text-fg">{h.title}</p>
+                  return (
+                    <li key={h.id} className="min-w-0">
+                      <Card
+                        as="article"
+                        aria-labelledby={`org-event-${h.id}`}
+                        className={cn(
+                          "relative flex h-full flex-col overflow-hidden",
+                          "before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:content-['']",
+                          phaseAccent[phase],
+                          completed && "bg-none bg-sunken/60"
+                        )}
+                      >
+                        <EventCover hackathon={h} muted={completed} className="h-20 w-full border-b border-line" />
+                        <div className="flex flex-1 flex-col gap-4 p-5">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 space-y-1.5">
+                              <h3
+                                id={`org-event-${h.id}`}
+                                className={cn(
+                                  "break-words text-base font-semibold leading-snug",
+                                  completed ? "text-fg-muted" : "text-fg"
+                                )}
+                              >
+                                {h.title}
+                              </h3>
                               <div className="flex flex-wrap items-center gap-1.5">
                                 <Badge>{h.category || h.track}</Badge>
                                 {isMine && <Badge tone="accent">Managed by you</Badge>}
                               </div>
-                              <p className="text-xs text-fg-subtle">
-                                {h.organizerName || "Central Committee"} · Teams of {h.teamSize || "2 - 4"}
-                              </p>
                             </div>
-                          </td>
-                          <td className={tableClasses.td}>
-                            <div className="space-y-2">
-                              <Badge tone={stageTone(h.stage)} dot>{h.stage}</Badge>
-                              <div
-                                className="h-1.5 w-28 overflow-hidden rounded-full bg-sunken"
-                                role="progressbar"
-                                aria-label="Lifecycle progress"
-                                aria-valuemin={0}
-                                aria-valuemax={100}
-                                aria-valuenow={progress}
-                              >
-                                <div
-                                  className="h-full rounded-full bg-accent transition-all duration-500"
-                                  style={{ width: `${progress}%` }}
-                                />
+                            <Badge tone={stageTone(h.stage)} dot className="shrink-0">{h.stage}</Badge>
+                          </div>
+
+                          <p className="text-xs text-fg-subtle">
+                            {h.organizerName || "Central Committee"} · Teams of {h.teamSize || "2 - 4"}
+                          </p>
+
+                          <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg bg-line text-sm">
+                            <div className="col-span-2 flex items-start gap-2 bg-raised/80 px-3 py-2.5">
+                              <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-fg-subtle" aria-hidden="true" />
+                              <div className="min-w-0">
+                                <dt className="text-xs text-fg-subtle">Deadline</dt>
+                                <dd className="font-medium text-fg">{h.deadline}</dd>
+                                {h.dates && <dd className="text-xs text-fg-muted">{h.dates}</dd>}
                               </div>
                             </div>
-                          </td>
-                          <td className={cn(tableClasses.td, "whitespace-nowrap text-fg")}>{h.deadline}</td>
-                          <td className={cn(tableClasses.td, "whitespace-nowrap")}>
-                            <p><span className="tabular-nums text-fg">{sprintTeams.length}</span> teams</p>
-                            <p><span className="tabular-nums text-fg">{sprintSubs.length}</span> submissions</p>
-                          </td>
-                          <td className={tableClasses.td}>
-                            <div
-                              role="group"
-                              aria-label={`Actions for ${h.title}`}
-                              className="flex flex-wrap items-center justify-end gap-1.5"
-                            >
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                onClick={() => openManageModal(h)}
-                                aria-label={`Codes & committee for ${h.title}`}
-                                title="Manage judge & screening access codes"
-                              >
-                                <KeyRound aria-hidden="true" />
-                              </Button>
-                              <Button variant="secondary" size="sm" onClick={() => openRubricEditor(h)}>
-                                <ListChecks aria-hidden="true" />
-                                Rubrics <span className="tabular-nums">({(h.rubrics || []).length})</span>
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                onClick={() => setConfigTarget(h)}
-                                aria-label={`Settings for ${h.title}`}
-                                title="Settings"
-                              >
-                                <Settings aria-hidden="true" />
-                              </Button>
-                              <Button variant="secondary" size="sm" onClick={() => handleAdvance(h.id)}>
-                                Advance stage
-                                <ArrowRight aria-hidden="true" />
-                              </Button>
+                            <div className="bg-raised/80 px-3 py-2.5">
+                              <dt className="text-xs text-fg-subtle">Teams</dt>
+                              <dd className="text-lg font-semibold tabular-nums text-fg">{sprintTeams.length}</dd>
                             </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </TableContainer>
+                            <div className="bg-raised/80 px-3 py-2.5">
+                              <dt className="text-xs text-fg-subtle">Submissions</dt>
+                              <dd className="text-lg font-semibold tabular-nums text-fg">{sprintSubs.length}</dd>
+                            </div>
+                          </dl>
+
+                          <div className="mt-auto space-y-1.5">
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="text-fg-subtle">Lifecycle</span>
+                              <span className="tabular-nums text-fg-muted">
+                                {stageIndex > 0 ? `Stage ${stageIndex} of ${STAGE_ORDER.length - 1}` : "Not started"}
+                              </span>
+                            </div>
+                            <div
+                              className="h-1.5 w-full overflow-hidden rounded-full bg-raised"
+                              role="progressbar"
+                              aria-label={`Lifecycle progress for ${h.title}`}
+                              aria-valuemin={0}
+                              aria-valuemax={100}
+                              aria-valuenow={progress}
+                            >
+                              <div
+                                className={cn(
+                                  "h-full rounded-full transition-[width] duration-500",
+                                  completed ? "bg-fg-subtle/50" : "bg-gradient-to-r from-accent to-accent-2"
+                                )}
+                                style={{ width: `${progress}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div
+                          role="group"
+                          aria-label={`Actions for ${h.title}`}
+                          className="flex flex-wrap items-center gap-1.5 border-t border-line px-4 py-3"
+                        >
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => openManageModal(h)}
+                            aria-label={`Codes & committee for ${h.title}`}
+                            title="Manage judge & screening access codes"
+                          >
+                            <KeyRound aria-hidden="true" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => setConfigTarget(h)}
+                            aria-label={`Settings for ${h.title}`}
+                            title="Settings"
+                          >
+                            <Settings aria-hidden="true" />
+                          </Button>
+                          <Button variant="secondary" size="sm" onClick={() => openRubricEditor(h)}>
+                            <ListChecks aria-hidden="true" />
+                            Rubrics <span className="tabular-nums">({(h.rubrics || []).length})</span>
+                          </Button>
+                          <Button variant="secondary" size="sm" className="ml-auto" onClick={() => handleAdvance(h.id)}>
+                            Advance stage
+                            <ArrowRight aria-hidden="true" />
+                          </Button>
+                        </div>
+                      </Card>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </section>
 
           {/* Announcements + teams */}
-          <aside className="grid grid-cols-1 gap-8 lg:grid-cols-2 lg:items-start">
+          <div className="hairline-gradient" aria-hidden="true" />
+          <aside className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start" aria-label="Communication and participants">
             <Card>
-              <CardHeader>
-                <CardTitle as="h2" className="flex items-center gap-2">
-                  <Megaphone className="h-4 w-4 text-fg-subtle" aria-hidden="true" />
-                  Broadcast announcement
-                </CardTitle>
-                <CardDescription>Pushed to participants' notifications in real time.</CardDescription>
+              <CardHeader className="flex-row items-start gap-3">
+                <IconTile icon={Megaphone} tone="info" />
+                <div className="min-w-0 space-y-0.5">
+                  <CardTitle as="h2">Broadcast announcement</CardTitle>
+                  <CardDescription>Pushed to participants' notifications in real time.</CardDescription>
+                </div>
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleBroadcastAnnouncement} className="space-y-4">
@@ -670,15 +691,19 @@ export default function OrganizerDashboard() {
             </Card>
 
             <Card>
-              <CardHeader className="flex-row items-center justify-between gap-2">
-                <CardTitle as="h2">Participant teams</CardTitle>
-                <Badge className="tabular-nums">{teamsList.length} total</Badge>
+              <CardHeader className="flex-row items-start gap-3">
+                <IconTile icon={Users} tone="cyan" />
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <CardTitle as="h2">Participant teams</CardTitle>
+                  <CardDescription>Every team registered across the platform.</CardDescription>
+                </div>
+                <Badge className="shrink-0 tabular-nums">{teamsList.length} total</Badge>
               </CardHeader>
               <CardContent>
                 {teamsList.length === 0 ? (
-                  <p className="text-sm text-fg-muted">No teams have registered yet.</p>
+                  <p className="rounded-lg border border-dashed border-line p-4 text-center text-sm text-fg-muted">No teams have registered yet.</p>
                 ) : (
-                  <ul className="max-h-72 divide-y divide-line overflow-y-auto">
+                  <ul className="max-h-72 divide-y divide-line overflow-y-auto rounded-lg bg-raised/50 px-3 py-2.5">
                     {teamsList.map((t) => (
                       <li key={t.code} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
                         <div className="min-w-0">
@@ -711,7 +736,7 @@ export default function OrganizerDashboard() {
           size="xl"
         >
           <form onSubmit={submitCreateHackathon} className="space-y-6">
-            <FormSection title="Basics">
+            <FormSection icon={FileText} title="Basics">
               <Field label="Hackathon title" required>
                 <Input
                   type="text"
@@ -738,7 +763,7 @@ export default function OrganizerDashboard() {
               </Field>
             </FormSection>
 
-            <FormSection title="Schedule & prize">
+            <FormSection icon={CalendarClock} title="Schedule & prize">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <Field label="Registration deadline">
                   <Input
@@ -767,7 +792,7 @@ export default function OrganizerDashboard() {
               </div>
             </FormSection>
 
-            <FormSection title="Teams">
+            <FormSection icon={Users} title="Teams">
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Min team size">
                   <Input
@@ -792,7 +817,7 @@ export default function OrganizerDashboard() {
               </div>
             </FormSection>
 
-            <FormSection title="Track & modules">
+            <FormSection icon={Layers} title="Track & modules">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label="Domain / track" required>
                   <Select
@@ -869,20 +894,22 @@ export default function OrganizerDashboard() {
         >
           {configTarget && (
             <form onSubmit={handleSaveConfig} className="space-y-4">
-              <Field label="Prize pool">
-                <Input
-                  type="text"
-                  value={configTarget.prizePool || ""}
-                  onChange={(e) => setConfigTarget({ ...configTarget, prizePool: e.target.value })}
-                />
-              </Field>
-              <Field label="Team size allowance">
-                <Input
-                  type="text"
-                  value={configTarget.teamSize || ""}
-                  onChange={(e) => setConfigTarget({ ...configTarget, teamSize: e.target.value })}
-                />
-              </Field>
+              <FormSection icon={Settings} title="Prize & team rules">
+                <Field label="Prize pool">
+                  <Input
+                    type="text"
+                    value={configTarget.prizePool || ""}
+                    onChange={(e) => setConfigTarget({ ...configTarget, prizePool: e.target.value })}
+                  />
+                </Field>
+                <Field label="Team size allowance">
+                  <Input
+                    type="text"
+                    value={configTarget.teamSize || ""}
+                    onChange={(e) => setConfigTarget({ ...configTarget, teamSize: e.target.value })}
+                  />
+                </Field>
+              </FormSection>
               <div className="flex flex-col-reverse gap-2 border-t border-line pt-4 sm:flex-row sm:justify-end">
                 <Button variant="secondary" onClick={() => setConfigTarget(null)}>
                   Cancel
@@ -939,6 +966,10 @@ export default function OrganizerDashboard() {
               {rubricError && <Alert tone="danger">{rubricError}</Alert>}
 
               {/* Criteria */}
+              <p className="flex items-center gap-2 text-sm font-semibold text-fg">
+                <IconTile icon={ListChecks} size="sm" />
+                Evaluation criteria
+              </p>
               {rubricDraft.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-line p-4 text-center text-sm text-fg-muted">
                   No criteria yet. Add one below or start from a template.
@@ -1022,7 +1053,10 @@ export default function OrganizerDashboard() {
 
               {/* Preset templates */}
               <div className="space-y-2 border-t border-line pt-4">
-                <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">Quick templates</p>
+                <p className="flex items-center gap-2 text-sm font-semibold text-fg">
+                  <IconTile icon={Layers} size="sm" />
+                  Quick templates
+                </p>
                 <div className="flex flex-wrap gap-2">
                   <Button
                     variant="secondary"
@@ -1206,8 +1240,8 @@ function AccessCodeSection({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className={cn('flex items-center gap-1.5 text-sm font-semibold', sectionToneText[tone])}>
-              <Icon className="h-4 w-4" aria-hidden="true" />
+            <h3 className={cn('flex items-center gap-2 text-sm font-semibold', sectionToneText[tone])}>
+              <IconTile icon={Icon} tone={tone} size="sm" />
               {title}
             </h3>
             <Badge tone={tone}>{badge}</Badge>
@@ -1270,11 +1304,42 @@ function AccessCodeSection({
   );
 }
 
-/** Titled group of fields inside the create-hackathon form. */
-function FormSection({ title, children }) {
+/** Small tinted icon tile used by every section heading on this page. */
+function IconTile({ icon: Icon, tone = 'accent', size = 'md' }) {
+  const t = toneStyles[tone] || toneStyles.accent;
+  return (
+    <span
+      className={cn(
+        'flex shrink-0 items-center justify-center ring-1 ring-inset',
+        size === 'sm' ? 'h-6 w-6 rounded-md' : 'h-8 w-8 rounded-lg',
+        t.tile
+      )}
+      aria-hidden="true"
+    >
+      <Icon className={size === 'sm' ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
+    </span>
+  );
+}
+
+/** Page-level section heading: icon tile + title + one-line description. */
+function SectionHeading({ id, icon, tone, title, description }) {
+  return (
+    <div className="flex min-w-0 items-start gap-3">
+      <IconTile icon={icon} tone={tone} />
+      <div className="min-w-0 space-y-0.5">
+        <h2 id={id} className="text-base font-semibold text-fg">{title}</h2>
+        {description && <p className="text-sm text-fg-muted">{description}</p>}
+      </div>
+    </div>
+  );
+}
+
+/** Titled group of fields inside the create-hackathon / settings forms. */
+function FormSection({ icon, title, children }) {
   return (
     <fieldset className="border-t border-line pt-5 first:border-t-0 first:pt-0">
-      <legend className="float-left mb-4 w-full text-xs font-medium uppercase tracking-wide text-fg-subtle">
+      <legend className="float-left mb-4 flex w-full items-center gap-2 text-sm font-semibold text-fg">
+        {icon && <IconTile icon={icon} size="sm" />}
         {title}
       </legend>
       <div className="clear-both space-y-4">{children}</div>

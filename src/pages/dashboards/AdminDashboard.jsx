@@ -7,6 +7,7 @@ import {
   ClipboardCheck,
   Copy,
   ExternalLink,
+  Layers,
   Package,
   Plus,
   Scale,
@@ -18,30 +19,8 @@ import {
   UsersRound,
 } from 'lucide-react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
-import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  Dialog,
-  EmptyState,
-  Field,
-  Input,
-  PageHeader,
-  SectionHeader,
-  Select,
-  StatCard,
-  TabPanel,
-  TableContainer,
-  Tabs,
-  cn,
-  stageTone,
-  tableClasses,
-} from '../../components/ui';
+import EventCover from '../../components/art/EventCover';
+import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, EmptyState, Field, Input, PageHeader, Select, StatCard, TabPanel, TableContainer, Tabs, cn, stageTone, tableClasses, stageProgress } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import {
   getStoredHackathons,
@@ -115,14 +94,63 @@ const ROLE_OPTIONS = [
   { value: 'mentor', label: 'Technical Mentor' },
 ];
 
-// Same stage → progress mapping the page has always used.
-function stageProgress(stage) {
-  return stage === "Results Published" ? 100 :
-    stage === "Rubric Judging" ? 85 :
-    stage === "Screening Gate" ? 70 :
-    stage === "Hacking Phase" ? 50 :
-    stage === "Team Formation" ? 35 : 20;
+// Presentation-only: Badge tone per role so each role reads distinctly.
+const ROLE_TONES = {
+  admin: 'danger',
+  organizer: 'accent',
+  judge: 'success',
+  screening: 'warning',
+  mentor: 'info',
+  leader: 'info',
+  student: 'neutral',
+};
+
+const ICON_TILE_TONES = {
+  accent: 'bg-accent/15 text-accent-text ring-accent/25',
+  success: 'bg-success/10 text-success ring-success/25',
+  warning: 'bg-warning/10 text-warning ring-warning/25',
+  info: 'bg-info/10 text-info ring-info/25',
+};
+
+// Section heading: icon tile + title + one-line description (+ optional actions).
+function IconSectionHeader({ icon: Icon, tone = 'accent', title, description, actions }) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex min-w-0 items-start gap-3">
+        <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset', ICON_TILE_TONES[tone])}>
+          <Icon className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 space-y-0.5">
+          <h2 className="text-base font-semibold text-fg">{title}</h2>
+          {description && <p className="text-sm text-fg-muted">{description}</p>}
+        </div>
+      </div>
+      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+    </div>
+  );
 }
+
+// Slim gradient stage progress bar.
+function StageProgressBar({ value, label, className }) {
+  return (
+    <div
+      className={cn('h-1.5 overflow-hidden rounded-full bg-raised', className)}
+      role="progressbar"
+      aria-label={label}
+      aria-valuenow={value}
+      aria-valuemin={0}
+      aria-valuemax={100}
+    >
+      <div
+        className="h-full rounded-full bg-gradient-to-r from-accent to-accent-2 transition-[width] duration-300"
+        style={{ width: `${value}%` }}
+      />
+    </div>
+  );
+}
+
+// Same stage → progress mapping the page has always used.
+// Stage → % lives in components/ui (shared with the other dashboards).
 
 // Checkbox grid for enabled modules. `isChecked(key)` and `onToggle(key, checked)`
 // keep each form's original checked/onChange semantics.
@@ -381,6 +409,7 @@ export default function AdminDashboard() {
     >
       <div className="space-y-8">
         <PageHeader
+          icon={ShieldCheck}
           eyebrow="Admin console"
           title="Platform administration"
           description="Run hackathons, manage who can do what, and release certified results and certificates."
@@ -389,16 +418,29 @@ export default function AdminDashboard() {
         />
 
         <section aria-label="Platform statistics" className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-5">
-          <StatCard label="Hackathons" value={hackathons.length} icon={CalendarRange} />
-          <StatCard label="Registered users" value={usersList.length} icon={Users} />
-          <StatCard label="Teams formed" value={Object.keys(allTeams).length} icon={UsersRound} />
           <StatCard
+            tone="accent"
+            label="Hackathons"
+            value={hackathons.length}
+            hint={`${publishedCount} of ${hackathons.length} with results released`}
+            icon={CalendarRange}
+          />
+          <StatCard tone="cyan" label="Registered users" value={usersList.length} icon={Users} />
+          <StatCard
+            tone="info"
+            label="Teams formed"
+            value={Object.keys(allTeams).length}
+            hint={`${allSubmissions.length} submissions received`}
+            icon={UsersRound}
+          />
+          <StatCard
+            tone="success"
             label="Screening pass rate"
             value={clearanceRate}
             hint={`${shortlistedSubs} of ${reviewedSubs} reviewed submissions shortlisted`}
             icon={ShieldCheck}
           />
-          <StatCard label="Certified evaluations" value={allEvaluations.length} icon={ClipboardCheck} />
+          <StatCard tone="accent" label="Certified evaluations" value={allEvaluations.length} icon={ClipboardCheck} />
         </section>
 
         {adminNotice && (
@@ -408,13 +450,20 @@ export default function AdminDashboard() {
         )}
 
         {/* HACKATHON SELECTOR */}
-        <Card>
-          <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div className="min-w-0 space-y-1">
-              <h2 className="text-base font-semibold text-fg">Hackathon-specific inspection</h2>
-              <p className="text-sm text-fg-muted">
-                Switch context to view dedicated teams, committee and submissions.
-              </p>
+        <section
+          aria-label="Inspection context"
+          className="surface-card flex flex-col gap-4 rounded-xl border border-line p-4 sm:flex-row sm:items-end sm:justify-between sm:p-5"
+        >
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-2/10 text-accent-2 ring-1 ring-inset ring-accent-2/25">
+                <Layers className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <div className="min-w-0 space-y-0.5">
+                <h2 className="text-base font-semibold text-fg">Hackathon-specific inspection</h2>
+                <p className="text-sm text-fg-muted">
+                  Switch context to view dedicated teams, committee and submissions.
+                </p>
+              </div>
             </div>
             <Field label="Context" className="w-full sm:w-72">
               <Select
@@ -427,15 +476,16 @@ export default function AdminDashboard() {
                 ))}
               </Select>
             </Field>
-          </CardContent>
-        </Card>
+        </section>
 
         {/* CONDITION 1: SPECIFIC HACKATHON SELECTED */}
         {activeH && scoped && (
           <div className="space-y-6">
             {/* Hackathon header */}
-            <Card>
-              <CardContent className="space-y-5">
+            <section
+              aria-label={`${activeH.title} overview`}
+              className="surface-hero space-y-5 rounded-2xl border border-line p-5 sm:p-6"
+            >
                 <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                   <div className="min-w-0 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -443,10 +493,18 @@ export default function AdminDashboard() {
                       <Badge tone={stageTone(activeH.stage)}>{activeH.stage}</Badge>
                       {activeH.track && <Badge>{activeH.track}</Badge>}
                     </div>
-                    <h2 className="text-xl font-semibold tracking-tight text-fg">{activeH.title}</h2>
+                    <h2 className="text-xl font-semibold tracking-tight text-fg sm:text-2xl">{activeH.title}</h2>
                     {(activeH.summary || activeH.headline) && (
                       <p className="max-w-2xl text-sm text-fg-muted">{activeH.summary || activeH.headline}</p>
                     )}
+                    <div className="flex max-w-sm items-center gap-3 pt-1">
+                      <StageProgressBar
+                        value={stageProgress(activeH.stage)}
+                        label={`${activeH.title} stage progress`}
+                        className="flex-1"
+                      />
+                      <span className="text-xs tabular-nums text-fg-subtle">{stageProgress(activeH.stage)}%</span>
+                    </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
                     <Button variant="ghost" size="sm" onClick={() => setConfigTarget(activeH)}>
@@ -459,7 +517,7 @@ export default function AdminDashboard() {
                 </div>
 
                 {/* Access codes & metrics */}
-                <div className="grid grid-cols-1 gap-3 border-t border-line pt-5 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="relative grid grid-cols-1 gap-3 border-t border-line pt-5 sm:grid-cols-2 lg:grid-cols-4">
                   <AccessCodeWell
                     label="Screening code"
                     code={scoped.screenCodeRecord?.code}
@@ -485,8 +543,7 @@ export default function AdminDashboard() {
                     <p className="text-xs text-fg-subtle">{activeH.prizePool || activeH.prize || "Prizes set"}</p>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+            </section>
 
             {/* Sub-tabs: Teams | Screeners | Judges | Deliverables */}
             <div className="space-y-4">
@@ -509,6 +566,7 @@ export default function AdminDashboard() {
                 {scoped.hackTeams.length === 0 ? (
                   <Card>
                     <EmptyState
+                      illustration="team"
                       icon={UsersRound}
                       title="No teams enrolled"
                       description="No squads currently enrolled in this specific sprint."
@@ -538,7 +596,9 @@ export default function AdminDashboard() {
                             </td>
                             <td className={tableClasses.td}>{t.track || activeH.track}</td>
                             <td className={cn(tableClasses.td, 'text-right')}>
-                              <Badge tone="success">{t.screeningStatus || "Registered"}</Badge>
+                              <Badge tone={t.screeningStatus ? screeningDecisionTone(t.screeningStatus) : 'info'}>
+                                {t.screeningStatus || "Registered"}
+                              </Badge>
                             </td>
                           </tr>
                         ))}
@@ -647,6 +707,7 @@ export default function AdminDashboard() {
                 {scoped.hackSubs.length === 0 ? (
                   <Card>
                     <EmptyState
+                      illustration="upload"
                       icon={Package}
                       title="No deliverables yet"
                       description="No project deliverables uploaded for this hackathon yet."
@@ -730,7 +791,8 @@ export default function AdminDashboard() {
 
             {/* HACKATHONS */}
             <TabPanel value="hackathons" activeValue={activeTab} idPrefix="admin" className="space-y-4 focus:outline-none">
-              <SectionHeader
+              <IconSectionHeader
+                icon={CalendarRange}
                 title="Competition management"
                 description="Advance stages and configure rules for each hackathon."
                 actions={<Badge>{hackathons.length} total</Badge>}
@@ -738,6 +800,7 @@ export default function AdminDashboard() {
               {hackathons.length === 0 ? (
                 <Card>
                   <EmptyState
+                    illustration="calendar"
                     icon={CalendarRange}
                     title="No hackathons yet"
                     description="Create the first hackathon to open registration and start tracking stages."
@@ -763,24 +826,21 @@ export default function AdminDashboard() {
                         const progress = stageProgress(h.stage);
                         return (
                           <tr key={h.id} className={tableClasses.tr}>
-                            <td className={cn(tableClasses.td, 'font-medium text-fg')}>{h.title}</td>
+                            <td className={cn(tableClasses.td, 'font-medium text-fg')}>
+                              <span className="flex items-center gap-3">
+                                <EventCover hackathon={h} className="h-9 w-16 shrink-0 rounded-md border border-line" />
+                                {h.title}
+                              </span>
+                            </td>
                             <td className={tableClasses.td}>{h.track}</td>
                             <td className={tableClasses.td}>
                               <div className="flex flex-col gap-1.5">
                                 <Badge tone={stageTone(h.stage)} className="w-fit">{h.stage}</Badge>
-                                <div
-                                  className="h-1 w-20 overflow-hidden rounded-full bg-raised"
-                                  role="progressbar"
-                                  aria-label={`${h.title} stage progress`}
-                                  aria-valuenow={progress}
-                                  aria-valuemin={0}
-                                  aria-valuemax={100}
-                                >
-                                  <div
-                                    className="h-full rounded-full bg-accent transition-all duration-300"
-                                    style={{ width: `${progress}%` }}
-                                  />
-                                </div>
+                                <StageProgressBar
+                                  value={progress}
+                                  label={`${h.title} stage progress`}
+                                  className="w-24"
+                                />
                               </div>
                             </td>
                             <td className={cn(tableClasses.td, 'whitespace-nowrap tabular-nums')}>{h.deadline}</td>
@@ -808,7 +868,8 @@ export default function AdminDashboard() {
 
             {/* USERS & ROLES */}
             <TabPanel value="users" activeValue={activeTab} idPrefix="admin" className="space-y-4 focus:outline-none">
-              <SectionHeader
+              <IconSectionHeader
+                icon={UserCog}
                 title="Users & role assignments"
                 description="Assign participant, committee, judge, organizer, mentor and admin roles. Changes apply immediately."
                 actions={<Badge>{usersList.length} users</Badge>}
@@ -816,6 +877,7 @@ export default function AdminDashboard() {
               {usersList.length === 0 ? (
                 <Card>
                   <EmptyState
+                    illustration="team"
                     icon={Users}
                     title="No registered users"
                     description="Users appear here after they sign up. You can then assign their roles."
@@ -839,7 +901,7 @@ export default function AdminDashboard() {
                           <td className={cn(tableClasses.td, 'font-medium text-fg')}>{u.fullName}</td>
                           <td className={cn(tableClasses.td, 'font-mono text-xs')}>{u.email}</td>
                           <td className={tableClasses.td}>
-                            <Badge tone="accent">{u.roleCategory || u.role}</Badge>
+                            <Badge tone={ROLE_TONES[u.role] || 'neutral'} dot>{u.roleCategory || u.role}</Badge>
                           </td>
                           <td className={tableClasses.td}>{u.university}</td>
                           <td className={cn(tableClasses.td, 'text-right')}>
@@ -866,7 +928,9 @@ export default function AdminDashboard() {
             {/* RESULTS & CERTIFICATES */}
             <TabPanel value="results" activeValue={activeTab} idPrefix="admin" className="space-y-8 focus:outline-none">
               <div className="space-y-4">
-                <SectionHeader
+                <IconSectionHeader
+                  icon={Award}
+                  tone="success"
                   title="Results publication"
                   description="Publishing a hackathon's results makes rankings visible to all participants and issues certificates to every evaluated team. This cannot be undone from here."
                   actions={<Badge>{publishedCount} of {hackathons.length} released</Badge>}
@@ -874,6 +938,7 @@ export default function AdminDashboard() {
                 {hackathons.length === 0 ? (
                   <Card>
                     <EmptyState
+                      illustration="award"
                       icon={Trophy}
                       title="Nothing to publish"
                       description="Results can be released once a hackathon exists and its submissions have been evaluated."
@@ -915,7 +980,9 @@ export default function AdminDashboard() {
               </div>
 
               <div className="space-y-4">
-                <SectionHeader
+                <IconSectionHeader
+                  icon={ShieldCheck}
+                  tone="warning"
                   title="Platform actions"
                   description="System-wide audit scans and bulk results release."
                 />

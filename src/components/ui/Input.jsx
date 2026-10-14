@@ -3,10 +3,10 @@ import { cn } from './cn';
 
 const control =
   // 16px text on small screens stops iOS Safari from zooming on focus.
-  'block w-full rounded-lg border border-line bg-sunken text-sm text-fg shadow-sm max-sm:text-base ' +
+  'block w-full rounded-lg border border-line bg-sunken/80 text-sm text-fg shadow-sm max-sm:text-base ' +
   'placeholder:text-fg-subtle transition-[border-color,box-shadow] duration-150 ' +
   'hover:border-line-strong ' +
-  'focus:border-accent focus:outline-none focus:ring-2 focus:ring-ring/30 ' +
+  'focus:border-accent focus:bg-sunken focus:outline-none focus:ring-4 focus:ring-accent/15 ' +
   'disabled:cursor-not-allowed disabled:bg-raised disabled:text-fg-subtle ' +
   'aria-[invalid=true]:border-danger aria-[invalid=true]:focus:ring-danger/30';
 

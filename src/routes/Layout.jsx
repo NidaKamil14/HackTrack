@@ -4,9 +4,15 @@ import NavigationBar from '../components/NavigationBar';
 import Footer from '../components/Footer';
 import TeamCodeModal from '../components/TeamCodeModal';
 import RouteFallback from '../components/RouteFallback';
+import { AppBackdrop } from '../components/ui';
 
 export default function Layout() {
   const location = useLocation();
+  // Each page type gets its own coordinated background treatment.
+  const backdropVariant =
+    location.pathname === '/' ? 'landing'
+      : ['/login', '/register'].includes(location.pathname) ? 'auth'
+      : 'discover';
   const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
   const [teamCodeInput, setTeamCodeInput] = useState("HT-DEV-42");
 
@@ -28,7 +34,8 @@ export default function Layout() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col justify-between bg-canvas text-fg">
+    <div className="relative flex min-h-screen flex-col justify-between text-fg">
+      <AppBackdrop variant={backdropVariant} />
       <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-50 focus:rounded-lg focus:bg-accent focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-accent-fg">
         Skip to main content
       </a>

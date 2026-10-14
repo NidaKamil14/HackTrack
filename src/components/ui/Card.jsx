@@ -9,8 +9,10 @@ export function Card({ as: Component = 'div', interactive = false, className, ..
   return (
     <Component
       className={cn(
-        'rounded-xl border border-line bg-surface shadow-sm',
-        interactive && 'transition-[border-color,box-shadow] duration-150 hover:border-line-strong hover:shadow-md',
+        'surface-card rounded-xl border border-line',
+        // Only clickable cards lift; static cards never pretend to be interactive.
+        interactive &&
+          'transition-[border-color,box-shadow,transform] duration-200 ease-out hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-glow',
         className
       )}
       {...props}

@@ -12,4 +12,6 @@ export { Skeleton } from './Skeleton';
 export { Logo } from './Logo';
 export { PageHeader, SectionHeader, EmptyState, Alert, StatCard, DescriptionList, TableContainer } from './Layout';
 export { tableClasses } from './tableClasses';
-export { stageTone } from './stageTone';
+export { stageTone, stageProgress, stagePhase, STAGE_ORDER } from './stageTone';
+export { AppBackdrop } from './AppBackdrop';
+export { PageHeaderVariantContext, toneStyles } from './pageHeaderContext';

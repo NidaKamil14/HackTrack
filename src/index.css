@@ -5,39 +5,45 @@
 @tailwind utilities;
 
 /* ==========================================================================
-   HACKTRACK DESIGN TOKENS
-   Colours are stored as space-separated RGB channels so Tailwind can apply
-   opacity modifiers (e.g. bg-accent/10). Consume them through the Tailwind
-   names in tailwind.config.js, never as raw hex values in components.
+   HACKTRACK DESIGN TOKENS — "Midnight" identity
+   Colours are space-separated RGB channels so Tailwind can apply opacity
+   modifiers (e.g. bg-accent/10). Consume them through the Tailwind names in
+   tailwind.config.js, never as raw values in components.
 
    Surface hierarchy (back → front):
-     canvas  → page background
-     surface → cards, panels, nav bars
-     raised  → hover rows, nested panels, segmented controls
-     sunken  → inputs, code wells, inset areas
+     canvas     → page background (with the .app-backdrop layer on top)
+     surface    → cards, panels, nav bars  (surface-hi = top of its gradient)
+     raised     → hover rows, nested wells, segmented controls
+     sunken     → inputs, code wells, inset areas
+   Accents: violet (accent) is the brand colour; cyan (accent-2) only appears
+   inside gradients and highlights, never as a second button colour.
    ========================================================================== */
 
 :root,
 html.dark {
   color-scheme: dark;
 
-  --canvas: 9 10 12;          /* #090A0C */
-  --surface: 17 19 22;        /* #111316 */
-  --raised: 24 27 31;         /* #181B1F */
-  --sunken: 13 14 17;         /* #0D0E11 */
-  --overlay: 3 4 6;           /* dialog backdrop */
+  --canvas: 7 9 18;           /* #070912 midnight */
+  --surface: 13 17 30;        /* #0D111E */
+  --surface-hi: 19 24 42;     /* #13182A */
+  --raised: 22 27 45;         /* #161B2D */
+  --sunken: 9 12 22;          /* #090C16 */
+  --overlay: 3 4 10;
 
-  --line: 38 41 48;           /* #262930 hairline borders */
-  --line-strong: 56 61 71;    /* #383D47 hover / emphasis borders */
+  --line: 33 39 62;           /* #21273E hairline borders */
+  --line-strong: 52 60 92;    /* #343C5C hover / emphasis borders */
+  --highlight: 255 255 255;   /* inner top highlight on surfaces */
 
-  --fg: 237 238 240;          /* #EDEEF0 primary text   ~16:1 on surface */
-  --fg-muted: 165 169 178;    /* #A5A9B2 secondary text ~8:1  */
-  --fg-subtle: 132 137 148;   /* #848994 tertiary text  ~5:1  */
+  --fg: 236 238 246;          /* #ECEEF6 */
+  --fg-muted: 166 172 198;    /* #A6ACC6 */
+  --fg-subtle: 131 138 168;   /* #838AA8 */
 
-  --accent: 60 200 230;       /* #3CC8E6 HackTrack cyan */
-  --accent-hover: 110 216 240;
-  --accent-fg: 3 22 28;       /* text on accent fills */
-  --accent-text: 96 212 238;  /* accent used as text/links */
+  --accent: 106 85 245;       /* #6A55F5 electric violet — white text ≥4.5:1 */
+  --accent-deep: 79 70 229;   /* #4F46E5 indigo — gradient end */
+  --accent-hover: 94 72 238;
+  --accent-fg: 255 255 255;
+  --accent-text: 168 155 255; /* #A89BFF violet for text/links on dark */
+  --accent-2: 34 211 238;     /* #22D3EE cyan — gradients & highlights only */
 
   --success: 61 214 140;
   --warning: 245 184 61;
@@ -45,45 +51,53 @@ html.dark {
   --danger-solid: 220 38 38;
   --info: 96 165 250;
 
-  --ring: 60 200 230;
+  --ring: 168 155 255;
 
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(255 255 255 / 0.03);
-  --shadow-lg: 0 24px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.04);
+  --glow-strength: 1;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.45);
+  --shadow-md: 0 8px 24px -8px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.02);
+  --shadow-lg: 0 32px 64px -16px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.04);
+  --shadow-glow: 0 10px 30px -10px rgb(106 85 245 / 0.55);
 }
 
 html.light {
   color-scheme: light;
 
-  --canvas: 247 248 250;      /* #F7F8FA */
+  --canvas: 246 247 252;      /* #F6F7FC */
   --surface: 255 255 255;
-  --raised: 242 244 247;      /* #F2F4F7 */
+  --surface-hi: 255 255 255;
+  --raised: 241 242 250;      /* #F1F2FA */
   --sunken: 255 255 255;
-  --overlay: 15 17 21;
+  --overlay: 17 19 40;
 
-  --line: 227 230 235;        /* #E3E6EB */
-  --line-strong: 205 210 218; /* #CDD2DA */
+  --line: 226 228 240;        /* #E2E4F0 */
+  --line-strong: 200 204 222; /* #C8CCDE */
+  --highlight: 255 255 255;
 
-  --fg: 15 17 21;             /* #0F1115 */
-  --fg-muted: 75 82 98;       /* #4B5262 ~7.8:1 on white */
-  --fg-subtle: 104 111 125;   /* #686F7D ~4.9:1 on white */
+  --fg: 14 16 34;             /* #0E1022 */
+  --fg-muted: 72 78 104;      /* #484E68 */
+  --fg-subtle: 100 106 132;   /* #646A84 */
 
-  --accent: 14 116 144;       /* #0E7490 — white text passes AA */
-  --accent-hover: 11 95 119;
+  --accent: 91 75 232;        /* #5B4BE8 — white text ≥4.5:1 */
+  --accent-deep: 67 56 202;   /* #4338CA */
+  --accent-hover: 79 63 216;
   --accent-fg: 255 255 255;
-  --accent-text: 14 116 144;
+  --accent-text: 79 63 216;   /* #4F3FD8 */
+  --accent-2: 8 145 178;      /* #0891B2 */
 
-  --success: 22 101 52;      /* #166534 */
-  --warning: 146 64 14;      /* #92400E */
-  --danger: 185 28 28;       /* #B91C1C — text; buttons use danger-solid */
+  --success: 22 101 52;
+  --warning: 146 64 14;
+  --danger: 185 28 28;
   --danger-solid: 220 38 38;
-  --info: 29 78 216;         /* #1D4ED8 */
+  --info: 29 78 216;
 
-  --ring: 14 116 144;
+  --ring: 91 75 232;
 
-  --shadow-sm: 0 1px 2px rgb(15 17 21 / 0.06);
-  --shadow-md: 0 4px 12px -2px rgb(15 17 21 / 0.08), 0 1px 2px rgb(15 17 21 / 0.04);
-  --shadow-lg: 0 24px 48px -12px rgb(15 17 21 / 0.18);
+  --glow-strength: 0.55;
+  --shadow-sm: 0 1px 2px rgb(17 19 40 / 0.06);
+  --shadow-md: 0 8px 24px -10px rgb(17 19 40 / 0.14), 0 1px 2px rgb(17 19 40 / 0.04);
+  --shadow-lg: 0 32px 64px -20px rgb(17 19 40 / 0.22);
+  --shadow-glow: 0 10px 28px -12px rgb(91 75 232 / 0.5);
 }
 
 @layer base {
@@ -125,17 +139,15 @@ html.light {
     cursor: not-allowed;
   }
 
-  /* Grids default to one shrinkable column. Without this, a grid with only
-     breakpoint columns (e.g. `lg:grid-cols-3`) sizes its implicit mobile column
-     to its widest unbreakable child and overflows small screens.
-     Any grid-cols-* utility still overrides this (utilities layer wins). */
-  .grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   /* Long unbroken strings (URLs, repo links, codes) must wrap, not overflow.
      Table cells are excluded: tables scroll inside TableContainer, and
      `anywhere` would let columns collapse and split ordinary words. */
+  /* Browsers give <fieldset> min-inline-size: min-content, so it refuses to
+     shrink below its content and overflows narrow screens. */
+  fieldset {
+    min-width: 0;
+  }
+
   p, dd, li {
     overflow-wrap: anywhere;
   }
@@ -154,6 +166,254 @@ html.light {
   .eyebrow {
     @apply text-xs font-medium uppercase tracking-[0.08em] text-fg-subtle;
   }
+
+  /* ---------------------------------------------------------------------
+     App backdrop — <AppBackdrop variant="landing|discover|auth|dashboard" />
+     Layers (back → front): grid/dots (::before) · drifting orbs (.bd-orb)
+     · abstract art (.bd-art) · grain (::after).
+     Gradients + transform-only motion: no blur filters, cheap to composite.
+     --------------------------------------------------------------------- */
+  .app-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: -10;
+    pointer-events: none;
+    overflow: hidden;
+    --bd-grid-opacity: 0.5;
+    --bd-orb-strength: 1;
+  }
+  .app-backdrop::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: var(--bd-grid-opacity);
+    background-image:
+      linear-gradient(rgb(var(--line) / 0.6) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--line) / 0.6) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 0%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 0%, transparent 75%);
+  }
+  .app-backdrop::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+  html.light .app-backdrop::after { opacity: 0.025; }
+
+  /* Drifting light orbs — soft radial gradients moved with transform only. */
+  .bd-orb {
+    position: absolute;
+    border-radius: 9999px;
+    will-change: transform;
+    opacity: calc(var(--bd-orb-strength) * var(--glow-strength));
+  }
+  .bd-orb--1 {
+    width: 58rem; height: 58rem; left: -18rem; top: -26rem;
+    background: radial-gradient(closest-side, rgb(var(--accent) / 0.34), transparent);
+    animation: bd-drift-a 46s ease-in-out infinite alternate;
+  }
+  .bd-orb--2 {
+    width: 46rem; height: 46rem; right: -16rem; top: -12rem;
+    background: radial-gradient(closest-side, rgb(var(--accent-2) / 0.18), transparent);
+    animation: bd-drift-b 54s ease-in-out infinite alternate;
+  }
+  .bd-orb--3 {
+    width: 52rem; height: 52rem; left: 30%; bottom: -34rem;
+    background: radial-gradient(closest-side, rgb(var(--accent-deep) / 0.26), transparent);
+    animation: bd-drift-c 62s ease-in-out infinite alternate;
+  }
+
+  .bd-art { position: absolute; }
+  .bd-spin-slow { animation: bd-spin 140s linear infinite; }
+  .bd-spin-reverse { animation: bd-spin 110s linear infinite reverse; }
+  .bd-float-y { animation: bd-float 14s ease-in-out infinite alternate; }
+  .bd-twinkle { animation: bd-twinkle 6s ease-in-out infinite; }
+
+  /* Landing — bold and atmospheric. */
+  .app-backdrop--landing { --bd-grid-opacity: 0.55; --bd-orb-strength: 1.15; }
+  .bd-art--orbit { width: 64rem; right: -22rem; top: -16rem; opacity: 0.65; }
+
+  /* Discover (event list & detail) — dot matrix + isometric lattice. */
+  .app-backdrop--discover { --bd-grid-opacity: 0.85; --bd-orb-strength: 0.95; }
+  .app-backdrop--discover::before {
+    background-image: radial-gradient(rgb(var(--line-strong) / 0.9) 1px, transparent 1.5px);
+    background-size: 22px 22px;
+    mask-image: radial-gradient(ellipse 90% 55% at 50% 0%, black 10%, transparent 80%);
+    -webkit-mask-image: radial-gradient(ellipse 90% 55% at 50% 0%, black 10%, transparent 80%);
+  }
+  .app-backdrop--discover .bd-orb--1 { left: auto; right: -20rem; top: -28rem; }
+  .app-backdrop--discover .bd-orb--2 { right: auto; left: -18rem; top: 18rem; }
+  .bd-art--iso {
+    width: 62rem; right: -18rem; top: 16rem; opacity: 0.5;
+    mask-image: radial-gradient(ellipse 55% 55% at 55% 45%, black, transparent 80%);
+    -webkit-mask-image: radial-gradient(ellipse 55% 55% at 55% 45%, black, transparent 80%);
+  }
+
+  /* Auth — centred spotlight with rings and a constellation. */
+  .app-backdrop--auth { --bd-grid-opacity: 0.35; --bd-orb-strength: 1; }
+  .app-backdrop--auth::before {
+    mask-image: radial-gradient(ellipse 55% 55% at 50% 45%, black 0%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 55% 55% at 50% 45%, black 0%, transparent 75%);
+  }
+  .app-backdrop--auth .bd-orb--1 { left: 5%; top: 10%; width: 44rem; height: 44rem; }
+  .app-backdrop--auth .bd-orb--2 { right: 5%; top: 30%; width: 40rem; height: 40rem; }
+  .app-backdrop--auth .bd-orb--3 { left: 35%; bottom: -30rem; }
+  .bd-art--auth-orbit { width: 70rem; left: 50%; top: 50%; transform: translate(-50%, -50%); opacity: 0.4; }
+  .bd-art--constellation { width: 46rem; left: -8rem; bottom: -4rem; opacity: 0.5; }
+
+  /* Dashboard — restrained: corner glows, faint top grid, one quiet orbit. */
+  .app-backdrop--dashboard { --bd-grid-opacity: 0.3; --bd-orb-strength: 0.7; }
+  .app-backdrop--dashboard::before {
+    mask-image: linear-gradient(180deg, black 0%, transparent 38%);
+    -webkit-mask-image: linear-gradient(180deg, black 0%, transparent 38%);
+  }
+  .app-backdrop--dashboard .bd-orb--1 { width: 46rem; height: 46rem; left: -20rem; top: -24rem; }
+  .app-backdrop--dashboard .bd-orb--2 { width: 38rem; height: 38rem; right: -18rem; top: -18rem; }
+  .bd-art--corner { width: 30rem; right: -12rem; top: -12rem; opacity: 0.35; }
+
+  /* Small screens: smaller decorative layers so they stay balanced. */
+  @media (max-width: 640px) {
+    .bd-orb--1, .bd-orb--2, .bd-orb--3 { width: 30rem; height: 30rem; }
+    .bd-art--orbit, .bd-art--auth-orbit { width: 40rem; }
+    .bd-art--iso { width: 36rem; }
+    .bd-art--constellation { width: 28rem; }
+  }
+
+  /* ---------------------------------------------------------------------
+     Section bands — landing sections blend into each other instead of
+     ending on a hard border: a tinted band whose top/bottom edges fade out.
+     --------------------------------------------------------------------- */
+  .section-band {
+    position: relative;
+    isolation: isolate;
+  }
+  .section-band::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(50rem 24rem at 15% 50%, rgb(var(--accent) / calc(0.10 * var(--glow-strength))), transparent 70%),
+      radial-gradient(40rem 20rem at 90% 30%, rgb(var(--accent-2) / calc(0.07 * var(--glow-strength))), transparent 70%),
+      rgb(var(--sunken) / 0.55);
+    mask-image: linear-gradient(180deg, transparent 0%, black 14%, black 86%, transparent 100%);
+    -webkit-mask-image: linear-gradient(180deg, transparent 0%, black 14%, black 86%, transparent 100%);
+  }
+  .section-divider {
+    height: 1px;
+    background-image: linear-gradient(90deg, transparent, rgb(var(--line-strong) / 0.9), transparent);
+  }
+
+  /* ---------------------------------------------------------------------
+     Surfaces
+     --------------------------------------------------------------------- */
+  /* Cards and panels: a barely-there top-down gradient plus an inner top
+     highlight gives depth without glassmorphism. */
+  .surface-card {
+    background-color: rgb(var(--surface));
+    background-image: linear-gradient(180deg, rgb(var(--surface-hi)) 0%, rgb(var(--surface)) 60%);
+    box-shadow: inset 0 1px 0 rgb(var(--highlight) / 0.04), var(--shadow-sm);
+  }
+  html.light .surface-card {
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* Hero panel used by dashboard page headers and public page intros. */
+  .surface-hero {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    background-color: rgb(var(--surface));
+    background-image:
+      radial-gradient(44rem 20rem at 0% 0%, rgb(var(--accent) / calc(0.32 * var(--glow-strength))), transparent 70%),
+      radial-gradient(32rem 18rem at 100% 0%, rgb(var(--accent-2) / calc(0.16 * var(--glow-strength))), transparent 70%),
+      linear-gradient(180deg, rgb(var(--surface-hi)) 0%, rgb(var(--surface)) 100%);
+    box-shadow: inset 0 1px 0 rgb(var(--highlight) / 0.06), var(--shadow-md);
+  }
+  .surface-hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image:
+      linear-gradient(rgb(var(--line) / 0.7) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--line) / 0.7) 1px, transparent 1px);
+    background-size: 32px 32px;
+    mask-image: linear-gradient(115deg, transparent 30%, black 80%);
+    -webkit-mask-image: linear-gradient(115deg, transparent 30%, black 80%);
+    opacity: 0.7;
+  }
+
+  /* Brand gradient text — use on one short phrase per page at most. */
+  .text-gradient {
+    background-image: linear-gradient(100deg, rgb(var(--accent-text)) 0%, rgb(var(--accent-2)) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  html.light .text-gradient {
+    background-image: linear-gradient(100deg, rgb(var(--accent)) 0%, rgb(var(--accent-2)) 100%);
+  }
+
+  /* Gradient hairline (e.g. under the sticky header). */
+  .hairline-gradient {
+    background-image: linear-gradient(90deg, transparent, rgb(var(--accent) / 0.55), rgb(var(--accent-2) / 0.45), transparent);
+  }
+
+  /* Staggered entrance for a page's top-level sections. If the container has a
+     single wrapper child (as every dashboard does), its children stagger instead. */
+  .rise-children > :not(:only-child),
+  .rise-children > :only-child > * {
+    animation: rise 420ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+  .rise-children > :not(:only-child):nth-child(2),
+  .rise-children > :only-child > :nth-child(2) { animation-delay: 50ms; }
+  .rise-children > :not(:only-child):nth-child(3),
+  .rise-children > :only-child > :nth-child(3) { animation-delay: 100ms; }
+  .rise-children > :not(:only-child):nth-child(4),
+  .rise-children > :only-child > :nth-child(4) { animation-delay: 150ms; }
+  .rise-children > :not(:only-child):nth-child(n + 5),
+  .rise-children > :only-child > :nth-child(n + 5) { animation-delay: 200ms; }
+}
+
+@keyframes bd-drift-a {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(8rem, 5rem, 0) scale(1.08); }
+}
+@keyframes bd-drift-b {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(-7rem, 6rem, 0) scale(0.94); }
+}
+@keyframes bd-drift-c {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(-6rem, -4rem, 0) scale(1.06); }
+}
+@keyframes bd-spin { to { transform: rotate(360deg); } }
+@keyframes bd-float {
+  from { transform: translateY(0); }
+  to { transform: translateY(-14px); }
+}
+@keyframes bd-twinkle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Grids default to one shrinkable column. Without this, a grid with only
+   breakpoint columns (e.g. `lg:grid-cols-3`) sizes its implicit mobile column to
+   its widest unbreakable child and overflows small screens.
+   Deliberately outside @layer and wrapped in :where() (zero specificity):
+   inside a layer Tailwind would also emit `lg:grid` variants of this rule, which
+   then override grid-cols-* utilities. Any grid-cols-* class always wins here. */
+:where(.grid) {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 /* Respect users who prefer reduced motion. */

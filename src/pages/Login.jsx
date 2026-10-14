@@ -146,7 +146,8 @@ export default function Login({ navigate: propNavigate }) {
     <div className="container-page py-10 sm:py-16">
       <div className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[1fr_1.1fr] lg:gap-12">
         {/* Credentials */}
-        <section className="lg:pt-6">
+        <section className="surface-card relative self-start rounded-2xl border border-line-strong p-6 sm:p-8">
+          <span className="hairline-gradient pointer-events-none absolute inset-x-10 -top-px h-px" aria-hidden="true" />
           <Logo className="mb-8" />
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Sign in</h1>
           <p className="mt-1.5 text-sm text-fg-muted">Welcome back. Sign in to open your HackTrack workspace.</p>
@@ -206,7 +207,7 @@ export default function Login({ navigate: propNavigate }) {
         </section>
 
         {/* Demo accounts */}
-        <section aria-labelledby="demo-heading" className="rounded-2xl border border-line bg-surface p-5 sm:p-6">
+        <section aria-labelledby="demo-heading" className="surface-hero self-start rounded-2xl border border-line p-5 sm:p-6">
           <h2 id="demo-heading" className="text-base font-semibold">Explore with a demo account</h2>
           <p className="mt-1 text-sm text-fg-muted">
             Pick a role to fill in its credentials, or open its dashboard directly.

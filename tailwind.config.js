@@ -25,7 +25,10 @@ export default {
       },
       colors: {
         canvas: token('canvas'),
-        surface: token('surface'),
+        surface: {
+          DEFAULT: token('surface'),
+          hi: token('surface-hi'),
+        },
         raised: token('raised'),
         sunken: token('sunken'),
         overlay: token('overlay'),
@@ -43,6 +46,8 @@ export default {
           hover: token('accent-hover'),
           fg: token('accent-fg'),
           text: token('accent-text'),
+          deep: token('accent-deep'),
+          2: token('accent-2'),
         },
         success: token('success'),
         warning: token('warning'),
@@ -65,6 +70,7 @@ export default {
         sm: 'var(--shadow-sm)',
         md: 'var(--shadow-md)',
         lg: 'var(--shadow-lg)',
+        glow: 'var(--shadow-glow)',
       },
       transitionTimingFunction: {
         out: 'cubic-bezier(0.16, 1, 0.3, 1)',
@@ -79,6 +85,7 @@ export default {
       animation: {
         'fade-in': 'fade-in 150ms ease-out',
         'dialog-in': 'dialog-in 180ms cubic-bezier(0.16, 1, 0.3, 1)',
+        rise: 'rise 420ms cubic-bezier(0.16, 1, 0.3, 1) backwards',
       },
     },
   },

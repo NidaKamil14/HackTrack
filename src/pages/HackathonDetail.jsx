@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useParams, useNavigate, useLocation, useOutletContext } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, CalendarDays, Check, CircleCheck, KeyRound, SearchX, ShieldCheck, Trophy, Users } from 'lucide-react';
 import { getHackathonById, getStoredHackathons } from '../utils/hackathonService';
+import EventCover from '../components/art/EventCover';
 import { useAuth } from '../context/AuthContext';
 import { isUserRegistered, registerForHackathon } from '../utils/registrationService';
 import { Alert, Badge, Button, Card, DescriptionList, EmptyState, TabPanel, Tabs, stageTone } from '../components/ui';
@@ -64,6 +65,7 @@ export default function HackathonDetail({
     return (
       <div className="container-page py-16">
         <EmptyState
+          illustration="search"
           icon={SearchX}
           titleAs="h1"
           title="Hackathon not found"
@@ -129,7 +131,9 @@ export default function HackathonDetail({
       </Button>
 
       {/* Header */}
-      <header className="mt-6 border-b border-line pb-8">
+      <div className="mt-4 overflow-hidden rounded-2xl border border-line shadow-md">
+        <EventCover hackathon={hackathon} wide className="h-32 w-full sm:h-44" />
+      <header className="surface-hero -mt-px p-5 sm:p-8">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone={stageTone(hackathon.stage)} dot>{hackathon.stage}</Badge>
           {hackathon.category && <Badge>{hackathon.category}</Badge>}
@@ -160,6 +164,7 @@ export default function HackathonDetail({
           ))}
         </dl>
       </header>
+      </div>
 
       <div className="mt-8 grid gap-10 lg:grid-cols-3">
         {/* Main content */}
