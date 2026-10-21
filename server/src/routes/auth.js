@@ -1,7 +1,7 @@
 import express from 'express';
 import store from '../database/store.js';
 import { signToken, requireAuth } from '../middleware/auth.js';
-import { notifyAccessCodeRedeemed } from '../notifications/notifier.js';
+import { notifyAccessCodeRedeemed, notifyUserRegistered, notifyPasswordReset } from '../notifications/notifier.js';
 
 const router = express.Router();
 
@@ -59,6 +59,9 @@ router.post('/register', (req, res) => {
     const token = signToken(user);
     const redirectPath = getRoleDashboardPath(user.role);
 
+    // FR-1: Trigger email notification for account registration
+    notifyUserRegistered(user);
+
     return res.status(201).json({
       status: 201,
       message: 'User registered successfully (FR-1).',
@@ -97,6 +100,15 @@ router.post('/login', (req, res) => {
     });
   }
 
+  // Enforce account active status (FR-1, FR-42)
+  if (user.isActive === false || user.is_active === 0) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'Your account has been deactivated. Please contact an administrator.',
+    });
+  }
+
   const { passwordHash: _hash, ...safeUser } = user;
   const token = signToken(safeUser);
   const redirectPath = getRoleDashboardPath(safeUser.role);
@@ -131,7 +143,16 @@ router.post('/forgot-password', (req, res) => {
     });
   }
 
-  const resetRecord = store.createPasswordResetToken(email);
+  const cleanEmail = String(email).trim().toLowerCase();
+  const user = store.findUserByEmail(cleanEmail);
+  let resetRecord = null;
+  if (user) {
+    resetRecord = store.createPasswordResetToken(cleanEmail);
+    if (resetRecord) {
+      notifyPasswordReset({ user, token: resetRecord.token });
+    }
+  }
+
   // Even if user does not exist, return standard safe message to prevent email enumeration
   return res.json({
     status: 200,

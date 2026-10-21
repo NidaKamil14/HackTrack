@@ -5,18 +5,80 @@ import { notifyAnnouncement } from '../notifications/notifier.js';
 
 const router = express.Router();
 
-// GET /api/v1/admin/users: List all users (FR-42)
-router.get('/users', requireAuth, requireRole('admin'), (req, res) => {
-  const users = store.getAllUsers();
-  return res.json({
-    status: 200,
-    count: users.length,
-    users,
-  });
+// GET /api/v1/admin/users: List all users from MySQL database (FR-42)
+router.get('/users', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { role, search, status } = req.query || {};
+    const users = await store.getUsersFromDb({ role, search, status });
+    return res.json({
+      status: 200,
+      count: users.length,
+      users,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      status: 500,
+      error: 'Internal Server Error',
+      message: err.message,
+    });
+  }
 });
 
-// PUT /api/v1/admin/users/:id/role: Update user role (FR-42)
-router.put('/users/:id/role', requireAuth, requireRole('admin'), (req, res) => {
+// POST /api/v1/admin/users: Create a new user (FR-42)
+router.post('/users', requireAuth, requireRole('admin'), async (req, res) => {
+  const { email, password, fullName, role, university, memberId } = req.body || {};
+
+  if (!email || !password || !fullName) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: 'Email, password, and fullName are mandatory fields.',
+    });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: 'Password must be at least 6 characters long.',
+    });
+  }
+
+  const validRoles = ['student', 'leader', 'judge', 'admin', 'screening', 'mentor', 'organizer'];
+  if (role && !validRoles.includes(role)) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: `Invalid role: ${role}. Valid roles are: ${validRoles.join(', ')}`,
+    });
+  }
+
+  try {
+    const user = store.createUser({
+      email,
+      password,
+      fullName,
+      role: role || 'student',
+      university,
+      memberId,
+    });
+
+    return res.status(201).json({
+      status: 201,
+      message: 'User created successfully.',
+      user,
+    });
+  } catch (err) {
+    return res.status(409).json({
+      status: 409,
+      error: 'Conflict',
+      message: err.message,
+    });
+  }
+});
+
+// PUT /api/v1/admin/users/:id/role: Update user role in MySQL (FR-42)
+router.put('/users/:id/role', requireAuth, requireRole('admin'), async (req, res) => {
   const { role } = req.body || {};
   if (!role) {
     return res.status(400).json({
@@ -26,8 +88,17 @@ router.put('/users/:id/role', requireAuth, requireRole('admin'), (req, res) => {
     });
   }
 
+  const validRoles = ['student', 'leader', 'judge', 'admin', 'screening', 'mentor', 'organizer'];
+  if (!validRoles.includes(role)) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: `Invalid role: ${role}. Valid roles are: ${validRoles.join(', ')}`,
+    });
+  }
+
   try {
-    const updated = store.updateUserRole(req.params.id, role);
+    const updated = await store.updateUserRole(req.params.id, role);
     const { passwordHash: _hash, ...safeUser } = updated;
     return res.json({
       status: 200,
@@ -41,6 +112,75 @@ router.put('/users/:id/role', requireAuth, requireRole('admin'), (req, res) => {
       message: err.message,
     });
   }
+});
+
+// Helper for status updates
+const handleStatusChange = async (req, res, targetActive) => {
+  try {
+    const updated = await store.setUserActiveStatus(req.params.id, targetActive, req.user.id);
+    return res.json({
+      status: 200,
+      message: targetActive
+        ? `User ${updated.fullName || updated.email} has been reactivated successfully.`
+        : `User ${updated.fullName || updated.email} has been deactivated successfully.`,
+      user: updated,
+    });
+  } catch (err) {
+    const status = err.statusCode || (err.message.includes('not found') ? 404 : 400);
+    return res.status(status).json({
+      status,
+      error: status === 404 ? 'Not Found' : 'Bad Request',
+      message: err.message,
+    });
+  }
+};
+
+// PUT /api/v1/admin/users/:id/status: Update user active status in MySQL (FR-42)
+router.put('/users/:id/status', requireAuth, requireRole('admin'), async (req, res) => {
+  const { isActive, status } = req.body || {};
+  let targetActive = isActive;
+  if (targetActive === undefined && status !== undefined) {
+    targetActive = status === 'active' || status === true;
+  }
+
+  if (targetActive === undefined || typeof targetActive !== 'boolean') {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: 'Active status is required as a boolean (isActive: true | false) or status: "active" | "inactive".',
+    });
+  }
+
+  return handleStatusChange(req, res, targetActive);
+});
+
+// PATCH /api/v1/admin/users/:id/status
+router.patch('/users/:id/status', requireAuth, requireRole('admin'), async (req, res) => {
+  const { isActive, status } = req.body || {};
+  let targetActive = isActive;
+  if (targetActive === undefined && status !== undefined) {
+    targetActive = status === 'active' || status === true;
+  }
+
+  if (targetActive === undefined || typeof targetActive !== 'boolean') {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: 'Active status is required as a boolean (isActive: true | false) or status: "active" | "inactive".',
+    });
+  }
+
+  return handleStatusChange(req, res, targetActive);
+});
+
+// POST /api/v1/admin/users/:id/deactivate: Deactivate user account (FR-42)
+router.post('/users/:id/deactivate', requireAuth, requireRole('admin'), (req, res) => {
+  return handleStatusChange(req, res, false);
+});
+
+// POST /api/v1/admin/users/:id/reactivate: Reactivate user account (FR-42)
+router.post('/users/:id/reactivate', requireAuth, requireRole('admin'), (req, res) => {
+  return handleStatusChange(req, res, true);
 });
 
 // GET /api/v1/admin/stats: System usage statistics (FR-41)

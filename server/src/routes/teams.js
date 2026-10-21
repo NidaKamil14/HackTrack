@@ -32,6 +32,80 @@ router.get('/', (req, res) => {
   });
 });
 
+// GET /api/v1/teams/mine: List teams and pending join requests for authenticated user
+router.get('/mine', requireAuth, (req, res) => {
+  const userId = req.user.id;
+  const userMemberships = store.teamMembers.filter((m) => m.userId === userId);
+
+  const activeTeamIds = new Set();
+  const leaderTeams = store.teams.filter((t) => t.leaderId === userId);
+  leaderTeams.forEach((t) => activeTeamIds.add(t.id));
+
+  userMemberships
+    .filter((m) => m.status === 'accepted')
+    .forEach((m) => activeTeamIds.add(m.teamId));
+
+  const myTeams = Array.from(activeTeamIds).map((teamId) => {
+    const team = store.findTeamById(teamId);
+    if (!team) return null;
+    const members = store.getTeamMembers(team.id);
+    const myMem = userMemberships.find((m) => m.teamId === team.id) || (team.leaderId === userId ? { role: 'leader', status: 'accepted' } : null);
+    const hackathon = store.getHackathonById(team.hackathonId);
+    return {
+      ...team,
+      hackathonTitle: hackathon?.title || team.hackathonId,
+      memberCount: members.filter((m) => m.status === 'accepted').length,
+      members,
+      myMembership: myMem,
+    };
+  }).filter(Boolean);
+
+  const pendingRequests = userMemberships
+    .filter((m) => m.status === 'pending')
+    .map((m) => {
+      const team = store.findTeamById(m.teamId);
+      const hackathon = team ? store.getHackathonById(team.hackathonId) : null;
+      return {
+        ...m,
+        teamName: team?.teamName || 'Unknown Team',
+        teamCode: team?.teamCode || '',
+        hackathonId: team?.hackathonId,
+        hackathonTitle: hackathon?.title || '',
+        rosterLocked: Boolean(team?.rosterLocked),
+      };
+    });
+
+  return res.json({
+    status: 200,
+    teams: myTeams,
+    pendingRequests,
+  });
+});
+
+// PUT /api/v1/teams/:id/roster-lock: Team Leader locks or unlocks team roster
+router.put('/:id/roster-lock', requireAuth, (req, res) => {
+  const { locked } = req.body || {};
+  try {
+    const team = store.setTeamRosterLock({
+      teamId: req.params.id,
+      leaderId: req.user.id,
+      locked: Boolean(locked),
+    });
+    return res.json({
+      status: 200,
+      message: `Team roster ${team.rosterLocked ? 'locked' : 'unlocked'} successfully.`,
+      team,
+    });
+  } catch (err) {
+    const status = err.message.includes('Only the Team Leader') ? 403 : 400;
+    return res.status(status).json({
+      status,
+      error: status === 403 ? 'Forbidden' : 'Bad Request',
+      message: err.message,
+    });
+  }
+});
+
 // GET /api/v1/teams/:id: Get team details, code, and members
 router.get('/:id', (req, res) => {
   const team = store.findTeamById(req.params.id);
@@ -170,6 +244,33 @@ router.put('/:id/requests/:requestId', requireAuth, (req, res) => {
       message: err.message,
     });
   }
+});
+
+// PATCH /api/v1/teams/:id/screening: Screening committee / Admin updates screening status
+router.patch('/:id/screening', requireAuth, (req, res) => {
+  const { status } = req.body || {};
+  if (!['pending', 'shortlisted', 'rejected'].includes(status)) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: 'Status must be one of: pending, shortlisted, rejected.',
+    });
+  }
+
+  const team = store.updateTeamScreeningStatus(req.params.id, status);
+  if (!team) {
+    return res.status(404).json({
+      status: 404,
+      error: 'Not Found',
+      message: 'Team not found.',
+    });
+  }
+
+  return res.json({
+    status: 200,
+    message: `Team screening status updated to ${status}.`,
+    team,
+  });
 });
 
 export default router;

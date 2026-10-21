@@ -124,4 +124,22 @@ router.post('/', requireAuth, (req, res) => {
   }
 });
 
+// PATCH /api/v1/submissions/:id/lock: Team Leader or Admin locks the project submission
+router.patch('/:id/lock', requireAuth, (req, res) => {
+  const submission = store.lockSubmission(req.params.id);
+  if (!submission) {
+    return res.status(404).json({
+      status: 404,
+      error: 'Not Found',
+      message: 'Submission not found.',
+    });
+  }
+
+  return res.json({
+    status: 200,
+    message: 'Project submission has been locked successfully (FR-21, BR-8).',
+    submission,
+  });
+});
+
 export default router;

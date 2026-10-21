@@ -1,9 +1,21 @@
 import './src/config/env.js';
 import app from './src/app.js';
 import { closePool } from './src/config/db.js';
+import initDatabase from './src/database/initDb.js';
+import store from './src/database/store.js';
 
 const PORT = parseInt(process.env.PORT, 10) || 5050;
 const HOST = process.env.HOST || '0.0.0.0';
+
+// Bootstrap database connection and sync initial store
+(async () => {
+  try {
+    await initDatabase();
+    await store.loadFromDatabase();
+  } catch (dbErr) {
+    console.warn('⚠️ Non-fatal database bootstrap warning:', dbErr.message);
+  }
+})();
 
 const server = app.listen(PORT, HOST, () => {
   console.log(`===============================================`);

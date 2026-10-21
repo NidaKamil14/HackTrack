@@ -1,8 +1,43 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import { pool, testConnection } from '../config/db.js';
+
+function toSqlDate(d) {
+  if (!d) return null;
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+const isTestMode = () => Boolean(process.env.NODE_TEST_CONTEXT || process.env.NODE_ENV === 'test');
+
+function asyncDbWrite(queryFn) {
+  if (isTestMode()) return Promise.resolve();
+  try {
+    const p = queryFn();
+    if (p && typeof p.catch === 'function') {
+      p.catch((err) => console.warn('MySQL async write error:', err.message));
+    }
+    return p;
+  } catch (err) {
+    console.warn('MySQL async write error:', err.message);
+    return Promise.resolve();
+  }
+}
 
 // Default Demo Users matching SRS and frontend seeds
 const RAW_DEMO_USERS = [
+  {
+    id: 'usr-leader-nida',
+    email: 'nida@university.edu',
+    password: 'password123',
+    fullName: 'Nida',
+    role: 'leader',
+    roleCategory: 'Team Leader',
+    university: 'PCCOE Pune',
+    memberId: 'LEAD-99214',
+    isActive: true,
+  },
   {
     id: 'usr-leader-001',
     email: 'alex@university.edu',
@@ -148,6 +183,33 @@ const INITIAL_HACKATHONS = [
       { id: 'crit-203', name: 'Presentation & Demo', maxScore: 30, weightage: 1.0, description: 'Clarity of presentation and live demonstration.' },
     ],
   },
+  {
+    id: 'hack-shesolves-001',
+    title: 'She Solves 2026',
+    tagLine: 'Empowering Women Technologists & AI Innovators',
+    description: 'Premier collegiate hackathon for women developers, engineers and researchers building high-impact tech solutions.',
+    status: 'published',
+    minTeamSize: 2,
+    maxTeamSize: 4,
+    startDate: new Date(Date.now() - 4 * 86400000).toISOString(),
+    endDate: new Date(Date.now() + 3 * 86400000).toISOString(),
+    registrationDeadline: new Date(Date.now() + 1 * 86400000).toISOString(),
+    submissionDeadline: new Date(Date.now() + 2 * 86400000).toISOString(),
+    evaluationDeadline: new Date(Date.now() + 3 * 86400000).toISOString(),
+    hasScreeningRound: true,
+    screeningRoundsCount: 1,
+    hasMentorship: true,
+    evaluationWorkflow: 'screening_first',
+    resultsPublished: false,
+    resultsPublishedAt: null,
+    createdBy: 'usr-admin-006',
+    criteria: [
+      { id: 'crit-ss-101', name: 'Innovation & Impact', maxScore: 25, weightage: 1.0, description: 'Novelty, creativity and direct societal impact.' },
+      { id: 'crit-ss-102', name: 'Technical Execution', maxScore: 25, weightage: 1.0, description: 'Code quality, technical architecture and robust APIs.' },
+      { id: 'crit-ss-103', name: 'UI / UX Design', maxScore: 25, weightage: 1.0, description: 'Design accessibility, visual aesthetics and user experience.' },
+      { id: 'crit-ss-104', name: 'Real-world Feasibility', maxScore: 25, weightage: 1.0, description: 'Deployment readiness and scalability.' },
+    ],
+  },
 ];
 
 // Initial Teams
@@ -175,6 +237,18 @@ const INITIAL_TEAMS = [
     screeningStatus: 'shortlisted',
     mentorId: null,
     createdAt: new Date(Date.now() - 7 * 86400000).toISOString(),
+  },
+  {
+    id: 'team-coders-001',
+    hackathonId: 'hack-shesolves-001',
+    leaderId: 'usr-leader-nida',
+    teamName: 'The Coders',
+    teamCode: 'HT-CODERS',
+    track: 'Women in Tech & AI',
+    status: 'active',
+    screeningStatus: 'shortlisted',
+    mentorId: 'usr-mentor-008',
+    createdAt: new Date(Date.now() - 3 * 86400000).toISOString(),
   },
 ];
 
@@ -209,6 +283,26 @@ const INITIAL_TEAM_MEMBERS = [
     status: 'accepted',
     requestedAt: new Date(Date.now() - 7 * 86400000).toISOString(),
     reviewedAt: new Date(Date.now() - 7 * 86400000).toISOString(),
+  },
+  {
+    id: 'tm-coders-001',
+    teamId: 'team-coders-001',
+    hackathonId: 'hack-shesolves-001',
+    userId: 'usr-leader-nida',
+    role: 'leader',
+    status: 'accepted',
+    requestedAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+    reviewedAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+  },
+  {
+    id: 'tm-coders-002',
+    teamId: 'team-coders-001',
+    hackathonId: 'hack-shesolves-001',
+    userId: 'usr-student-002',
+    role: 'member',
+    status: 'accepted',
+    requestedAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+    reviewedAt: new Date(Date.now() - 3 * 86400000).toISOString(),
   },
 ];
 
@@ -246,6 +340,22 @@ const INITIAL_SUBMISSIONS = [
     submittedAt: new Date(Date.now() - 5 * 86400000).toISOString(),
     updatedAt: new Date(Date.now() - 5 * 86400000).toISOString(),
   },
+  {
+    id: 'sub-herbuddy-001',
+    hackathonId: 'hack-shesolves-001',
+    teamId: 'team-coders-001',
+    submittedBy: 'usr-leader-nida',
+    projectTitle: 'HerBuddy',
+    abstract: 'An intelligent safety, wellness, and mentorship companion platform designed for collegiate women in STEM with automated emergency beaconing and decentralized support circles.',
+    track: 'Women in Tech & AI',
+    repoUrl: 'https://github.com/nidakamil/herbuddy',
+    demoUrl: 'https://herbuddy-demo.vercel.app',
+    presentationUrl: 'https://docs.herbuddy.app/deck.pdf',
+    fileUrl: null,
+    isLocked: true,
+    submittedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+  },
 ];
 
 // Initial Judge Assignments
@@ -264,9 +374,16 @@ const INITIAL_JUDGE_ASSIGNMENTS = [
     submissionId: 'sub-002',
     assignedAt: new Date(Date.now() - 4 * 86400000).toISOString(),
   },
+  {
+    id: 'ja-ss-001',
+    hackathonId: 'hack-shesolves-001',
+    judgeId: 'usr-judge-005',
+    submissionId: 'sub-herbuddy-001',
+    assignedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+  },
 ];
 
-// Initial Evaluations
+// Initial Evaluations (Score sums up to exactly 83.00 for HerBuddy)
 const INITIAL_EVALUATIONS = [
   {
     id: 'eval-001',
@@ -301,6 +418,50 @@ const INITIAL_EVALUATIONS = [
     isLocked: true,
     submittedAt: new Date(Date.now() - 3 * 86400000).toISOString(),
   },
+  {
+    id: 'eval-ss-001',
+    hackathonId: 'hack-shesolves-001',
+    submissionId: 'sub-herbuddy-001',
+    judgeId: 'usr-judge-005',
+    criterionId: 'crit-ss-101',
+    score: 22,
+    remarks: 'Exceptional problem framing and high novelty addressing community safety.',
+    isLocked: true,
+    submittedAt: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: 'eval-ss-002',
+    hackathonId: 'hack-shesolves-001',
+    submissionId: 'sub-herbuddy-001',
+    judgeId: 'usr-judge-005',
+    criterionId: 'crit-ss-102',
+    score: 21,
+    remarks: 'Strong architectural implementation with reliable edge processing and error recovery.',
+    isLocked: true,
+    submittedAt: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: 'eval-ss-003',
+    hackathonId: 'hack-shesolves-001',
+    submissionId: 'sub-herbuddy-001',
+    judgeId: 'usr-judge-005',
+    criterionId: 'crit-ss-103',
+    score: 20,
+    remarks: 'Clean, accessible interface with high attention to user journey and feedback states.',
+    isLocked: true,
+    submittedAt: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: 'eval-ss-004',
+    hackathonId: 'hack-shesolves-001',
+    submissionId: 'sub-herbuddy-001',
+    judgeId: 'usr-judge-005',
+    criterionId: 'crit-ss-104',
+    score: 20,
+    remarks: 'Practical campus deployment strategy and well-documented technical road-map.',
+    isLocked: true,
+    submittedAt: new Date(Date.now() - 86400000).toISOString(),
+  },
 ];
 
 // Initial Certificates
@@ -316,6 +477,18 @@ const INITIAL_CERTIFICATES = [
     hackathonTitle: 'PCCOE InnovateX 2026',
     issuedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
     qrPayload: 'https://hacktrack.io/verify/HT-CERT-INNO26-001',
+  },
+  {
+    id: 'cert-002',
+    certificateCode: 'HT-CERT-SHESOLVE-001',
+    hackathonId: 'hack-shesolves-001',
+    userId: 'usr-leader-nida',
+    teamId: 'team-coders-001',
+    certificateType: 'participation',
+    participantName: 'Nida',
+    hackathonTitle: 'She Solves 2026',
+    issuedAt: new Date().toISOString(),
+    qrPayload: 'https://hacktrack.io/verify/HT-CERT-SHESOLVE-001',
   },
 ];
 
@@ -422,6 +595,399 @@ class HackTrackStore {
     if (screenUser) screenUser.assignedHackathonIds = ['hack-001'];
   }
 
+  async loadFromDatabase() {
+    try {
+      const status = await testConnection();
+      if (!status.connected) {
+        console.log(`ℹ️ MySQL connection offline (${status.error || 'unreachable'}). Using fast in-memory store.`);
+        return false;
+      }
+
+      console.log('🔄 Syncing store with MySQL database hacktrack_db...');
+
+      // 1. Users
+      const [dbUsers] = await pool.query('SELECT * FROM users');
+      if (dbUsers.length === 0) {
+        console.log('🌱 Seeding initial users into MySQL...');
+        for (const u of this.users) {
+          await pool.query(
+            `INSERT INTO users (id, email, password_hash, full_name, role, role_category, university, member_id, is_active, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE full_name = VALUES(full_name)`,
+            [
+              u.id,
+              u.email,
+              u.passwordHash,
+              u.fullName,
+              u.role,
+              u.roleCategory || this.getRoleCategory(u.role),
+              u.university || 'University / Organization',
+              u.memberId || null,
+              u.isActive ? 1 : 0,
+              toSqlDate(u.createdAt) || toSqlDate(new Date()),
+            ]
+          );
+        }
+      } else {
+        this.users = dbUsers.map((r) => ({
+          id: r.id,
+          email: r.email,
+          passwordHash: r.password_hash,
+          fullName: r.full_name,
+          role: r.role,
+          roleCategory: r.role_category || this.getRoleCategory(r.role),
+          university: r.university,
+          memberId: r.member_id,
+          isActive: !!r.is_active,
+          createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+          assignedHackathonIds: [],
+        }));
+      }
+
+      // 2. Hackathons & Criteria
+      const [dbHackathons] = await pool.query('SELECT * FROM hackathons');
+      const [dbCriteria] = await pool.query('SELECT * FROM evaluation_criteria ORDER BY display_order ASC, created_at ASC');
+      if (dbHackathons.length === 0) {
+        console.log('🌱 Seeding initial hackathons & criteria into MySQL...');
+        for (const h of this.hackathons) {
+          await pool.query(
+            `INSERT INTO hackathons (id, title, tag_line, description, status, min_team_size, max_team_size, start_date, end_date, registration_deadline, submission_deadline, evaluation_deadline, has_screening_round, screening_rounds_count, has_mentorship, evaluation_workflow, results_published, results_published_at, created_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE title = VALUES(title)`,
+            [
+              h.id,
+              h.title,
+              h.tagLine || null,
+              h.description || null,
+              h.status || 'draft',
+              h.minTeamSize || 1,
+              h.maxTeamSize || 4,
+              toSqlDate(h.startDate),
+              toSqlDate(h.endDate),
+              toSqlDate(h.registrationDeadline),
+              toSqlDate(h.submissionDeadline),
+              toSqlDate(h.evaluationDeadline),
+              h.hasScreeningRound ? 1 : 0,
+              h.screeningRoundsCount || 1,
+              h.hasMentorship ? 1 : 0,
+              h.evaluationWorkflow || 'direct_judging',
+              h.resultsPublished ? 1 : 0,
+              toSqlDate(h.resultsPublishedAt),
+              h.createdBy || 'usr-admin-006',
+              toSqlDate(h.createdAt) || toSqlDate(new Date()),
+            ]
+          );
+
+          if (Array.isArray(h.criteria)) {
+            let order = 0;
+            for (const c of h.criteria) {
+              await pool.query(
+                `INSERT INTO evaluation_criteria (id, hackathon_id, name, description, max_score, weightage, display_order)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE name = VALUES(name)`,
+                [c.id, h.id, c.name, c.description || '', c.maxScore || 25, c.weightage || 1.0, order++]
+              );
+            }
+          }
+        }
+      } else {
+        const criteriaByHackathon = {};
+        for (const c of dbCriteria) {
+          if (!criteriaByHackathon[c.hackathon_id]) criteriaByHackathon[c.hackathon_id] = [];
+          criteriaByHackathon[c.hackathon_id].push({
+            id: c.id,
+            name: c.name,
+            description: c.description,
+            maxScore: Number(c.max_score),
+            weightage: Number(c.weightage),
+          });
+        }
+
+        this.hackathons = dbHackathons.map((h) => ({
+          id: h.id,
+          title: h.title,
+          tagLine: h.tag_line || '',
+          description: h.description || '',
+          status: h.status,
+          minTeamSize: h.min_team_size,
+          maxTeamSize: h.max_team_size,
+          startDate: h.start_date ? new Date(h.start_date).toISOString() : new Date().toISOString(),
+          endDate: h.end_date ? new Date(h.end_date).toISOString() : new Date().toISOString(),
+          registrationDeadline: h.registration_deadline ? new Date(h.registration_deadline).toISOString() : new Date().toISOString(),
+          submissionDeadline: h.submission_deadline ? new Date(h.submission_deadline).toISOString() : new Date().toISOString(),
+          evaluationDeadline: h.evaluation_deadline ? new Date(h.evaluation_deadline).toISOString() : null,
+          hasScreeningRound: !!h.has_screening_round,
+          screeningRoundsCount: h.screening_rounds_count,
+          hasMentorship: !!h.has_mentorship,
+          evaluationWorkflow: h.evaluation_workflow,
+          resultsPublished: !!h.results_published,
+          resultsPublishedAt: h.results_published_at ? new Date(h.results_published_at).toISOString() : null,
+          createdBy: h.created_by,
+          createdAt: h.created_at ? new Date(h.created_at).toISOString() : new Date().toISOString(),
+          criteria: criteriaByHackathon[h.id] || [],
+        }));
+      }
+
+      // 3. Teams & Members
+      const [dbTeams] = await pool.query('SELECT * FROM teams');
+      const [dbMembers] = await pool.query('SELECT * FROM team_members');
+      if (dbTeams.length === 0) {
+        console.log('🌱 Seeding initial teams & members into MySQL...');
+        for (const t of this.teams) {
+          await pool.query(
+            `INSERT INTO teams (id, hackathon_id, leader_id, team_name, team_code, track, status, screening_status, mentor_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE team_name = VALUES(team_name)`,
+            [
+              t.id,
+              t.hackathonId,
+              t.leaderId,
+              t.teamName,
+              t.teamCode,
+              t.track || 'General Track',
+              t.status || 'active',
+              t.screeningStatus || 'pending',
+              t.mentorId || null,
+              toSqlDate(t.createdAt) || toSqlDate(new Date()),
+            ]
+          );
+        }
+        for (const tm of this.teamMembers) {
+          await pool.query(
+            `INSERT INTO team_members (id, team_id, hackathon_id, user_id, role, status, requested_at, reviewed_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE status = VALUES(status)`,
+            [
+              tm.id,
+              tm.teamId,
+              tm.hackathonId,
+              tm.userId,
+              tm.role || 'member',
+              tm.status || 'pending',
+              toSqlDate(tm.requestedAt) || toSqlDate(new Date()),
+              toSqlDate(tm.reviewedAt),
+            ]
+          );
+        }
+      } else {
+        this.teams = dbTeams.map((t) => ({
+          id: t.id,
+          hackathonId: t.hackathon_id,
+          leaderId: t.leader_id,
+          teamName: t.team_name,
+          teamCode: t.team_code,
+          track: t.track,
+          status: t.status,
+          rosterLocked: Boolean(t.roster_locked),
+          screeningStatus: t.screening_status,
+          mentorId: t.mentor_id,
+          createdAt: t.created_at ? new Date(t.created_at).toISOString() : new Date().toISOString(),
+        }));
+        this.teamMembers = dbMembers.map((m) => ({
+          id: m.id,
+          teamId: m.team_id,
+          hackathonId: m.hackathon_id,
+          userId: m.user_id,
+          role: m.role,
+          status: m.status,
+          requestedAt: m.requested_at ? new Date(m.requested_at).toISOString() : new Date().toISOString(),
+          reviewedAt: m.reviewed_at ? new Date(m.reviewed_at).toISOString() : null,
+        }));
+      }
+
+      // 4. Submissions
+      const [dbSubmissions] = await pool.query('SELECT * FROM submissions');
+      if (dbSubmissions.length === 0) {
+        console.log('🌱 Seeding initial submissions into MySQL...');
+        for (const s of this.submissions) {
+          await pool.query(
+            `INSERT INTO submissions (id, hackathon_id, team_id, submitted_by, project_title, abstract, track, repo_url, demo_url, presentation_url, file_url, is_locked, submitted_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE project_title = VALUES(project_title)`,
+            [
+              s.id,
+              s.hackathonId,
+              s.teamId,
+              s.submittedBy,
+              s.projectTitle,
+              s.abstract,
+              s.track || null,
+              s.repoUrl || null,
+              s.demoUrl || null,
+              s.presentationUrl || null,
+              s.fileUrl || null,
+              s.isLocked ? 1 : 0,
+              toSqlDate(s.submittedAt) || toSqlDate(new Date()),
+              toSqlDate(s.updatedAt) || toSqlDate(new Date()),
+            ]
+          );
+        }
+      } else {
+        this.submissions = dbSubmissions.map((s) => ({
+          id: s.id,
+          hackathonId: s.hackathon_id,
+          teamId: s.team_id,
+          submittedBy: s.submitted_by,
+          projectTitle: s.project_title,
+          abstract: s.abstract,
+          track: s.track,
+          repoUrl: s.repo_url,
+          demoUrl: s.demo_url,
+          presentationUrl: s.presentation_url,
+          fileUrl: s.file_url,
+          isLocked: !!s.is_locked,
+          submittedAt: s.submitted_at ? new Date(s.submitted_at).toISOString() : new Date().toISOString(),
+          updatedAt: s.updated_at ? new Date(s.updated_at).toISOString() : new Date().toISOString(),
+        }));
+      }
+
+      // 5. Judge Assignments & Evaluations
+      const [dbAssignments] = await pool.query('SELECT * FROM judge_assignments');
+      const [dbEvaluations] = await pool.query('SELECT * FROM evaluations');
+      if (dbAssignments.length === 0 && dbEvaluations.length === 0) {
+        console.log('🌱 Seeding initial evaluations into MySQL...');
+        for (const a of this.judgeAssignments) {
+          await pool.query(
+            `INSERT INTO judge_assignments (id, hackathon_id, judge_id, submission_id, assigned_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE assigned_at = VALUES(assigned_at)`,
+            [a.id, a.hackathonId, a.judgeId, a.submissionId, toSqlDate(a.assignedAt) || toSqlDate(new Date())]
+          );
+        }
+        for (const e of this.evaluations) {
+          await pool.query(
+            `INSERT INTO evaluations (id, hackathon_id, submission_id, judge_id, criterion_id, score, remarks, is_locked, submitted_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE score = VALUES(score)`,
+            [
+              e.id,
+              e.hackathonId,
+              e.submissionId,
+              e.judgeId,
+              e.criterionId,
+              e.score,
+              e.remarks || '',
+              e.isLocked ? 1 : 0,
+              toSqlDate(e.submittedAt) || toSqlDate(new Date()),
+            ]
+          );
+        }
+      } else {
+        this.judgeAssignments = dbAssignments.map((a) => ({
+          id: a.id,
+          hackathonId: a.hackathon_id,
+          judgeId: a.judge_id,
+          submissionId: a.submission_id,
+          assignedAt: a.assigned_at ? new Date(a.assigned_at).toISOString() : new Date().toISOString(),
+        }));
+        this.evaluations = dbEvaluations.map((e) => ({
+          id: e.id,
+          hackathonId: e.hackathon_id,
+          submissionId: e.submission_id,
+          judgeId: e.judge_id,
+          criterionId: e.criterion_id,
+          score: Number(e.score),
+          remarks: e.remarks,
+          isLocked: !!e.is_locked,
+          submittedAt: e.submitted_at ? new Date(e.submitted_at).toISOString() : new Date().toISOString(),
+        }));
+      }
+
+      // 6. Certificates
+      const [dbCertificates] = await pool.query('SELECT * FROM certificates');
+      if (dbCertificates.length === 0) {
+        for (const c of this.certificates) {
+          await pool.query(
+            `INSERT INTO certificates (id, certificate_code, hackathon_id, user_id, team_id, certificate_type, participant_name, hackathon_title, issued_at, qr_payload)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE certificate_code = VALUES(certificate_code)`,
+            [
+              c.id,
+              c.certificateCode,
+              c.hackathonId,
+              c.userId,
+              c.teamId,
+              c.certificateType,
+              c.participantName,
+              c.hackathonTitle,
+              toSqlDate(c.issuedAt) || toSqlDate(new Date()),
+              c.qrPayload || '',
+            ]
+          );
+        }
+      } else {
+        this.certificates = dbCertificates.map((c) => ({
+          id: c.id,
+          certificateCode: c.certificate_code,
+          hackathonId: c.hackathon_id,
+          userId: c.user_id,
+          teamId: c.team_id,
+          certificateType: c.certificate_type,
+          participantName: c.participant_name,
+          hackathonTitle: c.hackathon_title,
+          issuedAt: c.issued_at ? new Date(c.issued_at).toISOString() : new Date().toISOString(),
+          qrPayload: c.qr_payload,
+        }));
+      }
+
+      // 7. Announcements
+      const [dbAnnouncements] = await pool.query('SELECT * FROM announcements');
+      if (dbAnnouncements.length === 0) {
+        for (const a of this.announcements) {
+          await pool.query(
+            `INSERT INTO announcements (id, hackathon_id, title, content, target_role, created_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE title = VALUES(title)`,
+            [a.id, a.hackathonId, a.title, a.content, a.targetRole || 'all', a.createdBy, toSqlDate(a.createdAt) || toSqlDate(new Date())]
+          );
+        }
+      } else {
+        this.announcements = dbAnnouncements.map((a) => ({
+          id: a.id,
+          hackathonId: a.hackathon_id,
+          title: a.title,
+          content: a.content,
+          targetRole: a.target_role,
+          createdBy: a.created_by,
+          createdAt: a.created_at ? new Date(a.created_at).toISOString() : new Date().toISOString(),
+        }));
+      }
+
+      // 8. Hackathon Codes
+      try {
+        const [dbCodes] = await pool.query('SELECT * FROM hackathon_codes');
+        if (dbCodes.length === 0) {
+          for (const c of this.hackathonCodes) {
+            await pool.query(
+              `INSERT INTO hackathon_codes (id, hackathon_id, role, code, created_by, created_at, redeemed_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE code = VALUES(code)`,
+              [c.id, c.hackathonId, c.role, c.code, c.createdBy, toSqlDate(c.createdAt) || toSqlDate(new Date()), JSON.stringify(c.redeemedBy || [])]
+            );
+          }
+        } else {
+          this.hackathonCodes = dbCodes.map((c) => ({
+            id: c.id,
+            hackathonId: c.hackathon_id,
+            role: c.role,
+            code: c.code,
+            createdBy: c.created_by,
+            createdAt: c.created_at ? new Date(c.created_at).toISOString() : new Date().toISOString(),
+            redeemedBy: typeof c.redeemed_by === 'string' ? JSON.parse(c.redeemed_by) : (c.redeemed_by || []),
+          }));
+        }
+      } catch (codeErr) {
+        console.warn('hackathon_codes sync warning:', codeErr.message);
+      }
+
+      console.log('✓ Store successfully synchronized with MySQL database.');
+      return true;
+    } catch (err) {
+      console.error('❌ Failed to load from MySQL:', err.message);
+      return false;
+    }
+  }
+
   // --- Users & Auth ---
   findUserByEmail(email) {
     if (!email) return null;
@@ -430,11 +996,120 @@ class HackTrackStore {
   }
 
   findUserById(id) {
-    return this.users.find((u) => u.id === id) || null;
+    if (!id) return null;
+    const clean = id.trim().toLowerCase();
+    return this.users.find((u) => u.id === id || (u.email && u.email.toLowerCase() === clean)) || null;
   }
 
-  getAllUsers() {
-    return this.users.map(({ passwordHash: _p, ...safeUser }) => safeUser);
+  getAllUsers(filters = {}) {
+    let list = this.users.map(({ passwordHash: _p, ...safeUser }) => safeUser);
+    if (filters.role && filters.role !== 'all') {
+      list = list.filter((u) => u.role === filters.role);
+    }
+    if (filters.status === 'active') {
+      list = list.filter((u) => u.isActive !== false);
+    } else if (filters.status === 'inactive') {
+      list = list.filter((u) => u.isActive === false);
+    }
+    if (filters.search && filters.search.trim()) {
+      const q = filters.search.trim().toLowerCase();
+      list = list.filter((u) =>
+        (u.fullName && u.fullName.toLowerCase().includes(q)) ||
+        (u.email && u.email.toLowerCase().includes(q)) ||
+        (u.memberId && u.memberId.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }
+
+  /**
+   * Retrieves users directly from MySQL with parameterized SQL queries.
+   * Strictly excludes passwords, password hashes, and reset tokens.
+   */
+  async getUsersFromDb(filters = {}) {
+    if (isTestMode()) {
+      return this.getAllUsers(filters);
+    }
+
+    try {
+      const connStatus = await testConnection();
+      if (!connStatus.connected) {
+        return this.getAllUsers(filters);
+      }
+
+      let query = `
+        SELECT id, email, full_name AS fullName, role, role_category AS roleCategory,
+               university, member_id AS memberId, is_active AS isActive,
+               created_at AS createdAt, updated_at AS updatedAt
+        FROM users
+      `;
+      const whereClauses = [];
+      const params = [];
+
+      if (filters.role && filters.role !== 'all') {
+        whereClauses.push('role = ?');
+        params.push(filters.role);
+      }
+
+      if (filters.status === 'active') {
+        whereClauses.push('is_active = 1');
+      } else if (filters.status === 'inactive') {
+        whereClauses.push('is_active = 0');
+      }
+
+      if (filters.search && filters.search.trim()) {
+        whereClauses.push('(full_name LIKE ? OR email LIKE ? OR member_id LIKE ?)');
+        const searchPattern = `%${filters.search.trim()}%`;
+        params.push(searchPattern, searchPattern, searchPattern);
+      }
+
+      if (whereClauses.length > 0) {
+        query += ' WHERE ' + whereClauses.join(' AND ');
+      }
+
+      query += ' ORDER BY created_at DESC';
+
+      const [rows] = await pool.query(query, params);
+
+      const safeUsers = rows.map((r) => ({
+        id: r.id,
+        email: r.email,
+        fullName: r.fullName,
+        role: r.role,
+        roleCategory: r.roleCategory || this.getRoleCategory(r.role),
+        university: r.university || 'University / Organization',
+        memberId: r.memberId || null,
+        isActive: Boolean(r.isActive),
+        createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+        updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : null,
+      }));
+
+      // Keep in-memory store in sync
+      if (!filters.role && !filters.search && !filters.status) {
+        for (const u of safeUsers) {
+          const existing = this.users.find((eu) => eu.id === u.id || (eu.email && eu.email.toLowerCase() === u.email.toLowerCase()));
+          if (!existing) {
+            this.users.push({
+              ...u,
+              passwordHash: '',
+              assignedHackathonIds: [],
+            });
+          } else {
+            existing.role = u.role;
+            existing.roleCategory = u.roleCategory;
+            existing.fullName = u.fullName;
+            existing.university = u.university;
+            existing.memberId = u.memberId;
+            existing.isActive = u.isActive;
+          }
+        }
+      }
+
+      return safeUsers;
+    } catch (err) {
+      console.warn('⚠️ Falling back to in-memory store for getUsers:', err.message);
+      return this.getAllUsers();
+    }
   }
 
   createUser({ email, password, fullName, role = 'student', university, memberId }) {
@@ -461,6 +1136,25 @@ class HackTrackStore {
     };
 
     this.users.push(newUser);
+    asyncDbWrite(() =>
+      pool.query(
+        `INSERT INTO users (id, email, password_hash, full_name, role, role_category, university, member_id, is_active, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE full_name = VALUES(full_name)`,
+        [
+          newUser.id,
+          newUser.email,
+          newUser.passwordHash,
+          newUser.fullName,
+          newUser.role,
+          newUser.roleCategory,
+          newUser.university,
+          newUser.memberId,
+          1,
+          toSqlDate(newUser.createdAt),
+        ]
+      )
+    );
     const { passwordHash: _hash, ...safeUser } = newUser;
     return safeUser;
   }
@@ -476,6 +1170,14 @@ class HackTrackStore {
     const token = crypto.randomBytes(24).toString('hex');
     const expiresAt = Date.now() + 3600 * 1000; // 1 hour
     this.resetTokens.set(token, { email: user.email, expiresAt });
+
+    asyncDbWrite(() =>
+      pool.query(
+        'UPDATE users SET reset_token = ?, reset_token_expiry = ?, updated_at = NOW() WHERE email = ?',
+        [token, new Date(expiresAt), user.email]
+      )
+    );
+
     return { token, email: user.email, expiresAt };
   }
 
@@ -492,15 +1194,149 @@ class HackTrackStore {
     const salt = bcrypt.genSaltSync(10);
     user.passwordHash = bcrypt.hashSync(newPassword, salt);
     this.resetTokens.delete(token);
+
+    asyncDbWrite(() =>
+      pool.query(
+        'UPDATE users SET password_hash = ?, reset_token = NULL, reset_token_expiry = NULL, updated_at = NOW() WHERE email = ?',
+        [user.passwordHash, user.email]
+      )
+    );
+
     return true;
   }
 
-  updateUserRole(userId, newRole) {
-    const user = this.findUserById(userId);
+  async updateUserRole(userId, newRole) {
+    let user = this.findUserById(userId);
+    if (!user) {
+      try {
+        const [rows] = await pool.query(
+          'SELECT id, email, password_hash, full_name, role, role_category, university, member_id, is_active, created_at FROM users WHERE id = ? OR email = ? LIMIT 1',
+          [userId, userId]
+        );
+        if (rows.length > 0) {
+          const r = rows[0];
+          user = {
+            id: r.id,
+            email: r.email,
+            passwordHash: r.password_hash,
+            fullName: r.full_name,
+            role: r.role,
+            roleCategory: r.role_category || this.getRoleCategory(r.role),
+            university: r.university,
+            memberId: r.member_id,
+            isActive: Boolean(r.is_active),
+            createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+            assignedHackathonIds: [],
+          };
+          this.users.push(user);
+        }
+      } catch (err) {
+        console.warn('MySQL lookup in updateUserRole:', err.message);
+      }
+    }
+
     if (!user) throw new Error('User not found');
     user.role = newRole;
     user.roleCategory = this.getRoleCategory(newRole);
+
+    try {
+      await pool.query(
+        'UPDATE users SET role = ?, role_category = ?, updated_at = NOW() WHERE id = ? OR email = ?',
+        [newRole, user.roleCategory, user.id, user.email]
+      );
+    } catch (dbErr) {
+      console.warn('MySQL update role error:', dbErr.message);
+    }
+
     return user;
+  }
+
+  /**
+   * Sets a user's active status (deactivation / reactivation).
+   * Persists change in MySQL using parameterized queries.
+   * Safeguards:
+   * 1. Prevents self-deactivation.
+   * 2. Prevents deactivation of the last active platform administrator.
+   */
+  async setUserActiveStatus(targetId, isActive, currentAdminId = null) {
+    let user = this.findUserById(targetId);
+    if (!user) {
+      try {
+        const [rows] = await pool.query(
+          'SELECT id, email, password_hash, full_name, role, role_category, university, member_id, is_active, created_at FROM users WHERE id = ? OR email = ? LIMIT 1',
+          [targetId, targetId]
+        );
+        if (rows.length > 0) {
+          const r = rows[0];
+          user = {
+            id: r.id,
+            email: r.email,
+            passwordHash: r.password_hash,
+            fullName: r.full_name,
+            role: r.role,
+            roleCategory: r.role_category || this.getRoleCategory(r.role),
+            university: r.university,
+            memberId: r.member_id,
+            isActive: Boolean(r.is_active),
+            createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+            assignedHackathonIds: [],
+          };
+          this.users.push(user);
+        }
+      } catch (err) {
+        console.warn('MySQL lookup in setUserActiveStatus:', err.message);
+      }
+    }
+
+    if (!user) {
+      const err = new Error('User not found.');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    // 1. Prevent self-deactivation
+    if (!isActive && currentAdminId) {
+      if (user.id === currentAdminId || (user.email && user.email.toLowerCase() === currentAdminId.toLowerCase())) {
+        const err = new Error('Administrators cannot deactivate their own account.');
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    // 2. Prevent deactivation of the last active administrator
+    if (!isActive && user.role === 'admin') {
+      let activeAdminCount = 0;
+      try {
+        const [rows] = await pool.query(
+          "SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND is_active = 1"
+        );
+        activeAdminCount = Number(rows[0]?.count || 0);
+      } catch {
+        // Fallback to in-memory count
+        activeAdminCount = this.users.filter((u) => u.role === 'admin' && u.isActive !== false).length;
+      }
+
+      if (activeAdminCount <= 1) {
+        const err = new Error('Cannot deactivate the last active platform administrator.');
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    user.isActive = Boolean(isActive);
+
+    // Persist to MySQL
+    try {
+      await pool.query(
+        'UPDATE users SET is_active = ?, updated_at = NOW() WHERE id = ? OR email = ?',
+        [user.isActive ? 1 : 0, user.id, user.email]
+      );
+    } catch (dbErr) {
+      console.warn('MySQL update active status error:', dbErr.message);
+    }
+
+    const { passwordHash: _p, ...safeUser } = user;
+    return safeUser;
   }
 
   getRoleCategory(role) {
@@ -617,6 +1453,25 @@ class HackTrackStore {
       });
     });
 
+    // Persist to MySQL
+    asyncDbWrite(() =>
+      pool.query(
+        `UPDATE hackathons SET results_published = 1, results_published_at = ?, status = 'completed' WHERE id = ?`,
+        [toSqlDate(hackathon.resultsPublishedAt), hackathonId]
+      )
+    );
+
+    for (const c of this.certificates.filter((x) => x.hackathonId === hackathonId)) {
+      asyncDbWrite(() =>
+        pool.query(
+          `INSERT INTO certificates (id, certificate_code, hackathon_id, user_id, team_id, certificate_type, participant_name, hackathon_title, issued_at, qr_payload)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE certificate_code = VALUES(certificate_code)`,
+          [c.id, c.certificateCode, c.hackathonId, c.userId, c.teamId, c.certificateType, c.participantName, c.hackathonTitle, toSqlDate(c.issuedAt), c.qrPayload]
+        )
+      );
+    }
+
     return hackathon;
   }
 
@@ -678,6 +1533,7 @@ class HackTrackStore {
       teamCode,
       track: track || 'General',
       status: 'active',
+      rosterLocked: false,
       screeningStatus: 'pending',
       mentorId: null,
       createdAt: new Date().toISOString(),
@@ -685,8 +1541,7 @@ class HackTrackStore {
 
     this.teams.push(newTeam);
 
-    // Add leader as accepted member
-    this.teamMembers.push({
+    const leaderMember = {
       id: `tm-${crypto.randomBytes(4).toString('hex')}`,
       teamId: id,
       hackathonId,
@@ -695,7 +1550,24 @@ class HackTrackStore {
       status: 'accepted',
       requestedAt: new Date().toISOString(),
       reviewedAt: new Date().toISOString(),
-    });
+    };
+    this.teamMembers.push(leaderMember);
+
+    asyncDbWrite(() =>
+      pool.query(
+        `INSERT INTO teams (id, hackathon_id, leader_id, team_name, team_code, track, status, roster_locked, screening_status, mentor_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [newTeam.id, newTeam.hackathonId, newTeam.leaderId, newTeam.teamName, newTeam.teamCode, newTeam.track, newTeam.status, 0, newTeam.screeningStatus, newTeam.mentorId, toSqlDate(newTeam.createdAt)]
+      )
+    );
+
+    asyncDbWrite(() =>
+      pool.query(
+        `INSERT INTO team_members (id, team_id, hackathon_id, user_id, role, status, requested_at, reviewed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [leaderMember.id, leaderMember.teamId, leaderMember.hackathonId, leaderMember.userId, leaderMember.role, leaderMember.status, toSqlDate(leaderMember.requestedAt), toSqlDate(leaderMember.reviewedAt)]
+      )
+    );
 
     return newTeam;
   }
@@ -703,6 +1575,10 @@ class HackTrackStore {
   requestJoinTeam({ teamCode, userId }) {
     const team = this.findTeamByCode(teamCode);
     if (!team) throw new Error('Invalid Team Code. Team not found.');
+
+    if (team.rosterLocked) {
+      throw new Error('This team roster is locked by the Team Leader and no longer accepting join requests.');
+    }
 
     const hackathon = this.getHackathonById(team.hackathonId);
     if (!hackathon) throw new Error('Hackathon not found.');
@@ -728,6 +1604,13 @@ class HackTrackStore {
       if (pending.status === 'rejected') {
         pending.status = 'pending';
         pending.requestedAt = new Date().toISOString();
+        pending.reviewedAt = null;
+        asyncDbWrite(() =>
+          pool.query(
+            `UPDATE team_members SET status = 'pending', requested_at = ?, reviewed_at = NULL WHERE id = ?`,
+            [toSqlDate(pending.requestedAt), pending.id]
+          )
+        );
         return pending;
       }
     }
@@ -750,6 +1633,14 @@ class HackTrackStore {
     };
 
     this.teamMembers.push(newRequest);
+    asyncDbWrite(() =>
+      pool.query(
+        `INSERT INTO team_members (id, team_id, hackathon_id, user_id, role, status, requested_at, reviewed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE status = VALUES(status), requested_at = VALUES(requested_at), reviewed_at = NULL`,
+        [newRequest.id, newRequest.teamId, newRequest.hackathonId, newRequest.userId, newRequest.role, newRequest.status, toSqlDate(newRequest.requestedAt), null]
+      )
+    );
     return newRequest;
   }
 
@@ -764,6 +1655,10 @@ class HackTrackStore {
     if (!memberRecord) throw new Error('Join request not found.');
 
     if (action === 'accept') {
+      if (team.rosterLocked) {
+        throw new Error('This team roster is locked by the Team Leader. Join requests cannot be accepted while the roster is locked.');
+      }
+
       const hackathon = this.getHackathonById(team.hackathonId);
       const acceptedCount = this.teamMembers.filter((m) => m.teamId === team.id && m.status === 'accepted').length;
       if (hackathon && acceptedCount >= hackathon.maxTeamSize) {
@@ -791,7 +1686,37 @@ class HackTrackStore {
       throw new Error('Invalid action. Use "accept" or "reject".');
     }
 
+    asyncDbWrite(() =>
+      pool.query(
+        `UPDATE team_members SET status = ?, reviewed_at = ? WHERE id = ?`,
+        [memberRecord.status, toSqlDate(memberRecord.reviewedAt), memberRecord.id]
+      )
+    );
+
     return memberRecord;
+  }
+
+  setTeamRosterLock({ teamId, leaderId, locked }) {
+    const team = this.findTeamById(teamId);
+    if (!team) throw new Error('Team not found');
+    if (team.leaderId !== leaderId) {
+      throw new Error('Only the Team Leader can lock or unlock the roster (BR-3).');
+    }
+    team.rosterLocked = Boolean(locked);
+    asyncDbWrite(() =>
+      pool.query('UPDATE teams SET roster_locked = ? WHERE id = ?', [team.rosterLocked ? 1 : 0, teamId])
+    );
+    return team;
+  }
+
+  updateTeamScreeningStatus(teamId, status) {
+    const team = this.findTeamById(teamId);
+    if (!team) return null;
+    team.screeningStatus = status;
+    asyncDbWrite(() =>
+      pool.query('UPDATE teams SET screening_status = ? WHERE id = ?', [status, teamId])
+    );
+    return team;
   }
 
   getTeamMembers(teamId) {
@@ -873,6 +1798,41 @@ class HackTrackStore {
       this.submissions.push(submission);
     }
 
+    asyncDbWrite(() =>
+      pool.query(
+        `INSERT INTO submissions (id, hackathon_id, team_id, submitted_by, project_title, abstract, track, repo_url, demo_url, presentation_url, file_url, is_locked, submitted_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE project_title = VALUES(project_title), abstract = VALUES(abstract), track = VALUES(track), repo_url = VALUES(repo_url), demo_url = VALUES(demo_url), presentation_url = VALUES(presentation_url), file_url = VALUES(file_url), is_locked = VALUES(is_locked), updated_at = VALUES(updated_at)`,
+        [
+          submission.id,
+          submission.hackathonId,
+          submission.teamId,
+          submission.submittedBy,
+          submission.projectTitle,
+          submission.abstract,
+          submission.track,
+          submission.repoUrl,
+          submission.demoUrl,
+          submission.presentationUrl,
+          submission.fileUrl,
+          submission.isLocked ? 1 : 0,
+          toSqlDate(submission.submittedAt),
+          toSqlDate(submission.updatedAt),
+        ]
+      )
+    );
+
+    return submission;
+  }
+
+  lockSubmission(submissionId) {
+    const submission = this.getSubmissionById(submissionId);
+    if (!submission) return null;
+    submission.isLocked = true;
+    submission.updatedAt = new Date().toISOString();
+    asyncDbWrite(() =>
+      pool.query('UPDATE submissions SET is_locked = 1, updated_at = ? WHERE id = ?', [toSqlDate(submission.updatedAt), submissionId])
+    );
     return submission;
   }
 
@@ -897,6 +1857,14 @@ class HackTrackStore {
       assignedAt: new Date().toISOString(),
     };
     this.judgeAssignments.push(assignment);
+    asyncDbWrite(() =>
+      pool.query(
+        `INSERT INTO judge_assignments (id, hackathon_id, judge_id, submission_id, assigned_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE assigned_at = VALUES(assigned_at)`,
+        [assignment.id, assignment.hackathonId, assignment.judgeId, assignment.submissionId, toSqlDate(assignment.assignedAt)]
+      )
+    );
     return assignment;
   }
 
@@ -970,6 +1938,17 @@ class HackTrackStore {
       recorded.push(evalRecord);
     });
 
+    for (const e of recorded) {
+      asyncDbWrite(() =>
+        pool.query(
+          `INSERT INTO evaluations (id, hackathon_id, submission_id, judge_id, criterion_id, score, remarks, is_locked, submitted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE score = VALUES(score), remarks = VALUES(remarks), is_locked = VALUES(is_locked)`,
+          [e.id, e.hackathonId, e.submissionId, e.judgeId, e.criterionId, e.score, e.remarks, e.isLocked ? 1 : 0, toSqlDate(e.submittedAt)]
+        )
+      );
+    }
+
     return recorded;
   }
 
@@ -1022,6 +2001,32 @@ class HackTrackStore {
     return this.certificates.find((c) => c.certificateCode.toUpperCase() === code.trim().toUpperCase()) || null;
   }
 
+  createCertificate({ hackathonId, userId, teamId, certificateType = 'participation', participantName, hackathonTitle }) {
+    const code = `HT-CERT-${hackathonId.toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    const cert = {
+      id: `cert-${crypto.randomBytes(4).toString('hex')}`,
+      certificateCode: code,
+      hackathonId,
+      userId,
+      teamId: teamId || null,
+      certificateType,
+      participantName,
+      hackathonTitle: hackathonTitle || 'HackTrack Hackathon',
+      issuedAt: new Date().toISOString(),
+      qrPayload: `https://hacktrack.io/verify/${code}`,
+    };
+    this.certificates.push(cert);
+    asyncDbWrite(() =>
+      pool.query(
+        `INSERT INTO certificates (id, certificate_code, hackathon_id, user_id, team_id, certificate_type, participant_name, hackathon_title, issued_at, qr_payload)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE certificate_code = VALUES(certificate_code)`,
+        [cert.id, cert.certificateCode, cert.hackathonId, cert.userId, cert.teamId, cert.certificateType, cert.participantName, cert.hackathonTitle, toSqlDate(cert.issuedAt), cert.qrPayload]
+      )
+    );
+    return cert;
+  }
+
   // --- Announcements & Notifications (FR-35 to FR-39, FR-46) ---
   getAnnouncements(hackathonId = null) {
     if (!hackathonId) return this.announcements;
@@ -1039,6 +2044,13 @@ class HackTrackStore {
       createdAt: new Date().toISOString(),
     };
     this.announcements.unshift(ann);
+    asyncDbWrite(() =>
+      pool.query(
+        `INSERT INTO announcements (id, hackathon_id, title, content, target_role, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [ann.id, ann.hackathonId, ann.title, ann.content, ann.targetRole, ann.createdBy, toSqlDate(ann.createdAt)]
+      )
+    );
     return ann;
   }
 
@@ -1068,6 +2080,13 @@ class HackTrackStore {
       createdAt: new Date().toISOString(),
     };
     this.notifications.unshift(notification);
+    asyncDbWrite(() =>
+      pool.query(
+        `INSERT INTO notifications (id, user_id, type, title, message, is_read, email_sent, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [notification.id, notification.userId, notification.type, notification.title, notification.message, 0, notification.emailStatus === 'sent' ? 1 : 0, toSqlDate(notification.createdAt)]
+      )
+    );
     return notification;
   }
 

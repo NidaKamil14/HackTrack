@@ -106,19 +106,28 @@ cd ..
 ```
 
 ### 2. Environment Configuration
-Create a `.env` file in `/server` (sample provided below):
+Create a `.env` file in `/server` (sample provided in `server/.env.example`):
 
 ```env
-PORT=5001
-CORS_ORIGIN=http://localhost:5173,http://localhost:5174
+PORT=5050
+CLIENT_ORIGIN=http://localhost:5174
 JWT_SECRET=hacktrack_super_secret_jwt_key_2026
 
-# Optional: MySQL Database Configuration
+# MySQL Database Configuration
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USER=root
-DB_PASSWORD=
+DB_PASSWORD=your_password
 DB_NAME=hacktrack_db
+DB_CONNECTION_LIMIT=10
+
+# Transactional Email Configuration
+# Providers: resend | sendgrid | console (development default) | disabled
+EMAIL_PROVIDER=console
+EMAIL_API_KEY=your_resend_or_sendgrid_key
+EMAIL_FROM="HackTrack <notifications@your-domain.com>"
+FRONTEND_URL=http://localhost:5174
+API_PUBLIC_URL=http://localhost:5050
 ```
 
 ### 3. Running the Backend Server
@@ -126,21 +135,48 @@ DB_NAME=hacktrack_db
 ```bash
 cd server
 npm start
-# Server listens on http://localhost:5001
+# Server listens on http://localhost:5050
+# Health check: http://localhost:5050/api/v1/health
 ```
 
 ### 4. Running the Frontend Application
 
 ```bash
 npm run dev
-# Vite runs on http://localhost:5173
+# Vite runs on http://localhost:5174
 ```
+
+---
+
+## 📧 Email Notifications Architecture
+
+HackTrack implements an asynchronous, resilient transactional email notification module (`server/src/notifications/`):
+
+### Supported Events & Triggers
+1. **User Registration Confirmation (`user_registered`)**: Sent to newly registered users with role and dashboard deep link.
+2. **Team Join Request Received (`join_request_received`)**: Sent to the Team Leader when a student requests to join with a Team Code.
+3. **Team Join Request Confirmation (`join_request_submitted`)**: Sent to the requesting student.
+4. **Team Join Request Decision (`join_request_approved` / `join_request_rejected`)**: Sent to requester upon leader approval/rejection.
+5. **Team Member Joined (`team_member_joined`)**: Broadcast to existing team members when a new member joins.
+6. **Project Submission Saved (`submission_received` / `submission_updated`)**: Sent to all accepted members upon project submission/update (throttled to 1 email per 10m per submission).
+7. **Judge Assignment (`judge_assigned`)**: Sent to the designated judge when assigned by an administrator.
+8. **Results & Certificate Announcement (`results_published` / `certificate_issued`)**: Sent to participants with team rank and certificate link.
+9. **Broadcast Announcements (`announcement`)**: Hackathon-scoped or platform-wide updates.
+10. **Reviewer Access Code Redeemed (`access_granted` / `reviewer_joined`)**: Notifies reviewer and hackathon organizer.
+
+### Core Security & Reliability Guarantees
+- **Non-blocking Execution**: Business operations succeed independently of provider delivery.
+- **Provider Support**: Server-side native HTTP integrations for **Resend** and **SendGrid** with zero heavy SDK dependencies, plus a dev **console** provider and in-memory test provider.
+- **Privacy & Security**: Credentials, passwords, tokens, and invite codes are never included in email templates. Dynamic content is strictly HTML-escaped.
+- **Duplicate Prevention**: Deduping keys prevent multiple sends for the same business action.
+- **Unsubscribe & Preferences**: Per-category notification preferences with HMAC-SHA256 signed one-click unsubscribe links.
+- **Automatic Retries**: Transient provider errors (429, 5xx, timeouts) retry with exponential backoff; administrators can inspect and trigger retries via `POST /api/v1/notifications/email/retry-failed`.
 
 ---
 
 ## 🧪 Automated Testing
 
-The backend includes a comprehensive, 47-test automated test suite using native `node:test` covering all SRS business rules:
+The backend includes a comprehensive, **69-test automated test suite** using native `node:test`:
 
 ```bash
 cd server
@@ -149,6 +185,7 @@ npm test
 
 ### Test Coverage Highlights
 - ✅ **Authentication & RBAC**: Register, duplicate detection, login, `/me` guard, forgot/reset password.
+- ✅ **Email Notifications (21 tests)**: Registration confirmation, join requests, approval/rejection, submission alerts, results & certificate notifications, unsubscribe HMAC verification, transient failure retry, provider failure isolation, rate limiting.
 - ✅ **Hackathon Lifecycle**: Chronological deadline validation, team size constraints, rubric definition, publishing.
 - ✅ **Team Management & Join Codes**: Leader exclusivity (BR-1), unique team codes, student join approval (BR-3), 1 team constraint (BR-2).
 - ✅ **Submissions & Deadlines**: Leader-only submission, deadline locking (BR-8), multi-link project payloads.

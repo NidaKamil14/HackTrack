@@ -29,6 +29,39 @@ const CERT_LABELS = { winner: 'Winner', runner_up: 'Runner-up', participation: '
    Every template receives { recipient, ...data } and must return plain strings
    (escaping happens in renderEmail). `cta.path` is relative to FRONTEND_URL. */
 export const TEMPLATES = {
+  user_registered: ({ user }) => ({
+    subject: 'Welcome to HackTrack — Account Confirmed',
+    heading: 'Welcome to HackTrack',
+    intro: `Welcome, ${user.fullName || 'Participant'}! Your HackTrack account is confirmed.`,
+    body: [
+      `Your account has been registered with role: ${user.roleCategory || user.role}.`,
+      'You can now browse active hackathons, create or join competition teams, and collaborate on project submissions.',
+    ],
+    cta: { label: 'Go to your dashboard', path: `/dashboard/${user.role === 'leader' ? 'leader' : user.role === 'student' ? 'student' : user.role}` },
+  }),
+
+  password_reset: ({ user, resetUrl, token }) => ({
+    subject: 'Reset your HackTrack password',
+    heading: 'Password Reset Request',
+    intro: `Hello, ${user.fullName || 'there'}. We received a request to reset your HackTrack account password.`,
+    body: [
+      'Click the button below to choose a new password for your account.',
+      'For security reasons, this password reset link is valid for 1 hour only.',
+      'If you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.',
+    ],
+    cta: { label: 'Reset Password', path: resetUrl || `/reset-password?token=${encodeURIComponent(token || '')}` },
+  }),
+
+  certificate_issued: ({ certificate, hackathon }) => ({
+    subject: `Your Certificate for ${hackathon?.title || certificate.hackathonTitle || 'HackTrack'} is ready`,
+    heading: 'Certificate Available',
+    intro: `Congratulations, ${certificate.participantName}! Your certificate has been issued.`,
+    body: [
+      `Your ${CERT_LABELS[certificate.certificateType] || 'Participation'} Certificate for ${certificate.hackathonTitle || hackathon?.title} is now ready for download and verification.`,
+    ],
+    cta: { label: 'View Certificate', path: '/dashboard/student?tab=results' },
+  }),
+
   team_created: ({ team, hackathon }) => ({
     subject: `Your team “${team.teamName}” is ready`,
     heading: 'Your team is ready',

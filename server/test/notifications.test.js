@@ -9,6 +9,7 @@ import { signUnsubscribe } from '../src/notifications/notifier.js';
 
 // Email delivery uses the in-memory provider automatically under `node --test`
 // (see notifications/config.js); no real email is ever sent from tests.
+process.env.EMAIL_PROVIDER = 'memory';
 
 let server;
 let baseUrl;
@@ -37,6 +38,7 @@ async function registerUser(role, fullName) {
     body: { email, password: 'password123', fullName, role, university: 'PCCOE' },
   });
   assert.equal(res.status, 201, `register ${role}: ${JSON.stringify(res.body)}`);
+  await settle();
   return { token: res.body.token, id: res.body.user.id, email, fullName };
 }
 
@@ -234,6 +236,7 @@ test('Email notifications for team, submission, results and admin workflows', as
 
   await t.test('missing or invalid email addresses are skipped safely', async () => {
     const noMail = await registerUser('leader', 'No Mail');
+    memoryProvider.reset();
     store.findUserById(noMail.id).email = 'not-an-email';
     await api('/api/v1/teams', { method: 'POST', token: noMail.token, body: { hackathonId: 'hack-001', teamName: 'Silent Squad' } });
     await settle();
@@ -347,6 +350,8 @@ test('templates render every event with subject, CTA and plain text', () => {
     announcement: { hackathon, announcement: { title: 'T', content: 'C' } },
     access_granted: { hackathon, role: 'judge' },
     reviewer_joined: { hackathon, role: 'screening', reviewer: { fullName: 'E F' } },
+    user_registered: { user: { fullName: 'Priya Sharma', role: 'student', roleCategory: 'Participant' } },
+    certificate_issued: { certificate: { participantName: 'Priya Sharma', certificateType: 'participation', hackathonTitle: 'CodeSprint' }, hackathon },
   };
   for (const [type, data] of Object.entries(cases)) {
     const email = renderEmail(type, { recipient, ...data }, opts);
@@ -354,5 +359,142 @@ test('templates render every event with subject, CTA and plain text', () => {
     assert.ok(email.html.includes('https://app.example'), `${type} CTA link`);
     assert.ok(email.text.includes('Hi Priya,'), `${type} plain text greeting`);
     assert.ok(!email.html.includes('<X>'), `${type} escapes HTML`);
+  }
+});
+
+test('user registration sends confirmation email to new user', async () => {
+  memoryProvider.reset();
+  const res = await api('/api/v1/auth/register', {
+    method: 'POST',
+    body: {
+      email: `welcome_${unique()}@pccoe.edu.in`,
+      password: 'password123',
+      fullName: 'Aayush Phadke',
+      role: 'student',
+      university: 'PCCOE',
+    },
+  });
+  assert.equal(res.status, 201);
+  await settle();
+
+  const mails = sentTo(res.body.user.email);
+  assert.equal(mails.length, 1);
+  assert.match(mails[0].subject, /Welcome to HackTrack/);
+  assert.ok(mails[0].text.includes('Aayush Phadke'));
+  assert.ok(mails[0].html.includes('Go to your dashboard'));
+
+  const n = store.getUserNotifications(res.body.user.id).find((x) => x.type === 'user_registered');
+  assert.ok(n);
+  assert.equal(n.emailStatus, 'sent');
+});
+
+test('certificate availability notification emails recipient', async () => {
+  const certUser = await registerUser('student', 'Cert Recipient');
+  memoryProvider.reset();
+  const cert = {
+    id: `cert-test-${unique()}`,
+    certificateCode: `HT-CERT-${unique()}`,
+    hackathonId: 'hack-001',
+    userId: certUser.id,
+    teamId: 'team-001',
+    certificateType: 'participation',
+    participantName: 'Cert Recipient',
+    hackathonTitle: 'CodeSprint 2026',
+    issuedAt: new Date().toISOString(),
+  };
+
+  const { notifyCertificateIssued } = await import('../src/notifications/notifier.js');
+  notifyCertificateIssued(cert);
+  await settle();
+
+  const mails = sentTo(certUser.email);
+  assert.equal(mails.length, 1);
+  assert.match(mails[0].subject, /Your Certificate for CodeSprint Global 2026 is ready/);
+  assert.ok(mails[0].text.includes('Cert Recipient'));
+  assert.ok(mails[0].html.includes('View Certificate'));
+});
+
+test('Resend provider: sends payload correctly and parses message id', async () => {
+  const originalFetch = global.fetch;
+  const originalProvider = process.env.EMAIL_PROVIDER;
+  const originalKey = process.env.EMAIL_API_KEY;
+
+  process.env.EMAIL_PROVIDER = 'resend';
+  process.env.EMAIL_API_KEY = 're_test_mock_123';
+
+  let capturedUrl = null;
+  let capturedHeaders = null;
+  let capturedBody = null;
+
+  global.fetch = async (url, options) => {
+    capturedUrl = url;
+    capturedHeaders = options.headers;
+    capturedBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 're-msg-12345' }),
+    };
+  };
+
+  try {
+    const { getProvider } = await import('../src/notifications/providers.js');
+    const provider = getProvider();
+    assert.equal(provider.name, 'resend');
+
+    const result = await provider.send({
+      to: 'student@example.com',
+      subject: 'Test Subject',
+      html: '<p>Hello</p>',
+      text: 'Hello',
+      headers: { 'X-Test': 'true' },
+    });
+
+    assert.equal(result.id, 're-msg-12345');
+    assert.equal(capturedUrl, 'https://api.resend.com/emails');
+    assert.equal(capturedHeaders['Authorization'], 'Bearer re_test_mock_123');
+    assert.deepEqual(capturedBody.to, ['student@example.com']);
+    assert.equal(capturedBody.subject, 'Test Subject');
+  } finally {
+    global.fetch = originalFetch;
+    process.env.EMAIL_PROVIDER = originalProvider;
+    process.env.EMAIL_API_KEY = originalKey;
+  }
+});
+
+test('Resend provider: extracts error message on HTTP 422/403 failure', async () => {
+  const originalFetch = global.fetch;
+  const originalProvider = process.env.EMAIL_PROVIDER;
+  const originalKey = process.env.EMAIL_API_KEY;
+
+  process.env.EMAIL_PROVIDER = 'resend';
+  process.env.EMAIL_API_KEY = 're_test_mock_123';
+
+  global.fetch = async () => ({
+    ok: false,
+    status: 422,
+    json: async () => ({
+      statusCode: 422,
+      name: 'validation_error',
+      message: 'The from domain is not verified',
+    }),
+  });
+
+  try {
+    const { getProvider } = await import('../src/notifications/providers.js');
+    const provider = getProvider();
+    await assert.rejects(
+      () => provider.send({ to: 'student@example.com', subject: 'Test', html: '<p>Hi</p>', text: 'Hi' }),
+      (err) => {
+        assert.equal(err.name, 'EmailDeliveryError');
+        assert.ok(err.message.includes('The from domain is not verified'));
+        assert.equal(err.transient, false);
+        return true;
+      }
+    );
+  } finally {
+    global.fetch = originalFetch;
+    process.env.EMAIL_PROVIDER = originalProvider;
+    process.env.EMAIL_API_KEY = originalKey;
   }
 });

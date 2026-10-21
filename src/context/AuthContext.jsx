@@ -92,8 +92,19 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
-  const switchDemoRole = (roleKey) => {
+  const switchDemoRole = async (roleKey) => {
     const targetDemo = DEMO_USERS.find((u) => u.role === roleKey) || DEMO_USERS[0];
+    if (backendOnline) {
+      try {
+        const data = await api.login({ email: targetDemo.email, password: targetDemo.password });
+        const safeUser = data.user;
+        localStorage.setItem('hacktrack_current_user', JSON.stringify(safeUser));
+        setUser(safeUser);
+        return safeUser;
+      } catch (err) {
+        console.warn('Backend login for demo role fallback:', err.message);
+      }
+    }
     const res = authenticateUser(targetDemo.email, targetDemo.password);
     if (res.success) {
       setUser(res.user);

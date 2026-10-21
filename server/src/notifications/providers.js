@@ -27,12 +27,27 @@ async function postJson(url, apiKey, body, providerName) {
       signal: AbortSignal.timeout(15000),
     });
   } catch (err) {
-    throw new EmailDeliveryError(`${providerName} request failed: ${err.name}`, { transient: true });
+    throw new EmailDeliveryError(`${providerName} request failed: ${err.name || err.message}`, { transient: true });
   }
   if (!response.ok) {
-    // Never echo request bodies or headers (they contain the API key / content).
+    // Extract provider error detail safely without exposing request body or secrets
+    let detail = '';
+    try {
+      const errorJson = await response.json();
+      if (errorJson) {
+        if (typeof errorJson.message === 'string') {
+          detail = `: ${errorJson.message}`;
+        } else if (Array.isArray(errorJson.errors) && errorJson.errors[0]?.message) {
+          detail = `: ${errorJson.errors[0].message}`;
+        } else if (typeof errorJson.error === 'string') {
+          detail = `: ${errorJson.error}`;
+        }
+      }
+    } catch {
+      // body wasn't JSON
+    }
     const transient = response.status === 429 || response.status >= 500;
-    throw new EmailDeliveryError(`${providerName} responded with HTTP ${response.status}`, { transient, status: response.status });
+    throw new EmailDeliveryError(`${providerName} error (HTTP ${response.status})${detail}`, { transient, status: response.status });
   }
   return response;
 }

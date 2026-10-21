@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Award, Bell, CalendarDays, Check, ClipboardCheck, Compass, Copy, FileText, Flag, FolderOpen, Gavel, KeyRound, Link2, Lock, LockOpen, Paperclip, Printer, Rocket, ShieldCheck, Trophy, Upload, UserPlus, Users, X, Mail } from 'lucide-react';
+import { Award, Bell, CalendarDays, Check, ClipboardCheck, Clock, Compass, Copy, FileText, Flag, FolderOpen, Gavel, KeyRound, Link2, Lock, LockOpen, Paperclip, Printer, Rocket, ShieldCheck, Trophy, Upload, UserPlus, Users, X, Mail } from 'lucide-react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
 import EmailActivity from '../../components/notifications/EmailActivity';
 import EventCover from '../../components/art/EventCover';
@@ -32,6 +32,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { getStoredHackathons } from '../../utils/hackathonService';
 import { getUserRegistrations, registerForHackathon } from '../../utils/registrationService';
+import api from '../../utils/api';
 import {
   getUserTeamForHackathon,
   createTeam,
@@ -212,9 +213,32 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
   // New team formation state
   const [newTeamName, setNewTeamName] = useState("");
   const [teamActionFeedback, setTeamActionFeedback] = useState(null);
+  const [teamActionLoading, setTeamActionLoading] = useState(false);
 
   // Join team state
   const [joinCode, setJoinCode] = useState("");
+
+  // Backend API teams & pending requests
+  const [apiTeamsData, setApiTeamsData] = useState({ teams: [], pendingRequests: [], loaded: false });
+
+  useEffect(() => {
+    if (!api.getToken()) return;
+    let isMounted = true;
+    api.getMyTeams()
+      .then((data) => {
+        if (isMounted && data) {
+          setApiTeamsData({
+            teams: data.teams || [],
+            pendingRequests: data.pendingRequests || [],
+            loaded: true,
+          });
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not load teams from API:', err.message);
+      });
+    return () => { isMounted = false; };
+  }, [refreshKey, userEmail]);
 
   // Combine user registration records with hackathons metadata
   const registeredHackathons = registrations.map((reg) => {
@@ -239,16 +263,81 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     registeredHackathons[0] ||
     null;
 
-  const currentTeam = activeSprint
+  // 1. Backend team from MySQL API
+  const backendTeam = useMemo(() => {
+    if (!activeSprint || !apiTeamsData.loaded) return null;
+    return apiTeamsData.teams.find(
+      (t) => t.hackathonId === activeSprint.id || t.hackathonTitle === activeSprint.title
+    );
+  }, [activeSprint, apiTeamsData]);
+
+  // 2. Pending join request for this sprint
+  const pendingJoinRequest = useMemo(() => {
+    if (!activeSprint || !apiTeamsData.loaded) return null;
+    return apiTeamsData.pendingRequests.find(
+      (p) => p.hackathonId === activeSprint.id || p.hackathonTitle === activeSprint.title
+    );
+  }, [activeSprint, apiTeamsData]);
+
+  // Local fallback
+  const localTeam = activeSprint
     ? getUserTeamForHackathon(userEmail, activeSprint.id)
     : null;
+
+  const currentTeam = useMemo(() => {
+    if (backendTeam) {
+      const activeMembers = (backendTeam.members || []).filter(
+        (m) => m.status === 'accepted' || m.role === 'leader'
+      );
+      const pendingMembers = (backendTeam.members || []).filter(
+        (m) => m.status === 'pending'
+      );
+      const leaderMember = backendTeam.members?.find((m) => m.role === 'leader');
+      return {
+        id: backendTeam.id,
+        name: backendTeam.teamName || backendTeam.name,
+        code: backendTeam.teamCode || backendTeam.code,
+        hackathon: backendTeam.hackathonTitle || activeSprint?.title,
+        hackathonId: backendTeam.hackathonId,
+        track: backendTeam.track || activeSprint?.track || 'General Track',
+        lead: leaderMember?.userName || backendTeam.lead || 'Team Leader',
+        leadEmail: leaderMember?.userEmail || backendTeam.leadEmail || '',
+        leaderId: backendTeam.leaderId,
+        rosterLocked: Boolean(backendTeam.rosterLocked),
+        members: activeMembers.map((m) => ({
+          id: m.id,
+          name: m.userName || m.name,
+          email: m.userEmail || m.email,
+          role: m.role === 'leader' ? 'Team Leader' : 'Member',
+          status: 'Active',
+          university: m.userUniversity || '',
+        })),
+        pendingRequests: pendingMembers.map((m) => ({
+          id: m.id,
+          name: m.userName || m.name,
+          email: m.userEmail || m.email,
+          university: m.userUniversity || '',
+          requestedAt: m.requestedAt,
+          status: 'pending',
+        })),
+        capacity: `${activeMembers.length} / 4 Members`,
+        isOpen: !backendTeam.rosterLocked,
+      };
+    }
+    return localTeam;
+  }, [backendTeam, localTeam, activeSprint]);
 
   // Team-based submission resolution
   const teamSubmission = (currentTeam && activeSprint)
     ? getSubmissionByTeamAndHackathon(currentTeam.code, activeSprint.id)
     : null;
 
-  const isLeader = Boolean(currentTeam && user && isUserTeamLeader(currentTeam, user));
+  const isLeader = Boolean(
+    currentTeam && user && (
+      (backendTeam && (backendTeam.leaderId === user.id || currentTeam.leadEmail?.toLowerCase() === userEmail)) ||
+      isUserTeamLeader(currentTeam, user)
+    )
+  );
   const isFinalized = teamSubmission?.status === "finalized";
 
   // Evaluation & Results resolution
@@ -331,44 +420,93 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     setTimeout(() => setTeamActionFeedback(null), 5000);
   };
 
-  const handleJoinTeam = (e) => {
+  const handleJoinTeam = async (e) => {
     e.preventDefault();
     const clean = joinCode.trim().toUpperCase();
     if (!clean || !user) return;
 
-    const res = joinTeamWithCode(clean, user);
-    if (res.success) {
-      setTeamActionFeedback({
-        type: "success",
-        text: `✓ Joined team "${res.team.name}" (${res.team.hackathon})!`
-      });
-      setJoinCode("");
-      setSelectedHackathonId(res.team.hackathonId);
-      setRefreshKey((k) => k + 1);
-    } else {
+    setTeamActionLoading(true);
+    try {
+      if (api.getToken()) {
+        const res = await api.joinTeam(clean);
+        setTeamActionFeedback({
+          type: "success",
+          text: `✓ Join request submitted successfully! Awaiting approval from the Team Leader.`,
+        });
+        setJoinCode("");
+        setRefreshKey((k) => k + 1);
+      } else {
+        const res = await joinTeamWithCode(clean, user);
+        if (res.success) {
+          setTeamActionFeedback({
+            type: "success",
+            text: res.message || `✓ Join request submitted for "${res.team?.name || clean}"!`,
+          });
+          setJoinCode("");
+          setRefreshKey((k) => k + 1);
+        } else {
+          setTeamActionFeedback({
+            type: "error",
+            text: res.error,
+          });
+        }
+      }
+    } catch (err) {
       setTeamActionFeedback({
         type: "error",
-        text: res.error
+        text: err.data?.message || err.message || "Failed to submit join request.",
       });
+    } finally {
+      setTeamActionLoading(false);
+      setTimeout(() => setTeamActionFeedback(null), 5000);
     }
-    setTimeout(() => setTeamActionFeedback(null), 5000);
   };
 
-  const handleToggleRosterLock = () => {
+  const handleRespondRequest = async (requestId, action) => {
     if (!currentTeam || !user || !isLeader) return;
+    setTeamActionLoading(true);
+    try {
+      if (api.getToken() && currentTeam.id) {
+        await api.respondToJoinRequest(currentTeam.id, requestId, action);
+      } else {
+        respondToTeamJoinRequest(currentTeam.code, requestId, action, user);
+      }
+      setTeamActionFeedback({
+        type: "success",
+        text: `✓ Join request ${action === 'accept' ? 'accepted' : 'rejected'} successfully. Roster updated.`,
+      });
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      setTeamActionFeedback({
+        type: "error",
+        text: err.data?.message || err.message || `Failed to ${action} join request.`,
+      });
+    } finally {
+      setTeamActionLoading(false);
+      setTimeout(() => setTeamActionFeedback(null), 5000);
+    }
+  };
 
-    if (currentTeam.rosterLocked) {
-      const res = unlockTeamRoster(currentTeam.code, user);
-      if (res.success) {
-        setTeamActionFeedback({ type: "success", text: "✓ Team roster unlocked. Teammates can now join." });
-        setRefreshKey((k) => k + 1);
+  const handleToggleRosterLock = async () => {
+    if (!currentTeam || !user || !isLeader) return;
+    try {
+      const willLock = !currentTeam.rosterLocked;
+      if (api.getToken() && currentTeam.id) {
+        await api.toggleTeamRosterLock(currentTeam.id, willLock);
       }
-    } else {
-      const res = lockTeamRoster(currentTeam.code, user);
-      if (res.success) {
-        setTeamActionFeedback({ type: "success", text: "✓ Team roster locked! No further members may join." });
-        setRefreshKey((k) => k + 1);
-      }
+      if (willLock) lockTeamRoster(currentTeam.code, user);
+      else unlockTeamRoster(currentTeam.code, user);
+
+      setTeamActionFeedback({
+        type: "success",
+        text: willLock ? "✓ Team roster locked! No further members may join." : "✓ Team roster unlocked. Teammates can now join.",
+      });
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      setTeamActionFeedback({
+        type: "error",
+        text: err.data?.message || err.message || "Failed to update roster lock state.",
+      });
     }
     setTimeout(() => setTeamActionFeedback(null), 4000);
   };
@@ -996,11 +1134,13 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                   ) : (
                     <div className="space-y-3 text-center">
                       <p className="text-sm text-fg-muted">
-                        No team formed for {activeSprint?.title || "this hackathon"}.
+                        {pendingJoinRequest
+                          ? `Your request to join ${pendingJoinRequest.teamName} is pending approval from the Team Leader.`
+                          : `No team formed for ${activeSprint?.title || "this hackathon"}.`}
                       </p>
                       <Button size="sm" onClick={() => setActiveTab("roster")}>
-                        <UserPlus aria-hidden="true" />
-                        Form or join a team
+                        {pendingJoinRequest ? <Clock aria-hidden="true" /> : <UserPlus aria-hidden="true" />}
+                        {pendingJoinRequest ? "View pending request" : "Form or join a team"}
                       </Button>
                     </div>
                   )}
@@ -1095,6 +1235,80 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                       </div>
                     </div>
 
+                    {/* Leader Review: Pending Join Requests */}
+                    {isLeader && currentTeam.pendingRequests && currentTeam.pendingRequests.length > 0 && (
+                      <div className="space-y-3 rounded-xl border border-warning/30 bg-warning/5 p-4 sm:p-5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-4 w-4 text-warning" aria-hidden="true" />
+                            <h3 className="text-sm font-semibold text-fg">
+                              Pending join requests
+                            </h3>
+                          </div>
+                          <Badge tone="warning">
+                            {currentTeam.pendingRequests.length} awaiting approval
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-fg-subtle">
+                          Participants who entered your team invite code. Accept to add them as active members and update the roster, or reject the request.
+                        </p>
+                        {currentTeam.rosterLocked && (
+                          <Alert tone="warning" className="text-xs">
+                            Team roster is locked. Unlock the roster above to accept new applicants into the team.
+                          </Alert>
+                        )}
+                        <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
+                          {currentTeam.pendingRequests.map((req) => (
+                            <li key={req.id} className="flex flex-wrap items-center justify-between gap-3 p-3 sm:p-4">
+                              <div className="flex min-w-0 items-center gap-3">
+                                <span
+                                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-raised text-xs font-semibold ring-1 ring-inset ring-line-strong text-fg-muted"
+                                  aria-hidden="true"
+                                >
+                                  {initialsOf(req.name)}
+                                </span>
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-sm font-semibold text-fg">{req.name}</span>
+                                    <Badge tone="warning">Pending Request</Badge>
+                                  </div>
+                                  <p className="mt-0.5 truncate font-mono text-xs text-fg-subtle">
+                                    {req.email} {req.university && `· ${req.university}`}
+                                  </p>
+                                  {req.requestedAt && (
+                                    <p className="mt-0.5 text-[11px] text-fg-subtle">
+                                      Requested: {new Date(req.requestedAt).toLocaleString()}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  disabled={teamActionLoading || currentTeam.rosterLocked}
+                                  onClick={() => handleRespondRequest(req.id, 'accept')}
+                                  title={currentTeam.rosterLocked ? "Unlock roster to accept" : "Accept applicant into roster"}
+                                >
+                                  <Check aria-hidden="true" />
+                                  Accept
+                                </Button>
+                                <Button
+                                  variant="danger-ghost"
+                                  size="sm"
+                                  disabled={teamActionLoading}
+                                  onClick={() => handleRespondRequest(req.id, 'reject')}
+                                >
+                                  <X aria-hidden="true" />
+                                  Reject
+                                </Button>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
                     <div className="space-y-3">
                       <h3 className="text-sm font-semibold text-fg">
                         Active members <span className="font-normal tabular-nums text-fg-subtle">({currentTeam.capacity})</span>
@@ -1148,6 +1362,34 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                       </ul>
                     </div>
                   </>
+                ) : pendingJoinRequest ? (
+                  <div className="rounded-xl border border-warning/30 bg-warning/5 p-5 space-y-4">
+                    <div className="flex items-center gap-3">
+                      <IconTile icon={Clock} tone="warning" />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-base font-semibold text-fg">
+                            Join request pending approval
+                          </h3>
+                          <Badge tone="warning" dot>Pending leader review</Badge>
+                        </div>
+                        <p className="mt-1 text-sm text-fg-muted">
+                          You requested to join <span className="font-semibold text-fg">{pendingJoinRequest.teamName}</span> (<code className="font-mono text-accent-text">{pendingJoinRequest.teamCode}</code>).
+                        </p>
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-line bg-surface p-4 text-xs text-fg-subtle space-y-1.5">
+                      <p>
+                        <span className="font-medium text-fg">Requested on:</span> {new Date(pendingJoinRequest.requestedAt).toLocaleString()}
+                      </p>
+                      <p>
+                        <span className="font-medium text-fg">Membership status:</span> Pending Team Leader approval. You are not yet an active member.
+                      </p>
+                      <p className="text-accent-text font-medium pt-1">
+                        An email notification will be sent to your registered address once the Team Leader accepts or rejects your request.
+                      </p>
+                    </div>
+                  </div>
                 ) : (
                   <EmptyState
                     illustration="team"

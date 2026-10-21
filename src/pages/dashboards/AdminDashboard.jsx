@@ -1,6 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
+  AlertCircle,
   Award,
   CalendarRange,
   Check,
@@ -8,15 +9,21 @@ import {
   Copy,
   ExternalLink,
   Layers,
+  Loader2,
+  MoreVertical,
   Package,
   Plus,
+  RefreshCw,
   Scale,
   ScanSearch,
+  Search,
   ShieldCheck,
   Trophy,
+  UserCheck,
   UserCog,
   Users,
   UsersRound,
+  UserX,
 } from 'lucide-react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
 import EventCover from '../../components/art/EventCover';
@@ -29,7 +36,7 @@ import {
   updateHackathon,
   getHackathonCommittee
 } from '../../utils/hackathonService';
-import { getUsers, updateUserRole } from '../../utils/auth';
+import api from '../../utils/api';
 import { getAllTeams } from '../../utils/teamService';
 import { getSubmissions } from '../../utils/submissionService';
 import {
@@ -194,10 +201,86 @@ export default function AdminDashboard() {
     return getStoredHackathons();
   }, [refreshKey]);
 
-  const usersList = useMemo(() => {
-    if (refreshKey) { /* trigger */ }
-    return getUsers();
-  }, [refreshKey]);
+  const [usersList, setUsersList] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [usersError, setUsersError] = useState(null);
+  const [userSearch, setUserSearch] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState('all');
+  const [userStatusFilter, setUserStatusFilter] = useState('all');
+  const [activeMenuUserId, setActiveMenuUserId] = useState(null);
+
+  // Deactivate confirmation dialog state
+  const [deactivateConfirmUser, setDeactivateConfirmUser] = useState(null);
+  const [deactivating, setDeactivating] = useState(false);
+  const [deactivateError, setDeactivateError] = useState(null);
+
+  // Reactivate confirmation dialog state
+  const [reactivateConfirmUser, setReactivateConfirmUser] = useState(null);
+  const [reactivating, setReactivating] = useState(false);
+  const [reactivateError, setReactivateError] = useState(null);
+
+  // Modal: Add User (Admin sanctioned)
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [newUserForm, setNewUserForm] = useState({
+    fullName: '',
+    email: '',
+    password: '',
+    role: 'student',
+    university: 'PCCOE Pune',
+    memberId: '',
+  });
+  const [addUserSubmitting, setAddUserSubmitting] = useState(false);
+  const [addUserError, setAddUserError] = useState(null);
+
+  // Fetch actual user records directly from MySQL via backend API
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchUsers() {
+      setLoadingUsers(true);
+      setUsersError(null);
+      try {
+        const data = await api.getUsers({
+          role: userRoleFilter,
+          status: userStatusFilter,
+          search: userSearch,
+        });
+        const list = Array.isArray(data) ? data : (data?.users || []);
+        if (isMounted) {
+          setUsersList(list);
+          setLoadingUsers(false);
+        }
+      } catch (err) {
+        console.error('Failed to retrieve users from MySQL API:', err);
+        if (isMounted) {
+          setUsersError(err.message || 'Failed to load user records from MySQL database.');
+          setLoadingUsers(false);
+        }
+      }
+    }
+    fetchUsers();
+    return () => {
+      isMounted = false;
+    };
+  }, [refreshKey, userRoleFilter, userStatusFilter, userSearch]);
+
+  // Click outside or Escape to close row action menu
+  useEffect(() => {
+    if (!activeMenuUserId) return;
+    const handleClickOutside = (e) => {
+      if (!e.target.closest('[role="menu"]') && !e.target.closest('button[aria-label^="Actions for"]')) {
+        setActiveMenuUserId(null);
+      }
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setActiveMenuUserId(null);
+    };
+    document.addEventListener('click', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [activeMenuUserId]);
 
   const allTeams = useMemo(() => {
     if (refreshKey) { /* trigger */ }
@@ -305,12 +388,94 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleRoleChange = (email, newRole) => {
-    const res = updateUserRole(email, newRole);
-    if (res.success) {
-      setAdminNotice(`✓ Updated role for ${email} to ${newRole.toUpperCase()}.`);
+  const handleRoleChange = async (userRecord, newRole) => {
+    const idOrEmail = userRecord.id || userRecord.email;
+    try {
+      await api.updateUserRole(idOrEmail, newRole);
+      setAdminNotice(`✓ Updated role for ${userRecord.fullName || userRecord.email} to ${newRole.toUpperCase()}.`);
       setRefreshKey((k) => k + 1);
       setTimeout(() => setAdminNotice(null), 3500);
+    } catch (err) {
+      console.error('Failed to update role in MySQL:', err);
+      setAdminNotice(`❌ Error updating role: ${err.message}`);
+      setTimeout(() => setAdminNotice(null), 4000);
+    }
+  };
+
+  const isCurrentAdminUser = (target) => {
+    if (!user || !target) return false;
+    return user.id === target.id || (user.email && target.email && user.email.toLowerCase() === target.email.toLowerCase());
+  };
+
+  const handleConfirmDeactivate = async () => {
+    if (!deactivateConfirmUser) return;
+    setDeactivating(true);
+    setDeactivateError(null);
+    try {
+      const idOrEmail = deactivateConfirmUser.id || deactivateConfirmUser.email;
+      await api.deactivateUser(idOrEmail);
+      setAdminNotice(`✓ Successfully deactivated ${deactivateConfirmUser.fullName} (${deactivateConfirmUser.email}).`);
+      setDeactivateConfirmUser(null);
+      setRefreshKey((k) => k + 1);
+      setTimeout(() => setAdminNotice(null), 3500);
+    } catch (err) {
+      console.error('Failed to deactivate user:', err);
+      setDeactivateError(err.message || 'Failed to deactivate user.');
+    } finally {
+      setDeactivating(false);
+    }
+  };
+
+  const handleConfirmReactivate = async () => {
+    if (!reactivateConfirmUser) return;
+    setReactivating(true);
+    setReactivateError(null);
+    try {
+      const idOrEmail = reactivateConfirmUser.id || reactivateConfirmUser.email;
+      await api.reactivateUser(idOrEmail);
+      setAdminNotice(`✓ Successfully reactivated ${reactivateConfirmUser.fullName} (${reactivateConfirmUser.email}).`);
+      setReactivateConfirmUser(null);
+      setRefreshKey((k) => k + 1);
+      setTimeout(() => setAdminNotice(null), 3500);
+    } catch (err) {
+      console.error('Failed to reactivate user:', err);
+      setReactivateError(err.message || 'Failed to reactivate user.');
+    } finally {
+      setReactivating(false);
+    }
+  };
+
+  const handleAddUserSubmit = async (e) => {
+    e.preventDefault();
+    if (!newUserForm.fullName.trim() || !newUserForm.email.trim() || !newUserForm.password) {
+      setAddUserError('Full name, email address, and password are required.');
+      return;
+    }
+    if (newUserForm.password.length < 6) {
+      setAddUserError('Password must be at least 6 characters long.');
+      return;
+    }
+    setAddUserSubmitting(true);
+    setAddUserError(null);
+    try {
+      await api.createUser(newUserForm);
+      setAdminNotice(`✓ Successfully added ${newUserForm.fullName} (${newUserForm.email}) to MySQL database.`);
+      setShowAddUserModal(false);
+      setNewUserForm({
+        fullName: '',
+        email: '',
+        password: '',
+        role: 'student',
+        university: 'PCCOE Pune',
+        memberId: '',
+      });
+      setRefreshKey((k) => k + 1);
+      setTimeout(() => setAdminNotice(null), 3500);
+    } catch (err) {
+      console.error('Failed to create user in MySQL:', err);
+      setAddUserError(err.message || 'Failed to create user.');
+    } finally {
+      setAddUserSubmitting(false);
     }
   };
 
@@ -868,19 +1033,121 @@ export default function AdminDashboard() {
 
             {/* USERS & ROLES */}
             <TabPanel value="users" activeValue={activeTab} idPrefix="admin" className="space-y-4 focus:outline-none">
-              <IconSectionHeader
-                icon={UserCog}
-                title="Users & role assignments"
-                description="Assign participant, committee, judge, organizer, mentor and admin roles. Changes apply immediately."
-                actions={<Badge>{usersList.length} users</Badge>}
-              />
-              {usersList.length === 0 ? (
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <IconSectionHeader
+                  icon={UserCog}
+                  title="Users & role assignments"
+                  description="Live MySQL database users. Assign participant, committee, judge, organizer, mentor and admin roles."
+                  actions={
+                    <div className="flex items-center gap-2">
+                      <Badge>{usersList.length} users</Badge>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setRefreshKey((k) => k + 1)}
+                        title="Refresh from MySQL"
+                        aria-label="Refresh user list from database"
+                      >
+                        <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                    </div>
+                  }
+                />
+                <Button onClick={() => setShowAddUserModal(true)} className="sm:self-start">
+                  <Plus className="h-4 w-4" aria-hidden="true" />
+                  Add User
+                </Button>
+              </div>
+
+              {/* Filters toolbar */}
+              <div className="flex flex-col gap-3 rounded-xl border border-line bg-raised/30 p-3 sm:flex-row sm:items-center">
+                <div className="relative flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-muted" aria-hidden="true" />
+                  <Input
+                    type="search"
+                    placeholder="Search users by name, email, or member ID..."
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    className="pl-9"
+                    aria-label="Search users"
+                  />
+                </div>
+                <div className="w-full sm:w-52">
+                  <Select
+                    value={userRoleFilter}
+                    onChange={(e) => setUserRoleFilter(e.target.value)}
+                    aria-label="Filter by role"
+                  >
+                    <option value="all">All Roles</option>
+                    {ROLE_OPTIONS.map((r) => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="w-full sm:w-48">
+                  <Select
+                    value={userStatusFilter}
+                    onChange={(e) => setUserStatusFilter(e.target.value)}
+                    aria-label="Filter by status"
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="active">Active Users Only</option>
+                    <option value="inactive">Inactive Users Only</option>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Error state */}
+              {usersError && (
+                <Alert tone="danger" className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="h-5 w-5 shrink-0" aria-hidden="true" />
+                    <span>{usersError}</span>
+                  </div>
+                  <Button size="sm" variant="secondary" onClick={() => setRefreshKey((k) => k + 1)}>
+                    Retry
+                  </Button>
+                </Alert>
+              )}
+
+              {/* Loading state */}
+              {loadingUsers ? (
+                <Card>
+                  <div className="flex flex-col items-center justify-center p-12 text-center text-fg-muted space-y-3">
+                    <Loader2 className="h-6 w-6 animate-spin text-accent" aria-hidden="true" />
+                    <p className="text-sm font-medium">Loading user records from MySQL database...</p>
+                  </div>
+                </Card>
+              ) : usersList.length === 0 ? (
                 <Card>
                   <EmptyState
                     illustration="team"
                     icon={Users}
-                    title="No registered users"
-                    description="Users appear here after they sign up. You can then assign their roles."
+                    title="No registered users found"
+                    description={
+                      userSearch || userRoleFilter !== 'all' || userStatusFilter !== 'all'
+                        ? "No users match your search and filter criteria. Try clearing filters or search terms."
+                        : "Users appear here after they sign up or are created. You can then assign and update their roles."
+                    }
+                    action={
+                      (userSearch || userRoleFilter !== 'all' || userStatusFilter !== 'all') ? (
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            setUserSearch('');
+                            setUserRoleFilter('all');
+                            setUserStatusFilter('all');
+                          }}
+                        >
+                          Clear Filters
+                        </Button>
+                      ) : (
+                        <Button onClick={() => setShowAddUserModal(true)}>
+                          <Plus className="h-4 w-4" aria-hidden="true" />
+                          Add First User
+                        </Button>
+                      )
+                    }
                   />
                 </Card>
               ) : (
@@ -891,34 +1158,114 @@ export default function AdminDashboard() {
                         <th scope="col" className={tableClasses.th}>Name</th>
                         <th scope="col" className={tableClasses.th}>Email</th>
                         <th scope="col" className={tableClasses.th}>Current role</th>
+                        <th scope="col" className={tableClasses.th}>Status</th>
                         <th scope="col" className={tableClasses.th}>Organization</th>
-                        <th scope="col" className={cn(tableClasses.th, 'text-right')}>Reassign role</th>
+                        <th scope="col" className={tableClasses.th}>Reassign role</th>
+                        <th scope="col" className={cn(tableClasses.th, 'text-right')}>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {usersList.map((u, i) => (
-                        <tr key={i} className={tableClasses.tr}>
-                          <td className={cn(tableClasses.td, 'font-medium text-fg')}>{u.fullName}</td>
-                          <td className={cn(tableClasses.td, 'font-mono text-xs')}>{u.email}</td>
-                          <td className={tableClasses.td}>
-                            <Badge tone={ROLE_TONES[u.role] || 'neutral'} dot>{u.roleCategory || u.role}</Badge>
-                          </td>
-                          <td className={tableClasses.td}>{u.university}</td>
-                          <td className={cn(tableClasses.td, 'text-right')}>
-                            <div className="ml-auto w-52">
-                              <Select
-                                value={u.role}
-                                onChange={(e) => handleRoleChange(u.email, e.target.value)}
-                                aria-label={`Role for ${u.fullName || u.email}`}
-                              >
-                                {ROLE_OPTIONS.map((r) => (
-                                  <option key={r.value} value={r.value}>{r.label}</option>
-                                ))}
-                              </Select>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                      {usersList.map((u) => {
+                        const userRowKey = u.id || u.email;
+                        const isMenuOpen = activeMenuUserId === userRowKey;
+                        const isCurrentAdmin = isCurrentAdminUser(u);
+
+                        return (
+                          <tr key={userRowKey} className={cn(tableClasses.tr, !u.isActive && 'opacity-65 bg-raised/20')}>
+                            <td className={cn(tableClasses.td, 'font-medium text-fg')}>
+                              <div className="flex flex-col">
+                                <span className="flex items-center gap-1.5">
+                                  {u.fullName}
+                                  {isCurrentAdmin && (
+                                    <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-text">You</span>
+                                  )}
+                                </span>
+                                {u.memberId && (
+                                  <span className="font-mono text-[11px] text-fg-muted">{u.memberId}</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className={cn(tableClasses.td, 'font-mono text-xs')}>{u.email}</td>
+                            <td className={tableClasses.td}>
+                              <Badge tone={ROLE_TONES[u.role] || 'neutral'} dot>{u.roleCategory || u.role}</Badge>
+                            </td>
+                            <td className={tableClasses.td}>
+                              <Badge tone={u.isActive ? 'success' : 'danger'} dot>
+                                {u.isActive ? 'Active' : 'Inactive'}
+                              </Badge>
+                            </td>
+                            <td className={tableClasses.td}>{u.university}</td>
+                            <td className={tableClasses.td}>
+                              <div className="w-48">
+                                <Select
+                                  value={u.role}
+                                  onChange={(e) => handleRoleChange(u, e.target.value)}
+                                  disabled={!u.isActive}
+                                  aria-label={`Role for ${u.fullName || u.email}`}
+                                >
+                                  {ROLE_OPTIONS.map((r) => (
+                                    <option key={r.value} value={r.value}>{r.label}</option>
+                                  ))}
+                                </Select>
+                              </div>
+                            </td>
+                            <td className={cn(tableClasses.td, 'text-right')}>
+                              <div className="relative inline-block text-left">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setActiveMenuUserId(isMenuOpen ? null : userRowKey)}
+                                  aria-label={`Actions for ${u.fullName}`}
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <MoreVertical className="h-4 w-4" aria-hidden="true" />
+                                </Button>
+
+                                {isMenuOpen && (
+                                  <div
+                                    className="absolute right-0 z-50 mt-1 w-44 rounded-lg border border-line bg-raised p-1 shadow-lg ring-1 ring-black/10 focus:outline-none"
+                                    role="menu"
+                                  >
+                                    {u.isActive ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setActiveMenuUserId(null);
+                                          setDeactivateConfirmUser(u);
+                                        }}
+                                        disabled={isCurrentAdmin}
+                                        className={cn(
+                                          'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs font-medium transition-colors',
+                                          isCurrentAdmin
+                                            ? 'cursor-not-allowed text-fg-subtle opacity-50'
+                                            : 'text-danger hover:bg-danger/10'
+                                        )}
+                                        role="menuitem"
+                                      >
+                                        <UserX className="h-3.5 w-3.5" aria-hidden="true" />
+                                        {isCurrentAdmin ? 'Cannot deactivate self' : 'Deactivate User'}
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setActiveMenuUserId(null);
+                                          setReactivateConfirmUser(u);
+                                        }}
+                                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs font-medium text-success hover:bg-success/10 transition-colors"
+                                        role="menuitem"
+                                      >
+                                        <UserCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                                        Reactivate User
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </TableContainer>
@@ -1131,6 +1478,241 @@ export default function AdminDashboard() {
                 <Button type="submit">Save configuration</Button>
               </div>
             </form>
+          )}
+        </Dialog>
+
+        {/* DIALOG: ADD NEW USER (MySQL) */}
+        <Dialog
+          open={showAddUserModal}
+          onClose={() => setShowAddUserModal(false)}
+          title="Add New User"
+          description="Register a new user directly in the MySQL database."
+        >
+          <form onSubmit={handleAddUserSubmit} className="space-y-4">
+            {addUserError && (
+              <Alert tone="danger">
+                {addUserError}
+              </Alert>
+            )}
+
+            <Field label="Full name" required>
+              <Input
+                type="text"
+                value={newUserForm.fullName}
+                onChange={(e) => setNewUserForm({ ...newUserForm, fullName: e.target.value })}
+                placeholder="e.g. John Doe"
+                required
+              />
+            </Field>
+
+            <Field label="Email address" required>
+              <Input
+                type="email"
+                value={newUserForm.email}
+                onChange={(e) => setNewUserForm({ ...newUserForm, email: e.target.value })}
+                placeholder="user@pccoe.edu.in"
+                required
+              />
+            </Field>
+
+            <Field label="Password" required hint="At least 6 characters">
+              <Input
+                type="password"
+                value={newUserForm.password}
+                onChange={(e) => setNewUserForm({ ...newUserForm, password: e.target.value })}
+                placeholder="••••••••"
+                required
+              />
+            </Field>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Assign initial role">
+                <Select
+                  value={newUserForm.role}
+                  onChange={(e) => setNewUserForm({ ...newUserForm, role: e.target.value })}
+                >
+                  {ROLE_OPTIONS.map((r) => (
+                    <option key={r.value} value={r.value}>{r.label}</option>
+                  ))}
+                </Select>
+              </Field>
+
+              <Field label="Member / Student ID" hint="Optional identifier">
+                <Input
+                  type="text"
+                  value={newUserForm.memberId}
+                  onChange={(e) => setNewUserForm({ ...newUserForm, memberId: e.target.value })}
+                  placeholder="e.g. ID-12345"
+                />
+              </Field>
+            </div>
+
+            <Field label="Organization / University">
+              <Input
+                type="text"
+                value={newUserForm.university}
+                onChange={(e) => setNewUserForm({ ...newUserForm, university: e.target.value })}
+                placeholder="PCCOE Pune"
+              />
+            </Field>
+
+            <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+              <Button variant="ghost" onClick={() => setShowAddUserModal(false)}>Cancel</Button>
+              <Button type="submit" disabled={addUserSubmitting}>
+                {addUserSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    Saving...
+                  </>
+                ) : (
+                  'Create User'
+                )}
+              </Button>
+            </div>
+          </form>
+        </Dialog>
+        {/* DIALOG: DEACTIVATE USER CONFIRMATION */}
+        <Dialog
+          open={Boolean(deactivateConfirmUser)}
+          onClose={() => {
+            if (!deactivating) {
+              setDeactivateConfirmUser(null);
+              setDeactivateError(null);
+            }
+          }}
+          title="Deactivate User"
+          description="Confirm account deactivation"
+        >
+          {deactivateConfirmUser && (
+            <div className="space-y-4">
+              {deactivateError && (
+                <Alert tone="danger">{deactivateError}</Alert>
+              )}
+
+              <div className="rounded-lg border border-line bg-raised/50 p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs uppercase tracking-wider text-fg-subtle font-medium">Target User</span>
+                  <Badge tone={ROLE_TONES[deactivateConfirmUser.role] || 'neutral'}>
+                    {deactivateConfirmUser.roleCategory || deactivateConfirmUser.role}
+                  </Badge>
+                </div>
+                <p className="font-semibold text-fg text-base">{deactivateConfirmUser.fullName}</p>
+                <p className="font-mono text-xs text-fg-muted">{deactivateConfirmUser.email}</p>
+                {deactivateConfirmUser.university && (
+                  <p className="text-xs text-fg-subtle">{deactivateConfirmUser.university}</p>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-danger/20 bg-danger/10 p-3.5 text-xs text-fg space-y-1">
+                <p className="font-semibold text-danger flex items-center gap-1.5">
+                  <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  Deactivation Impact:
+                </p>
+                <ul className="list-disc list-inside text-fg-muted space-y-0.5 pt-1">
+                  <li>This user will immediately be barred from signing in.</li>
+                  <li>Active session tokens will be denied access to protected endpoints.</li>
+                  <li>Historical team memberships, submissions, and scores remain safely preserved.</li>
+                </ul>
+              </div>
+
+              <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setDeactivateConfirmUser(null);
+                    setDeactivateError(null);
+                  }}
+                  disabled={deactivating}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleConfirmDeactivate}
+                  disabled={deactivating}
+                  className="bg-danger hover:bg-danger/90 text-white"
+                >
+                  {deactivating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-1.5" aria-hidden="true" />
+                      Deactivating...
+                    </>
+                  ) : (
+                    'Deactivate User'
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+        </Dialog>
+
+        {/* DIALOG: REACTIVATE USER CONFIRMATION */}
+        <Dialog
+          open={Boolean(reactivateConfirmUser)}
+          onClose={() => {
+            if (!reactivating) {
+              setReactivateConfirmUser(null);
+              setReactivateError(null);
+            }
+          }}
+          title="Reactivate User"
+          description="Restore account access"
+        >
+          {reactivateConfirmUser && (
+            <div className="space-y-4">
+              {reactivateError && (
+                <Alert tone="danger">{reactivateError}</Alert>
+              )}
+
+              <div className="rounded-lg border border-line bg-raised/50 p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs uppercase tracking-wider text-fg-subtle font-medium">Target User</span>
+                  <Badge tone={ROLE_TONES[reactivateConfirmUser.role] || 'neutral'}>
+                    {reactivateConfirmUser.roleCategory || reactivateConfirmUser.role}
+                  </Badge>
+                </div>
+                <p className="font-semibold text-fg text-base">{reactivateConfirmUser.fullName}</p>
+                <p className="font-mono text-xs text-fg-muted">{reactivateConfirmUser.email}</p>
+                {reactivateConfirmUser.university && (
+                  <p className="text-xs text-fg-subtle">{reactivateConfirmUser.university}</p>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-success/20 bg-success/10 p-3.5 text-xs text-fg space-y-1">
+                <p className="font-semibold text-success flex items-center gap-1.5">
+                  <Check className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  Reactivation Impact:
+                </p>
+                <p className="text-fg-muted pt-1">
+                  Full account access will be restored immediately. The user will be able to sign in with their existing credentials and access their assigned roles and teams.
+                </p>
+              </div>
+
+              <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setReactivateConfirmUser(null);
+                    setReactivateError(null);
+                  }}
+                  disabled={reactivating}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleConfirmReactivate}
+                  disabled={reactivating}
+                >
+                  {reactivating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-1.5" aria-hidden="true" />
+                      Reactivating...
+                    </>
+                  ) : (
+                    'Reactivate User'
+                  )}
+                </Button>
+              </div>
+            </div>
           )}
         </Dialog>
       </div>

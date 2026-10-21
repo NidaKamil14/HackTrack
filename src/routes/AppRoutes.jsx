@@ -11,6 +11,7 @@ const BrowseHackathons = lazy(() => import('../pages/BrowseHackathons'));
 const HackathonDetail = lazy(() => import('../pages/HackathonDetail'));
 const Login = lazy(() => import('../pages/Login'));
 const Register = lazy(() => import('../pages/Register'));
+const ResetPassword = lazy(() => import('../pages/ResetPassword'));
 const NotFound = lazy(() => import('../pages/NotFound'));
 
 // Role Dashboards
@@ -38,6 +39,7 @@ export default function AppRoutes() {
         <Route path="/hackathons/:id" element={<HackathonDetail />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="*" element={<NotFound />} />
       </Route>
 

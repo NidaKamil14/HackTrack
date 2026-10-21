@@ -4,6 +4,7 @@ import { Badge, Button, Dialog, Input } from './ui';
 import { useAuth } from '../context/AuthContext';
 import { getTeamByCode, joinTeamWithCode } from '../utils/teamService';
 import { isUserRegistered, registerForHackathon } from '../utils/registrationService';
+import api from '../utils/api';
 
 export default function TeamCodeModal({
   isOpen,
@@ -45,57 +46,57 @@ export default function TeamCodeModal({
     setJoinError(null);
   };
 
-  const handleConfirmJoin = () => {
+  const handleConfirmJoin = async () => {
     setJoinError(null);
 
     // 1. Require authentication
     if (!isAuthenticated || !user) {
       setJoinError({
         type: "auth",
-        text: "You must be logged in to join a team roster."
+        text: "You must be logged in to submit a join request."
       });
       return;
     }
 
-    // 2. Check if registered for this team's hackathon
-    const registered = isUserRegistered(user.email, result.hackathonId);
-    if (!registered) {
+    // 2. Check if registered for this team's hackathon (if known)
+    if (result?.hackathonId && !isUserRegistered(user.email, result.hackathonId)) {
       setJoinError({
         type: "registration",
         hackathonId: result.hackathonId,
         hackathonTitle: result.hackathon,
-        text: `You must register for "${result.hackathon}" before joining this team roster.`
+        text: `You must register for "${result.hackathon}" before requesting to join this team.`
       });
       return;
     }
 
-    // 3. Join team
-    const res = joinTeamWithCode(code, user);
-    if (res.success) {
-      setResult(res.team);
-      setJoinSuccess(true);
-    } else {
+    // 3. Submit join request through backend API (or fallback)
+    try {
+      if (api.getToken()) {
+        await api.joinTeam(code.trim().toUpperCase());
+        setJoinSuccess(true);
+      } else {
+        const res = await joinTeamWithCode(code, user);
+        if (res.success) {
+          setJoinSuccess(true);
+        } else {
+          setJoinError({
+            type: "error",
+            text: res.error || "Failed to submit join request."
+          });
+        }
+      }
+    } catch (err) {
       setJoinError({
         type: "error",
-        text: res.error || "Failed to join team."
+        text: err.data?.message || err.message || "Failed to submit join request."
       });
     }
   };
 
-  const handleRegisterAndJoin = () => {
+  const handleRegisterAndJoin = async () => {
     if (!user || !result) return;
     registerForHackathon(user.email, result.hackathonId);
-    const res = joinTeamWithCode(code, user);
-    if (res.success) {
-      setResult(res.team);
-      setJoinSuccess(true);
-      setJoinError(null);
-    } else {
-      setJoinError({
-        type: "error",
-        text: res.error
-      });
-    }
+    await handleConfirmJoin();
   };
 
   const memberNames = result?.members
@@ -175,12 +176,12 @@ export default function TeamCodeModal({
 
           {joinSuccess ? (
             <p role="status" className="mt-4 rounded-lg border border-success/25 bg-success/10 p-3 text-center text-sm font-medium text-success">
-              Joined team successfully. Your roster has been updated.
+              ✓ Join request submitted successfully! Awaiting approval from the Team Leader. You will receive an email notification upon decision.
             </p>
           ) : (
             <div className="mt-4 flex flex-col gap-2">
               <Button className="w-full" onClick={handleConfirmJoin}>
-                Confirm &amp; join team
+                Submit join request
               </Button>
               <Button
                 variant="ghost"

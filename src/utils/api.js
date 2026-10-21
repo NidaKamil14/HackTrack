@@ -197,6 +197,17 @@ class ApiClient {
     });
   }
 
+  async getMyTeams() {
+    return this.request('/teams/mine');
+  }
+
+  async toggleTeamRosterLock(teamId, locked) {
+    return this.request(`/teams/${teamId}/roster-lock`, {
+      method: 'PUT',
+      body: JSON.stringify({ locked }),
+    });
+  }
+
   // ── Submissions (FR-17 to FR-21) ─────────────────────────────────────
 
   async getSubmissions(hackathonId) {
@@ -260,14 +271,45 @@ class ApiClient {
 
   // ── Admin (FR-40 to FR-46) ───────────────────────────────────────────
 
-  async getUsers() {
-    return this.request('/admin/users');
+  async getUsers(params = {}) {
+    const query = new URLSearchParams();
+    if (params.role && params.role !== 'all') query.set('role', params.role);
+    if (params.status && params.status !== 'all') query.set('status', params.status);
+    if (params.search && params.search.trim()) query.set('search', params.search.trim());
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    return this.request(`/admin/users${qs}`);
   }
 
   async updateUserRole(userId, role) {
-    return this.request(`/admin/users/${userId}/role`, {
+    return this.request(`/admin/users/${encodeURIComponent(userId)}/role`, {
       method: 'PUT',
       body: JSON.stringify({ role }),
+    });
+  }
+
+  async setUserStatus(userId, isActive) {
+    return this.request(`/admin/users/${encodeURIComponent(userId)}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ isActive }),
+    });
+  }
+
+  async deactivateUser(userId) {
+    return this.request(`/admin/users/${encodeURIComponent(userId)}/deactivate`, {
+      method: 'POST',
+    });
+  }
+
+  async reactivateUser(userId) {
+    return this.request(`/admin/users/${encodeURIComponent(userId)}/reactivate`, {
+      method: 'POST',
+    });
+  }
+
+  async createUser(userData) {
+    return this.request('/admin/users', {
+      method: 'POST',
+      body: JSON.stringify(userData),
     });
   }
 

@@ -10,12 +10,16 @@ import evaluationRoutes from './routes/evaluations.js';
 import certificateRoutes from './routes/certificates.js';
 import adminRoutes from './routes/admin.js';
 import notificationRoutes from './routes/notifications.js';
+import { requireAuth, requireRole } from './middleware/auth.js';
+import store from './database/store.js';
 
 const app = express();
 
 // Determine allowed origins (frontend development URL)
 const allowedOrigins = [
-  process.env.CLIENT_ORIGIN || 'http://localhost:5174',
+  process.env.CLIENT_ORIGIN || 'http://localhost:5175',
+  'http://localhost:5175',
+  'http://127.0.0.1:5175',
   'http://localhost:5174',
   'http://127.0.0.1:5174',
   'http://localhost:5173',
@@ -77,6 +81,27 @@ app.use('/api/v1/evaluations', evaluationRoutes);
 app.use('/api/v1/certificates', certificateRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
+
+// Direct aliases for users API (FR-42)
+const usersHandler = async (req, res) => {
+  try {
+    const { role, search, status } = req.query || {};
+    const users = await store.getUsersFromDb({ role, search, status });
+    return res.json({
+      status: 200,
+      count: users.length,
+      users,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      status: 500,
+      error: 'Internal Server Error',
+      message: err.message,
+    });
+  }
+};
+app.get('/api/users', requireAuth, requireRole('admin'), usersHandler);
+app.get('/api/v1/users', requireAuth, requireRole('admin'), usersHandler);
 
 // 404 Route Handler for undefined endpoints
 app.use((req, res) => {

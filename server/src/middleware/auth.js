@@ -54,6 +54,15 @@ export function requireAuth(req, res, next) {
     });
   }
 
+  // Enforce account active status (FR-1, FR-42)
+  if (user.isActive === false || user.is_active === 0) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'Your account has been deactivated. Please contact an administrator.',
+    });
+  }
+
   req.user = user;
   next();
 }

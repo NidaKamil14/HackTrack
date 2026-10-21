@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowRight, ClipboardCheck, Compass, Crown, Gavel, Lightbulb, Settings2, ShieldCheck } from 'lucide-react';
 import { Alert, Button, Field, Input, Logo, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
+import api from '../utils/api';
 import { DEMO_USERS, getRoleDashboardPath } from '../utils/auth';
 import { registerForHackathon } from '../utils/registrationService';
 
@@ -79,6 +80,10 @@ export default function Login({ navigate: propNavigate }) {
   // True only while the real login/register call is in flight; stays true on
   // success because the page is about to redirect.
   const [submitting, setSubmitting] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotFeedback, setForgotFeedback] = useState(null);
 
   const handlePersonaSelect = (roleKey) => {
     setSelectedRolePreview(roleKey);
@@ -133,9 +138,9 @@ export default function Login({ navigate: propNavigate }) {
     }, 400);
   };
 
-  const handleQuickDemoLaunch = (roleKey) => {
-    const user = switchDemoRole(roleKey);
-    const destination = getRoleDashboardPath(user.role);
+  const handleQuickDemoLaunch = async (roleKey) => {
+    const user = await switchDemoRole(roleKey);
+    const destination = getRoleDashboardPath(user?.role || roleKey);
     navigate(destination, { replace: true });
   };
 
@@ -158,45 +163,131 @@ export default function Login({ navigate: propNavigate }) {
             </Alert>
           )}
 
-          <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
-            <Field label="Email">
-              <Input
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@university.edu"
-              />
-            </Field>
+          {!showForgotPassword ? (
+            <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
+              <Field label="Email">
+                <Input
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@university.edu"
+                />
+              </Field>
 
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label htmlFor="login-password" className="text-sm font-medium text-fg">Password</label>
-                <Button
-                  variant="link"
-                  size="sm"
-                  className="text-xs"
-                  onClick={() => setStatusMessage({ type: "info", text: "Demo passwords for all accounts are: password123" })}
-                >
-                  Forgot password?
-                </Button>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="login-password" className="text-sm font-medium text-fg">Password</label>
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="text-xs text-accent-text hover:underline"
+                    onClick={() => {
+                      setShowForgotPassword(true);
+                      setForgotEmail(email);
+                      setForgotFeedback(null);
+                    }}
+                  >
+                    Forgot password?
+                  </Button>
+                </div>
+                <Input
+                  id="login-password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your password"
+                />
               </div>
-              <Input
-                id="login-password"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
-              />
-            </div>
 
-            <Button type="submit" size="lg" className="w-full" loading={submitting}>
-              {submitting ? "Signing in…" : "Sign in"}
-            </Button>
-          </form>
+              <Button type="submit" size="lg" className="w-full" loading={submitting}>
+                {submitting ? "Signing in…" : "Sign in"}
+              </Button>
+            </form>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-line bg-surface-panel p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-semibold text-fg">Reset your password</h3>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowForgotPassword(false)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+                <p className="text-xs text-fg-muted">
+                  Enter your registered email address. We'll send you a password reset link.
+                </p>
+
+                {forgotFeedback && (
+                  <Alert variant={forgotFeedback.type === 'error' ? 'danger' : 'success'}>
+                    {forgotFeedback.message}
+                  </Alert>
+                )}
+
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!forgotEmail) return;
+                    setForgotLoading(true);
+                    setForgotFeedback(null);
+                    try {
+                      const res = await api.forgotPassword(forgotEmail);
+                      setForgotFeedback({
+                        type: 'success',
+                        message: res.message || 'If an account exists with this email address, a password reset link has been dispatched.'
+                      });
+                    } catch (err) {
+                      setForgotFeedback({
+                        type: 'error',
+                        message: err.message || 'Failed to dispatch reset email. Please try again.'
+                      });
+                    } finally {
+                      setForgotLoading(false);
+                    }
+                  }}
+                  className="space-y-3"
+                >
+                  <Field label="Registered Email">
+                    <Input
+                      type="email"
+                      required
+                      value={forgotEmail}
+                      onChange={(e) => setForgotEmail(e.target.value)}
+                      placeholder="e.g. alex@university.edu"
+                      disabled={forgotLoading}
+                    />
+                  </Field>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="submit"
+                      size="sm"
+                      className="w-full"
+                      loading={forgotLoading}
+                    >
+                      Send Reset Link
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setShowForgotPassword(false)}
+                    >
+                      Back to Login
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
 
           <p className="mt-6 text-sm text-fg-muted">
             New to HackTrack?{" "}

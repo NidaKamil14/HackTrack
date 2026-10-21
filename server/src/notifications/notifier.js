@@ -18,6 +18,7 @@ import { enqueueEmail } from './emailQueue.js';
  */
 
 export const CATEGORIES = {
+  account: { label: 'Account updates', description: 'Registration confirmations, security and account notices.' },
   team: { label: 'Team activity', description: 'Team creation, join requests and decisions, new members.' },
   submissions: { label: 'Submissions', description: 'When your team’s project is submitted or updated.' },
   results: { label: 'Results & certificates', description: 'Published results and issued certificates.' },
@@ -27,6 +28,9 @@ export const CATEGORIES = {
 export const CATEGORY_KEYS = Object.keys(CATEGORIES);
 
 const EVENT_CATEGORY = {
+  user_registered: 'account',
+  password_reset: 'account',
+  certificate_issued: 'results',
   team_created: 'team',
   join_request_submitted: 'team',
   join_request_received: 'team',
@@ -335,4 +339,46 @@ export const notifyAccessCodeRedeemed = (result, userId, codeCreatorId) => guard
       inApp: { message: () => `${reviewer.fullName} joined ${hackathon.title} as ${result.role}.` },
     }),
   ];
+});
+
+/**
+ * User registered → confirmation email to the user.
+ */
+export const notifyUserRegistered = (user) => guard('user_registered', () => {
+  return notify({
+    type: 'user_registered',
+    recipients: [user.id],
+    dedupeBase: user.id,
+    data: () => ({ user }),
+    inApp: { message: () => `Welcome to HackTrack, ${user.fullName}!` },
+  });
+});
+
+/**
+ * Certificate issued → recipient.
+ */
+export const notifyCertificateIssued = (certificate) => guard('certificate_issued', () => {
+  const hackathon = store.getHackathonById(certificate.hackathonId);
+  return notify({
+    type: 'certificate_issued',
+    recipients: [certificate.userId],
+    dedupeBase: certificate.id || certificate.certificateCode,
+    data: () => ({ certificate, hackathon }),
+    inApp: { message: () => `Your certificate for ${certificate.hackathonTitle || hackathon?.title} is available.` },
+  });
+});
+
+/**
+ * Password reset requested → send email with reset link to user.
+ */
+export const notifyPasswordReset = ({ user, token }) => guard('password_reset', () => {
+  const resetUrl = `/reset-password?token=${encodeURIComponent(token)}`;
+  const key = `${user.id}:${token}`;
+  return notify({
+    type: 'password_reset',
+    recipients: [user.id],
+    dedupeBase: key,
+    data: () => ({ user, token, resetUrl }),
+    inApp: { message: () => 'A password reset link was dispatched to your email address.' },
+  });
 });

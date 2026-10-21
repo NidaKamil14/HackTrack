@@ -105,6 +105,7 @@ CREATE TABLE `teams` (
   `team_code` VARCHAR(30) NOT NULL,
   `track` VARCHAR(100) NULL,
   `status` ENUM('active', 'disqualified', 'withdrawn') NOT NULL DEFAULT 'active',
+  `roster_locked` TINYINT(1) NOT NULL DEFAULT 0,
   `screening_status` ENUM('pending', 'shortlisted', 'rejected') NOT NULL DEFAULT 'pending',
   `mentor_id` VARCHAR(50) NULL,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -259,4 +260,20 @@ CREATE TABLE `announcements` (
   INDEX `idx_announcements_hackathon` (`hackathon_id`),
   CONSTRAINT `fk_ann_hackathon` FOREIGN KEY (`hackathon_id`) REFERENCES `hackathons` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_ann_creator` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------------------------
+-- 12. Hackathon Codes Table (Access code engine)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `hackathon_codes` (
+  `id` VARCHAR(50) NOT NULL,
+  `hackathon_id` VARCHAR(50) NOT NULL,
+  `role` VARCHAR(50) NOT NULL,
+  `code` VARCHAR(50) NOT NULL,
+  `created_by` VARCHAR(50) NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `redeemed_by` JSON NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_hackathon_codes_code` (`code`),
+  CONSTRAINT `fk_hc_hackathon` FOREIGN KEY (`hackathon_id`) REFERENCES `hackathons` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

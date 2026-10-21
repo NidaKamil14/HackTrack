@@ -1,6 +1,7 @@
 import { PRELOADED_TEAMS } from '../data/teams.js';
 import { isUserRegistered } from './registrationService.js';
 import { addNotification } from './notificationService.js';
+import api from './api.js';
 
 const STORAGE_KEY = "hacktrack_teams";
 
@@ -123,12 +124,32 @@ export function createTeam({ name, hackathonId, hackathonTitle, track, leadName,
   return { success: true, team: { ...newTeam, code } };
 }
 
-export function joinTeamWithCode(code, user) {
+export async function joinTeamWithCode(code, user) {
   if (!code || !user) {
     return { success: false, error: "Invite code and user profile are required." };
   }
 
   const cleanCode = code.trim().toUpperCase();
+
+  // Route through backend API if authenticated with backend JWT
+  if (api.getToken()) {
+    try {
+      const data = await api.joinTeam(cleanCode);
+      return {
+        success: true,
+        pending: true,
+        message: data.message || "Join request submitted! Awaiting Team Leader approval.",
+        request: data.request,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        error: err.data?.message || err.message || "Failed to submit join request.",
+      };
+    }
+  }
+
+  // Local fallback mode
   const all = getAllTeams();
   const targetTeam = all[cleanCode];
 
@@ -158,7 +179,7 @@ export function joinTeamWithCode(code, user) {
   const existingTeam = getUserTeamForHackathon(userEmail, targetTeam.hackathonId);
   if (existingTeam) {
     if (existingTeam.code === cleanCode) {
-      return { success: false, error: `You are already a member of "${targetTeam.name}".` };
+      return { success: false, error: `You are already an accepted member of "${targetTeam.name}".` };
     }
     return {
       success: false,
@@ -166,41 +187,124 @@ export function joinTeamWithCode(code, user) {
     };
   }
 
-  // 3. Add to roster
-  const updatedMembers = Array.isArray(targetTeam.members) ? [...targetTeam.members] : [];
-  if (updatedMembers.length >= 4) {
+  // 3. Check if user already submitted a pending request
+  targetTeam.pendingRequests = targetTeam.pendingRequests || [];
+  const alreadyPending = targetTeam.pendingRequests.find(
+    (p) => (p.email && p.email.toLowerCase() === userEmail) || p.name === userName
+  );
+  if (alreadyPending) {
+    return { success: false, error: "Join request already pending approval by the Team Leader." };
+  }
+
+  // 4. Check active capacity limit
+  const activeMembers = Array.isArray(targetTeam.members) ? targetTeam.members.filter((m) => m.status === 'Active') : [];
+  if (activeMembers.length >= 4) {
     return { success: false, error: `Team "${targetTeam.name}" has reached maximum capacity (4 members).` };
   }
 
-  updatedMembers.push({
+  // 5. Store request in pendingRequests (DO NOT add to active members!)
+  const newRequest = {
+    id: `req-${Date.now()}`,
     name: userName,
-    role: "Member",
     email: userEmail,
-    status: "Active"
-  });
-
-  const memberCount = updatedMembers.length;
-  const updatedTeam = {
-    ...targetTeam,
-    members: updatedMembers,
-    capacity: `${memberCount} / 4 Members`
+    university: user.university || "University",
+    requestedAt: new Date().toISOString(),
+    status: "Pending",
   };
+  targetTeam.pendingRequests.push(newRequest);
 
-  all[cleanCode] = updatedTeam;
+  all[cleanCode] = targetTeam;
   saveAllTeams(all);
 
-  // Notify team leader
+  // Notify team leader of incoming request
   if (targetTeam.leadEmail) {
     addNotification({
       userEmail: targetTeam.leadEmail,
-      title: "New Team Member Joined",
-      message: `${userName} (${userEmail}) joined your team "${targetTeam.name}".`,
+      title: "New Join Request Received",
+      message: `${userName} (${userEmail}) requested to join "${targetTeam.name}". Review in your Team & Roster dashboard.`,
       type: "info",
       link: "/dashboard/student"
     });
   }
 
-  return { success: true, team: { ...updatedTeam, code: cleanCode } };
+  return {
+    success: true,
+    pending: true,
+    message: `Join request submitted for "${targetTeam.name}". Awaiting Team Leader approval.`,
+    team: targetTeam,
+    request: newRequest,
+  };
+}
+
+export function respondToTeamJoinRequest(code, requestId, action, user) {
+  const cleanCode = (code || "").trim().toUpperCase();
+  const all = getAllTeams();
+  const team = all[cleanCode];
+  if (!team) return { success: false, error: "Team not found." };
+
+  const userEmail = (user?.email || "").toLowerCase().trim();
+  const isLead = team.leadEmail?.toLowerCase().trim() === userEmail || team.lead?.toLowerCase() === user?.fullName?.toLowerCase();
+  if (!isLead) {
+    return { success: false, error: "Only the Team Leader can approve or reject join requests." };
+  }
+
+  team.pendingRequests = team.pendingRequests || [];
+  const reqIdx = team.pendingRequests.findIndex((r) => r.id === requestId);
+  if (reqIdx === -1) return { success: false, error: "Join request not found." };
+
+  const req = team.pendingRequests[reqIdx];
+
+  if (action === "accept") {
+    if (team.rosterLocked) {
+      return { success: false, error: "Team roster is locked. Cannot accept join requests while roster is locked." };
+    }
+    const activeMembers = (team.members || []).filter((m) => m.status === "Active");
+    if (activeMembers.length >= 4) {
+      return { success: false, error: "Team has reached maximum capacity (4 members)." };
+    }
+
+    team.pendingRequests.splice(reqIdx, 1);
+    team.members = team.members || [];
+    team.members.push({
+      name: req.name,
+      role: "Member",
+      email: req.email,
+      status: "Active",
+      university: req.university,
+    });
+    team.capacity = `${team.members.filter((m) => m.status === "Active").length} / 4 Members`;
+
+    all[cleanCode] = team;
+    saveAllTeams(all);
+
+    if (req.email) {
+      addNotification({
+        userEmail: req.email,
+        title: "Join Request Approved",
+        message: `Your request to join "${team.name}" was accepted! You are now an active team member.`,
+        type: "success",
+        link: "/dashboard/student",
+      });
+    }
+
+    return { success: true, message: `${req.name} has been added to the team roster.`, team };
+  } else {
+    team.pendingRequests.splice(reqIdx, 1);
+    all[cleanCode] = team;
+    saveAllTeams(all);
+
+    if (req.email) {
+      addNotification({
+        userEmail: req.email,
+        title: "Join Request Declined",
+        message: `Your request to join "${team.name}" was declined by the Team Leader.`,
+        type: "info",
+        link: "/dashboard/student",
+      });
+    }
+
+    return { success: true, message: `Join request for ${req.name} has been rejected.`, team };
+  }
 }
 
 export function lockTeamRoster(code, user) {
