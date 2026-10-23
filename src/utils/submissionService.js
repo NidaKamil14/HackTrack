@@ -18,6 +18,7 @@
 import { isUserRegistered } from './registrationService.js';
 import { getTeamByCode, getUserTeamForHackathon } from './teamService.js';
 import { addNotification } from './notificationService.js';
+import { triggerDataSync } from './syncService.js';
 
 const STORAGE_KEY = "hacktrack_submissions";
 
@@ -233,6 +234,7 @@ export function getSubmissions() {
 export function saveAllSubmissions(submissions) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(submissions));
+    triggerDataSync("submissions_updated");
   } catch (err) {
     console.error("Failed to persist submissions to localStorage:", err);
   }
@@ -243,6 +245,12 @@ export function saveAllSubmissions(submissions) {
  */
 export function isUserTeamLeader(team, user) {
   if (!team || !user) return false;
+
+  // Regular students/participants cannot be team leaders (FR-17, BR-1)
+  if (user.role && user.role !== 'leader') {
+    return false;
+  }
+
   const userEmail = (user.email || "").toLowerCase().trim();
   const userName = (user.fullName || "").toLowerCase().trim();
 
@@ -508,7 +516,14 @@ export function saveDraftSubmission({
     };
   }
 
-  // 3. Verify user is Team Leader
+  // 3. Verify user has Team Leader role
+  if (user.role && user.role !== 'leader') {
+    return {
+      success: false,
+      error: "Only users with the Team Leader role may edit or save the project submission (FR-17, BR-1)."
+    };
+  }
+
   if (!isUserTeamLeader(team, user)) {
     return {
       success: false,
@@ -616,7 +631,14 @@ export function finalizeSubmission({
     };
   }
 
-  // 3. Verify user is Team Leader
+  // 3. Verify user has Team Leader role
+  if (user.role && user.role !== 'leader') {
+    return {
+      success: false,
+      error: "Only users with the Team Leader role may freeze and finalize the project submission (FR-17, BR-1)."
+    };
+  }
+
   if (!isUserTeamLeader(team, user)) {
     return {
       success: false,

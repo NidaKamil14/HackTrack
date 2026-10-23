@@ -277,3 +277,22 @@ CREATE TABLE IF NOT EXISTS `hackathon_codes` (
   UNIQUE KEY `idx_hackathon_codes_code` (`code`),
   CONSTRAINT `fk_hc_hackathon` FOREIGN KEY (`hackathon_id`) REFERENCES `hackathons` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------------------------
+-- 13. Hackathon Registrations Table
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `hackathon_registrations` (
+  `id` VARCHAR(50) NOT NULL,
+  `hackathon_id` VARCHAR(50) NOT NULL,
+  `user_id` VARCHAR(50) NOT NULL,
+  `user_email` VARCHAR(255) NOT NULL,
+  `status` VARCHAR(50) NOT NULL DEFAULT 'Registration Verified',
+  `registered_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_user_hackathon_reg` (`hackathon_id`, `user_id`),
+  INDEX `idx_reg_hackathon` (`hackathon_id`),
+  INDEX `idx_reg_user` (`user_id`),
+  INDEX `idx_reg_email` (`user_email`),
+  CONSTRAINT `fk_reg_hackathon` FOREIGN KEY (`hackathon_id`) REFERENCES `hackathons` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_reg_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

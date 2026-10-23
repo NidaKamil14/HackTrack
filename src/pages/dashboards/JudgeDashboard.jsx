@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useId } from 'react';
+import React, { useState, useMemo, useId, useEffect } from 'react';
 import {
   CheckCircle2,
   Clock,
@@ -42,6 +42,9 @@ import {
 } from '../../utils/hackathonService';
 import { getShortlistedSubmissions } from '../../utils/submissionService';
 import { getEvaluations, saveEvaluation, isResultsPublished } from '../../utils/evaluationService';
+import { addNotification } from '../../utils/notificationService';
+import { subscribeToDataSync } from '../../utils/syncService';
+import api from '../../utils/api';
 
 /* ------------------------------------------------------------------------- */
 /* Review-workspace pattern. Kept visually identical in JudgeDashboard and    */
@@ -248,6 +251,12 @@ export default function JudgeDashboard() {
   const { user } = useAuth();
   const [refreshKey, setRefreshKey] = useState(0);
 
+  useEffect(() => {
+    return subscribeToDataSync(() => {
+      setRefreshKey((k) => k + 1);
+    });
+  }, []);
+
   const allHackathons = useMemo(() => {
     if (refreshKey) { /* trigger */ }
     return getStoredHackathons();
@@ -271,11 +280,28 @@ export default function JudgeDashboard() {
   const [accessCodeInput, setAccessCodeInput] = useState("");
   const [codeNotice, setCodeNotice] = useState(null);
 
-  const handleRedeemCode = (e) => {
+  const handleRedeemCode = async (e) => {
     e.preventDefault();
-    if (!accessCodeInput.trim()) return;
-    const res = redeemAccessCode(accessCodeInput, user);
+    const cleanCode = accessCodeInput.trim().toUpperCase();
+    if (!cleanCode) return;
+
+    if (api.getToken()) {
+      try {
+        await api.redeemCode(cleanCode);
+      } catch (err) {
+        console.warn("[JudgeDashboard] Backend code redemption warning:", err.message);
+      }
+    }
+
+    const res = redeemAccessCode(cleanCode, user);
     if (res.success) {
+      addNotification({
+        userEmail: user?.email,
+        title: "Judging Assignment Activated",
+        message: res.message || "Access verified. Assigned to evaluation chamber.",
+        type: "success",
+        link: "/dashboard/judge"
+      });
       setCodeNotice({ type: 'success', text: res.message });
       setSelectedHackathonFilter(res.hackathonId);
       setAccessCodeInput("");
@@ -283,7 +309,7 @@ export default function JudgeDashboard() {
       setRefreshKey((k) => k + 1);
       setTimeout(() => setCodeNotice(null), 4500);
     } else {
-      setCodeNotice({ type: 'error', text: res.error });
+      setCodeNotice({ type: 'error', text: res.error || "Invalid or unavailable access code." });
       setTimeout(() => setCodeNotice(null), 4500);
     }
   };
@@ -421,6 +447,13 @@ export default function JudgeDashboard() {
     });
 
     if (res.success) {
+      addNotification({
+        userEmail: user?.email,
+        title: "Evaluation Score Certified",
+        message: `Certified score (${computeTotal(selectedTeam.scores)} / 100) recorded for ${selectedTeam.name}.`,
+        type: "success",
+        link: "/dashboard/judge"
+      });
       setTeamsState((prev) =>
         prev.map((t) => (t.id === selectedTeam.id ? { ...t, status: "Evaluated" } : t))
       );

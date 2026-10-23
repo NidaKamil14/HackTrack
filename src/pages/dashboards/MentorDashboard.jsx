@@ -146,6 +146,14 @@ export default function MentorDashboard() {
       });
     }
 
+    addNotification({
+      userEmail: user?.email,
+      title: "Mentoring Guidance Dispatched",
+      message: `You posted guidance for squad "${activeTeam.name}".`,
+      type: "info",
+      link: "/dashboard/mentor"
+    });
+
     setNotice(`Mentoring note dispatched to squad ${activeTeam.name}.`);
     setCurrentNoteInput("");
     setTimeout(() => setNotice(null), 3500);

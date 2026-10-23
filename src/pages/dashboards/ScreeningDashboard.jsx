@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Check,
   CheckCircle2,
@@ -43,6 +43,9 @@ import {
   getUserAssignedHackathonIds,
   redeemAccessCode
 } from '../../utils/hackathonService.js';
+import { addNotification } from '../../utils/notificationService.js';
+import { subscribeToDataSync } from '../../utils/syncService.js';
+import api from '../../utils/api.js';
 
 /* ------------------------------------------------------------------------- */
 /* Review-workspace pattern. Kept visually identical in JudgeDashboard and    */
@@ -283,6 +286,13 @@ export default function ScreeningDashboard() {
   const [submissions, setSubmissions] = useState(loadSubmissions);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  useEffect(() => {
+    return subscribeToDataSync(() => {
+      setRefreshKey((k) => k + 1);
+      setSubmissions(loadSubmissions());
+    });
+  }, []);
+
   const allHackathons = useMemo(() => {
     if (refreshKey) { /* trigger */ }
     return getStoredHackathons();
@@ -307,11 +317,28 @@ export default function ScreeningDashboard() {
   const [accessCodeInput, setAccessCodeInput] = useState("");
   const [codeNotice, setCodeNotice] = useState(null);
 
-  const handleRedeemCode = (e) => {
+  const handleRedeemCode = async (e) => {
     e.preventDefault();
-    if (!accessCodeInput.trim()) return;
-    const res = redeemAccessCode(accessCodeInput, user);
+    const cleanCode = accessCodeInput.trim().toUpperCase();
+    if (!cleanCode) return;
+
+    if (api.getToken()) {
+      try {
+        await api.redeemCode(cleanCode);
+      } catch (err) {
+        console.warn("[ScreeningDashboard] Backend code redemption warning:", err.message);
+      }
+    }
+
+    const res = redeemAccessCode(cleanCode, user);
     if (res.success) {
+      addNotification({
+        userEmail: user?.email,
+        title: "Screening Access Granted",
+        message: res.message || "Access verified for screening committee panel.",
+        type: "success",
+        link: "/dashboard/screening"
+      });
       setCodeNotice({ type: 'success', text: res.message });
       setFilterHackathon(res.hackathonId);
       setAccessCodeInput("");
@@ -319,7 +346,7 @@ export default function ScreeningDashboard() {
       setRefreshKey((k) => k + 1);
       setTimeout(() => setCodeNotice(null), 4500);
     } else {
-      setCodeNotice({ type: 'error', text: res.error });
+      setCodeNotice({ type: 'error', text: res.error || "Invalid or unavailable access code." });
       setTimeout(() => setCodeNotice(null), 4500);
     }
   };
@@ -368,6 +395,14 @@ export default function ScreeningDashboard() {
             : s
         )
       );
+
+      addNotification({
+        userEmail: user?.email,
+        title: `Screening Decision: ${newStatus}`,
+        message: `Decision recorded for "${target.teamName}": ${newStatus}. Synced with team & judges.`,
+        type: newStatus === "Shortlisted" ? "success" : "info",
+        link: "/dashboard/screening"
+      });
 
       setFeedbackNotice({
         type: newStatus === "Shortlisted" ? "success" : newStatus === "Rejected" ? "error" : "info",

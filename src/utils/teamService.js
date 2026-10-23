@@ -1,6 +1,7 @@
 import { PRELOADED_TEAMS } from '../data/teams.js';
-import { isUserRegistered } from './registrationService.js';
+import { isUserRegistered, normalizeHackathonId } from './registrationService.js';
 import { addNotification } from './notificationService.js';
+import { triggerDataSync } from './syncService.js';
 import api from './api.js';
 
 const STORAGE_KEY = "hacktrack_teams";
@@ -22,9 +23,22 @@ export function getAllTeams() {
 export function saveAllTeams(teams) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(teams));
+    triggerDataSync("teams_updated");
   } catch (err) {
     console.error("Failed to save teams:", err);
   }
+}
+
+export function saveTeam(team) {
+  if (!team) return;
+  const code = (team.code || team.teamCode || '').trim().toUpperCase();
+  if (!code) return;
+  const all = getAllTeams();
+  all[code] = {
+    ...team,
+    code,
+  };
+  saveAllTeams(all);
 }
 
 export function getTeamByCode(code) {
@@ -38,10 +52,12 @@ export function getUserTeamForHackathon(userId, hackathonId) {
   if (!userId || !hackathonId) return null;
   const cleanUser = String(userId).trim().toLowerCase();
   const all = getAllTeams();
+  const targetNorm = normalizeHackathonId(hackathonId);
 
   for (const teamCode of Object.keys(all)) {
     const t = all[teamCode];
-    if (t.hackathonId === hackathonId) {
+    const tNorm = normalizeHackathonId(t.hackathonId);
+    if (t.hackathonId === hackathonId || (tNorm && targetNorm && tNorm === targetNorm)) {
       const isLead = t.leadEmail && String(t.leadEmail).toLowerCase() === cleanUser;
       const isMember = t.members?.some(
         (m) =>
@@ -57,17 +73,35 @@ export function getUserTeamForHackathon(userId, hackathonId) {
     }
   }
 
-  // Pre-seeded demo user fallback for Alex Chen on devpulse-2026
-  if (cleanUser === 'alex@university.edu' && hackathonId === 'devpulse-2026') {
+  // Pre-seeded demo user fallback for Alex Chen on devpulse-2026 only
+  if (cleanUser === 'alex@university.edu' && (hackathonId === 'devpulse-2026' || targetNorm === 'hack-001')) {
     return { ...all['HT-DEV-42'], code: 'HT-DEV-42' };
   }
 
   return null;
 }
 
-export function createTeam({ name, hackathonId, hackathonTitle, track, leadName, leadEmail }) {
+export function createTeam({ name, hackathonId, hackathonTitle, track, leadName, leadEmail, user }) {
   if (!leadEmail || !hackathonId || !name) {
     return { success: false, error: "Team name and hackathon are required." };
+  }
+
+  // Enforce Team Leader role (FR-12, BR-1)
+  let effectiveRole = user?.role;
+  if (!effectiveRole) {
+    try {
+      const cur = JSON.parse(localStorage.getItem('hacktrack_current_user') || '{}');
+      effectiveRole = cur?.role;
+    } catch {
+      effectiveRole = null;
+    }
+  }
+
+  if (effectiveRole && effectiveRole !== 'leader') {
+    return {
+      success: false,
+      error: "Only users with the Team Leader role are authorized to create a team (FR-12, BR-1)."
+    };
   }
 
   // 1. Check if user is registered for this hackathon
@@ -97,6 +131,7 @@ export function createTeam({ name, hackathonId, hackathonTitle, track, leadName,
 
   const newTeam = {
     name: name.trim(),
+    code,
     hackathon: hackathonTitle || hackathonId,
     hackathonId,
     track: track || "General Track",
@@ -227,6 +262,15 @@ export async function joinTeamWithCode(code, user) {
     });
   }
 
+  // Notify participant of submitted request
+  addNotification({
+    userEmail: userEmail,
+    title: "Join Request Submitted",
+    message: `Your request to join "${targetTeam.name}" (Code: ${cleanCode}) has been submitted to the Team Leader.`,
+    type: "info",
+    link: "/dashboard/student?tab=roster"
+  });
+
   return {
     success: true,
     pending: true,
@@ -287,6 +331,16 @@ export function respondToTeamJoinRequest(code, requestId, action, user) {
       });
     }
 
+    if (userEmail) {
+      addNotification({
+        userEmail: userEmail,
+        title: "New Member Added to Roster",
+        message: `You accepted ${req.name} (${req.email}) into squad "${team.name}".`,
+        type: "success",
+        link: "/dashboard/student?tab=roster",
+      });
+    }
+
     return { success: true, message: `${req.name} has been added to the team roster.`, team };
   } else {
     team.pendingRequests.splice(reqIdx, 1);
@@ -300,6 +354,16 @@ export function respondToTeamJoinRequest(code, requestId, action, user) {
         message: `Your request to join "${team.name}" was declined by the Team Leader.`,
         type: "info",
         link: "/dashboard/student",
+      });
+    }
+
+    if (userEmail) {
+      addNotification({
+        userEmail: userEmail,
+        title: "Join Request Declined",
+        message: `You declined ${req.name}'s request to join "${team.name}".`,
+        type: "info",
+        link: "/dashboard/student?tab=roster",
       });
     }
 

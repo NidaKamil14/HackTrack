@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Award, Bell, CalendarDays, Check, ClipboardCheck, Clock, Compass, Copy, FileText, Flag, FolderOpen, Gavel, KeyRound, Link2, Lock, LockOpen, Paperclip, Printer, Rocket, ShieldCheck, Trophy, Upload, UserPlus, Users, X, Mail } from 'lucide-react';
+import { Award, Bell, CalendarDays, Check, CheckCircle2, ClipboardCheck, Clock, Compass, Copy, FileText, Flag, FolderOpen, Gavel, KeyRound, Link2, Lock, LockOpen, Paperclip, Printer, Rocket, ShieldCheck, Trophy, Upload, UserPlus, Users, X, Mail } from 'lucide-react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
 import EmailActivity from '../../components/notifications/EmailActivity';
 import EventCover from '../../components/art/EventCover';
@@ -31,11 +31,13 @@ import {
 } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { getStoredHackathons } from '../../utils/hackathonService';
-import { getUserRegistrations, registerForHackathon } from '../../utils/registrationService';
+import { getUserRegistrations, registerForHackathon, isUserRegistered, normalizeHackathonId } from '../../utils/registrationService';
+import { triggerDataSync } from '../../utils/syncService';
 import api from '../../utils/api';
 import {
   getUserTeamForHackathon,
   createTeam,
+  saveTeam,
   joinTeamWithCode,
   lockTeamRoster,
   unlockTeamRoster,
@@ -50,7 +52,8 @@ import {
 } from '../../utils/submissionService';
 import { getTeamEvaluation, isResultsPublished } from '../../utils/evaluationService';
 import { getUserCertificates } from '../../utils/certificateService';
-import { getUserNotifications, markAsRead, markAllAsRead } from '../../utils/notificationService';
+import { getUserNotifications, markAsRead, markAllAsRead, addNotification } from '../../utils/notificationService';
+import { subscribeToDataSync } from '../../utils/syncService';
 
 function formatBytes(bytes) {
   if (!bytes || bytes === 0) return "0 KB";
@@ -142,6 +145,48 @@ function initialsOf(name) {
   return ((parts[0][0] || "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
 
+/** Robust hackathon identity matching across canonical IDs, slug aliases, and titles */
+function matchHackathon(idA, idB, titleA, titleB) {
+  if (!idA && !idB) return false;
+  if (idA && idB) {
+    if (String(idA).toLowerCase().trim() === String(idB).toLowerCase().trim()) return true;
+    const normA = normalizeHackathonId(idA);
+    const normB = normalizeHackathonId(idB);
+    if (normA && normB && normA.toLowerCase() === normB.toLowerCase()) return true;
+    const cleanA = String(idA).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanB = String(idB).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (cleanA && cleanB && cleanA === cleanB) return true;
+    if (cleanA && cleanB && cleanA.length >= 6 && cleanB.length >= 6) {
+      if (cleanA.includes(cleanB) || cleanB.includes(cleanA)) return true;
+    }
+  }
+  if (titleA && titleB) {
+    const cleanTitleA = String(titleA).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanTitleB = String(titleB).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (cleanTitleA && cleanTitleB && cleanTitleA === cleanTitleB) return true;
+    if (cleanTitleA && cleanTitleB && cleanTitleA.length >= 6 && cleanTitleB.length >= 6) {
+      if (cleanTitleA.includes(cleanTitleB) || cleanTitleB.includes(cleanTitleA)) return true;
+    }
+  }
+  if (idA && titleB) {
+    const cleanA = String(idA).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanB = String(titleB).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (cleanA && cleanB && cleanA === cleanB) return true;
+    if (cleanA && cleanB && cleanA.length >= 6 && cleanB.length >= 6) {
+      if (cleanA.includes(cleanB) || cleanB.includes(cleanA)) return true;
+    }
+  }
+  if (titleA && idB) {
+    const cleanA = String(titleA).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanB = String(idB).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (cleanA && cleanB && cleanA === cleanB) return true;
+    if (cleanA && cleanB && cleanA.length >= 6 && cleanB.length >= 6) {
+      if (cleanA.includes(cleanB) || cleanB.includes(cleanA)) return true;
+    }
+  }
+  return false;
+}
+
 /** Small labelled sub-section used inside cards. */
 function FormSection({ title, description, actions, icon, children, className }) {
   return (
@@ -165,10 +210,13 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
   const { user } = useAuth();
   const userEmail = user?.email || "";
 
-  // Active dashboard tab (synced to ?tab=, falls back to initialTab)
+  // Active dashboard tab (synced to ?tab=, falls back to role-appropriate initialTab)
+  const isLeaderRole = user?.role === "leader";
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const activeTab = TAB_VALUES.includes(tabParam) ? tabParam : initialTab;
+  const allowedTabValues = isLeaderRole ? TAB_VALUES : TAB_VALUES.filter((t) => t !== "workspace");
+  const defaultTab = isLeaderRole ? initialTab : (initialTab === "workspace" ? "roster" : initialTab);
+  const activeTab = allowedTabValues.includes(tabParam) ? tabParam : defaultTab;
   const setActiveTab = (next) => {
     setSearchParams((prev) => {
       const params = new URLSearchParams(prev);
@@ -183,11 +231,52 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
   // State refresh trigger
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Notifications
+  useEffect(() => {
+    return subscribeToDataSync(() => {
+      setRefreshKey((k) => k + 1);
+    });
+  }, []);
+
+  // Notifications state and server merging
+  const [serverNotifications, setServerNotifications] = useState([]);
+
+  useEffect(() => {
+    if (!api.getToken() || !user) return;
+    let cancelled = false;
+    api.getNotifications()
+      .then((res) => {
+        if (!cancelled && Array.isArray(res?.notifications)) {
+          setServerNotifications(
+            res.notifications.map((n) => ({
+              id: n.id,
+              userEmail: userEmail,
+              title: n.title,
+              message: n.message,
+              type: n.category === 'announcement' ? 'info' : n.type === 'error' ? 'warning' : 'success',
+              date: new Date(n.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+              read: n.isRead,
+              link: n.link || '/dashboard/student',
+              isServer: true,
+            }))
+          );
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [user, userEmail, refreshKey]);
+
   const notifications = useMemo(() => {
     if (refreshKey) { /* trigger re-eval */ }
-    return getUserNotifications(userEmail);
-  }, [userEmail, refreshKey]);
+    const local = getUserNotifications(user || userEmail);
+    const merged = [...serverNotifications];
+    local.forEach((loc) => {
+      const exists = merged.some(
+        (m) => m.id === loc.id || (m.title === loc.title && m.message === loc.message)
+      );
+      if (!exists) merged.push(loc);
+    });
+    return merged;
+  }, [user, userEmail, refreshKey, serverNotifications]);
   const unreadNotifsCount = notifications.filter((n) => !n.read).length;
 
   // Certificates
@@ -196,11 +285,64 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     return getUserCertificates(userEmail);
   }, [userEmail, refreshKey]);
 
-  // All hackathons from service
+  // Server hackathons state
+  const [serverHackathons, setServerHackathons] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getHackathons()
+      .then((res) => {
+        if (!cancelled && Array.isArray(res?.hackathons)) {
+          setServerHackathons(res.hackathons);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [refreshKey]);
+
+  // All hackathons from service & backend API
   const allHackathons = useMemo(() => {
     if (refreshKey) { /* trigger re-eval */ }
-    return getStoredHackathons();
-  }, [refreshKey]);
+    const local = getStoredHackathons();
+    if (!serverHackathons.length) return local;
+
+    const combined = [...local];
+    serverHackathons.forEach((sh) => {
+      const idx = combined.findIndex((h) => h.id === sh.id || h.title?.toLowerCase() === sh.title?.toLowerCase());
+      const normalized = {
+        id: sh.id,
+        title: sh.title,
+        headline: sh.tagLine || `${sh.title} Innovation Sprint`,
+        deadline: sh.submissionDeadline ? new Date(sh.submissionDeadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : "TBD",
+        dates: `${sh.startDate ? new Date(sh.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''} - ${sh.endDate ? new Date(sh.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}`,
+        stage: sh.isRegistrationClosed ? "Registration Closed" : "Registration Open",
+        status: sh.status,
+        isRegistrationClosed: sh.isRegistrationClosed,
+        registrationDeadline: sh.registrationDeadline,
+        submissionDeadline: sh.submissionDeadline,
+        track: sh.track || "General Track",
+        category: sh.category || "Full-Stack",
+        teamSize: `${sh.minTeamSize || 1} - ${sh.maxTeamSize || 4} Members`,
+        summary: sh.description || sh.summary || `Official ${sh.title} competition.`,
+      };
+      if (idx >= 0) {
+        combined[idx] = { ...combined[idx], ...normalized, id: sh.id };
+      } else {
+        combined.push(normalized);
+      }
+    });
+    return combined;
+  }, [refreshKey, serverHackathons]);
+
+  // Available open hackathons for team creation & discovery
+  const availableOpenHackathons = useMemo(() => {
+    return allHackathons.filter((h) => {
+      if (h.status && h.status !== 'published') return false;
+      if (h.isRegistrationClosed) return false;
+      if (h.registrationDeadline && new Date() > new Date(h.registrationDeadline)) return false;
+      return true;
+    });
+  }, [allHackathons]);
 
   // Registrations
   const registrations = useMemo(() => {
@@ -212,6 +354,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
 
   // New team formation state
   const [newTeamName, setNewTeamName] = useState("");
+  const [createTeamHackathonId, setCreateTeamHackathonId] = useState("");
   const [teamActionFeedback, setTeamActionFeedback] = useState(null);
   const [teamActionLoading, setTeamActionLoading] = useState(false);
 
@@ -241,48 +384,67 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
   }, [refreshKey, userEmail]);
 
   // Combine user registration records with hackathons metadata
-  const registeredHackathons = registrations.map((reg) => {
-    const meta = allHackathons.find((h) => h.id === reg.hackathonId) || {
-      id: reg.hackathonId,
-      title: reg.hackathonId,
-      track: "General Track",
-      dates: "Dates Announced Soon",
-      deadline: "TBD"
-    };
-    const team = getUserTeamForHackathon(userEmail, reg.hackathonId);
-    return {
-      ...meta,
-      registrationStatus: reg.status,
-      registrationDate: reg.registrationDate,
-      team
-    };
-  });
+  const registeredHackathons = useMemo(() => {
+    return registrations.map((reg) => {
+      const meta = allHackathons.find((h) =>
+        matchHackathon(h.id, reg.hackathonId, h.title, reg.hackathonTitle)
+      ) || {
+        id: normalizeHackathonId(reg.hackathonId) || reg.hackathonId,
+        title: reg.hackathonTitle || reg.hackathonId,
+        track: "General Track",
+        dates: "Dates Announced Soon",
+        deadline: "TBD"
+      };
+      const team = getUserTeamForHackathon(userEmail, meta.id) || getUserTeamForHackathon(userEmail, reg.hackathonId);
+      return {
+        ...meta,
+        registrationStatus: reg.status,
+        registrationDate: reg.registrationDate,
+        team
+      };
+    });
+  }, [registrations, allHackathons, userEmail]);
 
-  const activeSprint =
-    registeredHackathons.find((h) => h.id === selectedHackathonId) ||
-    registeredHackathons[0] ||
-    null;
+  const activeSprint = useMemo(() => {
+    if (selectedHackathonId) {
+      const foundInReg = registeredHackathons.find((h) =>
+        matchHackathon(h.id, selectedHackathonId, h.title)
+      );
+      if (foundInReg) return foundInReg;
+
+      const foundInAll = allHackathons.find((h) =>
+        matchHackathon(h.id, selectedHackathonId, h.title)
+      );
+      if (foundInAll) return foundInAll;
+    }
+    return registeredHackathons[0] || allHackathons[0] || null;
+  }, [selectedHackathonId, registeredHackathons, allHackathons]);
 
   // 1. Backend team from MySQL API
   const backendTeam = useMemo(() => {
     if (!activeSprint || !apiTeamsData.loaded) return null;
-    return apiTeamsData.teams.find(
-      (t) => t.hackathonId === activeSprint.id || t.hackathonTitle === activeSprint.title
+    return apiTeamsData.teams.find((t) =>
+      matchHackathon(t.hackathonId, activeSprint.id, t.hackathonTitle, activeSprint.title)
     );
   }, [activeSprint, apiTeamsData]);
 
   // 2. Pending join request for this sprint
   const pendingJoinRequest = useMemo(() => {
     if (!activeSprint || !apiTeamsData.loaded) return null;
-    return apiTeamsData.pendingRequests.find(
-      (p) => p.hackathonId === activeSprint.id || p.hackathonTitle === activeSprint.title
+    return apiTeamsData.pendingRequests.find((p) =>
+      matchHackathon(p.hackathonId, activeSprint.id, p.hackathonTitle, activeSprint.title)
     );
   }, [activeSprint, apiTeamsData]);
 
   // Local fallback
-  const localTeam = activeSprint
-    ? getUserTeamForHackathon(userEmail, activeSprint.id)
-    : null;
+  const localTeam = useMemo(() => {
+    if (refreshKey) { /* trigger re-eval on sync */ }
+    if (!activeSprint) return null;
+    return (
+      getUserTeamForHackathon(userEmail, activeSprint.id) ||
+      getUserTeamForHackathon(userEmail, normalizeHackathonId(activeSprint.id))
+    );
+  }, [activeSprint, userEmail, refreshKey]);
 
   const currentTeam = useMemo(() => {
     if (backendTeam) {
@@ -293,6 +455,27 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
         (m) => m.status === 'pending'
       );
       const leaderMember = backendTeam.members?.find((m) => m.role === 'leader');
+      const resolvedLeadName = leaderMember?.userName || backendTeam.lead || user?.fullName || 'Team Leader';
+      const resolvedLeadEmail = leaderMember?.userEmail || backendTeam.leadEmail || userEmail;
+
+      const resolvedMembers = activeMembers.length > 0 ? activeMembers.map((m) => ({
+        id: m.id,
+        name: m.userName || m.name,
+        email: m.userEmail || m.email,
+        role: m.role === 'leader' ? 'Team Leader' : 'Member',
+        status: 'Active',
+        university: m.userUniversity || '',
+      })) : [
+        {
+          id: user?.id || 'usr-leader',
+          name: resolvedLeadName,
+          email: resolvedLeadEmail,
+          role: 'Team Leader',
+          status: 'Active',
+          university: user?.university || '',
+        }
+      ];
+
       return {
         id: backendTeam.id,
         name: backendTeam.teamName || backendTeam.name,
@@ -300,18 +483,11 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
         hackathon: backendTeam.hackathonTitle || activeSprint?.title,
         hackathonId: backendTeam.hackathonId,
         track: backendTeam.track || activeSprint?.track || 'General Track',
-        lead: leaderMember?.userName || backendTeam.lead || 'Team Leader',
-        leadEmail: leaderMember?.userEmail || backendTeam.leadEmail || '',
+        lead: resolvedLeadName,
+        leadEmail: resolvedLeadEmail,
         leaderId: backendTeam.leaderId,
         rosterLocked: Boolean(backendTeam.rosterLocked),
-        members: activeMembers.map((m) => ({
-          id: m.id,
-          name: m.userName || m.name,
-          email: m.userEmail || m.email,
-          role: m.role === 'leader' ? 'Team Leader' : 'Member',
-          status: 'Active',
-          university: m.userUniversity || '',
-        })),
+        members: resolvedMembers,
         pendingRequests: pendingMembers.map((m) => ({
           id: m.id,
           name: m.userName || m.name,
@@ -320,21 +496,23 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
           requestedAt: m.requestedAt,
           status: 'pending',
         })),
-        capacity: `${activeMembers.length} / 4 Members`,
+        capacity: `${Math.max(1, resolvedMembers.length)} / 4 Members`,
         isOpen: !backendTeam.rosterLocked,
       };
     }
     return localTeam;
-  }, [backendTeam, localTeam, activeSprint]);
+  }, [backendTeam, localTeam, activeSprint, user, userEmail]);
 
   // Team-based submission resolution
   const teamSubmission = (currentTeam && activeSprint)
     ? getSubmissionByTeamAndHackathon(currentTeam.code, activeSprint.id)
     : null;
 
-  const isLeader = Boolean(
+  const isLeader = isLeaderRole && Boolean(
     currentTeam && user && (
-      (backendTeam && (backendTeam.leaderId === user.id || currentTeam.leadEmail?.toLowerCase() === userEmail)) ||
+      (backendTeam && backendTeam.leaderId === user.id) ||
+      currentTeam.leadEmail?.toLowerCase() === userEmail ||
+      currentTeam.leaderId === user.id ||
       isUserTeamLeader(currentTeam, user)
     )
   );
@@ -391,33 +569,156 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleCreateTeamSubmit = (e) => {
+  const handleCreateTeamSubmit = async (e) => {
     e.preventDefault();
-    if (!newTeamName.trim() || !activeSprint) return;
+    const targetHackathonId = createTeamHackathonId || activeSprint?.id || availableOpenHackathons[0]?.id;
+    if (!newTeamName.trim() || !targetHackathonId) return;
 
-    const res = createTeam({
-      name: newTeamName.trim(),
-      hackathonId: activeSprint.id,
-      hackathonTitle: activeSprint.title,
-      track: activeSprint.track,
-      leadName: user?.fullName || "Team Lead",
-      leadEmail: userEmail
-    });
-
-    if (res.success) {
-      setTeamActionFeedback({
-        type: "success",
-        text: `✓ Created team "${res.team.name}"! Unique Invite Code: ${res.team.code}`
-      });
-      setNewTeamName("");
-      setRefreshKey((k) => k + 1);
-    } else {
+    if (!isLeaderRole) {
       setTeamActionFeedback({
         type: "error",
-        text: res.error
+        text: "Only users with the Team Leader role are authorized to create a team (FR-12, BR-1)."
       });
+      return;
     }
-    setTimeout(() => setTeamActionFeedback(null), 5000);
+
+    const targetHackathon = allHackathons.find(
+      (h) => matchHackathon(h.id, targetHackathonId, h.title)
+    ) || activeSprint;
+
+    // Check if leader is registered for this hackathon (do not silently auto-register)
+    const isRegistered =
+      isUserRegistered(userEmail, targetHackathonId) ||
+      isUserRegistered(userEmail, targetHackathon?.id) ||
+      registeredHackathons.some((r) => matchHackathon(r.id, targetHackathonId, r.title));
+
+    if (!isRegistered) {
+      setTeamActionFeedback({
+        type: "error",
+        text: `You must register for "${targetHackathon?.title || 'this competition'}" before creating a team. Please register for the hackathon first.`
+      });
+      return;
+    }
+
+    setTeamActionLoading(true);
+    try {
+      const canonicalId = targetHackathon?.id || targetHackathonId;
+      const targetTitle = targetHackathon?.title || canonicalId;
+
+      if (api.getToken()) {
+        const res = await api.createTeam({
+          hackathonId: canonicalId,
+          teamName: newTeamName.trim(),
+          track: targetHackathon?.track || 'General',
+        });
+
+        const createdTeam = res.team;
+        const normalizedCreated = {
+          ...createdTeam,
+          hackathonTitle: targetTitle,
+          lead: user?.fullName || 'Team Leader',
+          leadEmail: userEmail,
+          leaderId: user?.id,
+          members: [
+            {
+              id: user?.id || 'usr-leader',
+              userName: user?.fullName || 'Team Leader',
+              userEmail: userEmail,
+              role: 'leader',
+              status: 'accepted',
+              userUniversity: user?.university || '',
+            }
+          ]
+        };
+
+        // 1. Immediately update apiTeamsData so currentTeam resolves immediately
+        setApiTeamsData((prev) => {
+          const filtered = (prev.teams || []).filter(
+            (t) => !matchHackathon(t.hackathonId, canonicalId, t.hackathonTitle, targetTitle)
+          );
+          return {
+            ...prev,
+            teams: [normalizedCreated, ...filtered],
+            loaded: true,
+          };
+        });
+
+        // 2. Also save to teamService for persistent fallback across refreshes
+        saveTeam({
+          name: createdTeam.teamName,
+          hackathon: targetTitle,
+          hackathonId: canonicalId,
+          track: createdTeam.track || targetHackathon?.track || 'General',
+          lead: user?.fullName || 'Team Leader',
+          leadEmail: userEmail,
+          code: createdTeam.teamCode,
+          members: [
+            { name: `${user?.fullName || 'Team Leader'} (Lead)`, role: 'Team Leader', email: userEmail, status: 'Active' }
+          ],
+          capacity: '1 / 4 Members',
+          isOpen: true,
+          rosterLocked: false
+        });
+
+        // 3. Switch selected competition to the created hackathon
+        setSelectedHackathonId(canonicalId);
+        setCreateTeamHackathonId(canonicalId);
+        setNewTeamName("");
+
+        // 4. Set persistent success notice (DO NOT clear via timeout)
+        setTeamActionFeedback({
+          type: "success",
+          text: `Your team "${createdTeam.teamName}" is ready! Share the Team Code ${createdTeam.teamCode} with your teammates so they can join your team.`,
+          teamCode: createdTeam.teamCode,
+        });
+
+        addNotification({
+          userEmail: user.email,
+          title: "Team Created Successfully",
+          message: `Team "${createdTeam.teamName}" created with Invite Code: ${createdTeam.teamCode}.`,
+          type: "success",
+          link: "/dashboard/student?tab=roster"
+        });
+
+        triggerDataSync("team_created");
+        setRefreshKey((k) => k + 1);
+      } else {
+        const res = createTeam({
+          name: newTeamName.trim(),
+          hackathonId: canonicalId,
+          hackathonTitle: targetTitle,
+          track: targetHackathon?.track,
+          leadName: user?.fullName || "Team Lead",
+          leadEmail: userEmail,
+          user
+        });
+
+        if (res.success) {
+          setSelectedHackathonId(canonicalId);
+          setCreateTeamHackathonId(canonicalId);
+          setNewTeamName("");
+          setTeamActionFeedback({
+            type: "success",
+            text: `Your team "${res.team.name}" is ready! Share the Team Code ${res.team.code} with your teammates so they can join your team.`,
+            teamCode: res.team.code,
+          });
+          triggerDataSync("team_created");
+          setRefreshKey((k) => k + 1);
+        } else {
+          setTeamActionFeedback({
+            type: "error",
+            text: res.error
+          });
+        }
+      }
+    } catch (err) {
+      setTeamActionFeedback({
+        type: "error",
+        text: err.data?.message || err.message || "Failed to create team."
+      });
+    } finally {
+      setTeamActionLoading(false);
+    }
   };
 
   const handleJoinTeam = async (e) => {
@@ -428,7 +729,14 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     setTeamActionLoading(true);
     try {
       if (api.getToken()) {
-        const res = await api.joinTeam(clean);
+        await api.joinTeam(clean);
+        addNotification({
+          userEmail: user.email,
+          title: "Join Request Submitted",
+          message: `Your request to join squad (Team Code: ${clean}) was sent to the Team Leader.`,
+          type: "info",
+          link: "/dashboard/student?tab=roster"
+        });
         setTeamActionFeedback({
           type: "success",
           text: `✓ Join request submitted successfully! Awaiting approval from the Team Leader.`,
@@ -468,6 +776,15 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     try {
       if (api.getToken() && currentTeam.id) {
         await api.respondToJoinRequest(currentTeam.id, requestId, action);
+        addNotification({
+          userEmail: user.email,
+          title: action === 'accept' ? "Team Member Accepted" : "Join Request Declined",
+          message: action === 'accept'
+            ? `You accepted a new member into squad "${currentTeam.name || currentTeam.teamName}".`
+            : `You declined a membership request for squad "${currentTeam.name || currentTeam.teamName}".`,
+          type: action === 'accept' ? "success" : "info",
+          link: "/dashboard/student?tab=roster"
+        });
       } else {
         respondToTeamJoinRequest(currentTeam.code, requestId, action, user);
       }
@@ -571,7 +888,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     updateFormField("submissionFiles", updatedFiles);
   };
 
-  const handleSaveSubmission = (e) => {
+  const handleSaveSubmission = async (e) => {
     e.preventDefault();
     if (!currentTeam || !activeSprint || !user) return;
 
@@ -582,6 +899,21 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
       });
       setTimeout(() => setSubmissionNotice(null), 4500);
       return;
+    }
+
+    if (api.getToken() && currentTeam.id) {
+      try {
+        await api.submitProject({
+          teamId: currentTeam.id,
+          projectTitle: formValues.projectTitle.trim() || 'Untitled Project',
+          abstract: formValues.projectDescription.trim() || 'Project abstract description',
+          track: activeSprint.track || 'General',
+          repoUrl: formValues.repositoryUrl.trim(),
+          demoUrl: formValues.liveDemoUrl.trim(),
+        });
+      } catch (err) {
+        console.warn('Backend draft sync notice:', err.message);
+      }
     }
 
     const res = saveDraftSubmission({
@@ -640,7 +972,34 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     setShowFinalizeModal(true);
   };
 
-  const handleConfirmFinalize = () => {
+  const handleConfirmFinalize = async () => {
+    if (!isLeader) {
+      setSubmissionNotice({
+        type: "error",
+        text: `Only the Team Leader (${currentTeam?.lead || "Leader"}) can finalize the project submission.`
+      });
+      setTimeout(() => setSubmissionNotice(null), 4500);
+      return;
+    }
+
+    if (api.getToken() && currentTeam.id) {
+      try {
+        const subRes = await api.submitProject({
+          teamId: currentTeam.id,
+          projectTitle: formValues.projectTitle.trim() || 'Untitled Project',
+          abstract: formValues.projectDescription.trim() || 'Final submission abstract',
+          track: activeSprint.track || 'General',
+          repoUrl: formValues.repositoryUrl.trim(),
+          demoUrl: formValues.liveDemoUrl.trim(),
+        });
+        if (subRes.submission?.id) {
+          await api.request(`/submissions/${subRes.submission.id}/lock`, { method: 'PATCH' });
+        }
+      } catch (err) {
+        console.warn('Backend finalize lock sync notice:', err.message);
+      }
+    }
+
     saveDraftSubmission({
       teamId: currentTeam.code,
       hackathonId: activeSprint.id,
@@ -680,12 +1039,16 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
   const readOnlyForm = isFinalized || !isLeader;
 
   const tabItems = [
-    {
-      value: "workspace",
-      label: "Project submission",
-      icon: <Rocket aria-hidden="true" />,
-      badge: isFinalized ? <Badge tone="success">Submitted</Badge> : null
-    },
+    ...(isLeaderRole
+      ? [
+          {
+            value: "workspace",
+            label: "Project submission",
+            icon: <Rocket aria-hidden="true" />,
+            badge: isFinalized ? <Badge tone="success">Submitted</Badge> : null
+          }
+        ]
+      : []),
     {
       value: "roster",
       label: "Team & roster",
@@ -732,15 +1095,15 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
 
   return (
     <DashboardLayout
-      portalTitle={isLeader ? "Team Leader Portal" : "Student Participant Portal"}
-      roleBadgeText={isLeader ? "TEAM LEADER" : "STUDENT PARTICIPANT"}
+      portalTitle={isLeaderRole ? "Team Leader Portal" : "Student Participant Portal"}
+      roleBadgeText={isLeaderRole ? "TEAM LEADER" : "STUDENT PARTICIPANT"}
     >
       <div className="space-y-8">
 
         {/* HEADER */}
         <PageHeader
           icon={Rocket}
-          eyebrow={isLeader ? "Team leader workspace" : "Participant workspace"}
+          eyebrow={isLeaderRole ? "Team leader workspace" : "Participant workspace"}
           title={`Welcome back, ${user?.fullName || "Developer"}`}
           description="Register for hackathons, build your team, submit your project and follow it through screening, judging and certificates."
           meta={
@@ -754,7 +1117,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                 <Users className="h-4 w-4" aria-hidden="true" />
                 <span className="font-medium text-fg">{currentTeam ? currentTeam.name : "No team yet"}</span>
               </span>
-              <Badge tone={isLeader ? "accent" : "neutral"}>{isLeader ? "Team leader" : "Member"}</Badge>
+              <Badge tone={isLeaderRole ? "accent" : "neutral"}>{isLeaderRole ? "Team Leader" : "Participant"}</Badge>
             </>
           }
           actions={
@@ -867,9 +1230,10 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
         </div>
 
         {/* ========================================================= */}
-        {/* TAB 1: WORKSPACE & PROJECT SUBMISSION */}
+        {/* TAB 1: WORKSPACE & PROJECT SUBMISSION (LEADER ONLY) */}
         {/* ========================================================= */}
-        <TabPanel value="workspace" activeValue={activeTab} idPrefix="student" className="focus:outline-none">
+        {isLeaderRole && (
+          <TabPanel value="workspace" activeValue={activeTab} idPrefix="student" className="focus:outline-none">
           <div className="grid gap-6 lg:grid-cols-3">
             {/* Primary submission workspace */}
             <Card className={cn("lg:col-span-2", isFinalized && "border-success/30")}>
@@ -918,7 +1282,11 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                     illustration="team"
                     icon={Users}
                     title="A team is required to submit"
-                    description="Deliverables belong to a team. Create a new team or enter an invite code in the Team & roster tab."
+                    description={
+                      isLeaderRole
+                        ? "Deliverables belong to a team. Create a new team in the Team & roster tab."
+                        : "Deliverables belong to a team. Enter an invite code in the Team & roster tab to join an existing team."
+                    }
                     action={
                       <Button onClick={() => setActiveTab("roster")}>
                         Go to team management
@@ -1065,7 +1433,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                         )}
                       </FormSection>
 
-                      {isLeader && (
+                      {isLeader ? (
                         <div className="flex flex-col-reverse gap-3 border-t border-line pt-5 sm:flex-row sm:items-center sm:justify-between">
                           <p className="text-sm text-fg-subtle">
                             Status: <span className="font-medium text-fg">{isFinalized ? "Locked" : "Draft"}</span>
@@ -1085,6 +1453,15 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                               Submission certified and locked. Reopening requires admin request.
                             </p>
                           )}
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-2 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-between text-sm text-fg-muted">
+                          <p>
+                            Status: <span className="font-medium text-fg">{isFinalized ? "Locked" : "Draft"}</span>
+                          </p>
+                          <p className="text-xs text-fg-subtle">
+                            Submission controls are restricted to the Team Leader ({currentTeam?.lead || "Leader"}).
+                          </p>
                         </div>
                       )}
                     </form>
@@ -1169,6 +1546,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
             </div>
           </div>
         </TabPanel>
+        )}
 
         {/* ========================================================= */}
         {/* TAB 2: TEAM & ROSTER MANAGEMENT */}
@@ -1186,9 +1564,9 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                 <div className="flex min-w-0 items-start gap-3">
                   <IconTile icon={Users} />
                   <div className="min-w-0 space-y-1">
-                    <CardTitle as="h2">Team roster</CardTitle>
+                    <CardTitle as="h2">Team Details & Roster</CardTitle>
                     <CardDescription>
-                      {currentTeam ? `${currentTeam.name} · ${activeSprint?.title}` : "No team assigned"}
+                      {currentTeam ? `${currentTeam.name} · ${activeSprint?.title || currentTeam.hackathon}` : `No team formed for ${activeSprint?.title || "this hackathon"}`}
                     </CardDescription>
                   </div>
                 </div>
@@ -1202,6 +1580,18 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
               <CardContent className="space-y-6">
                 {currentTeam ? (
                   <>
+                    {/* Clear instruction alert */}
+                    <div className="rounded-xl border border-accent/30 bg-accent/5 p-4 flex items-start gap-3">
+                      <CheckCircle2 className="h-5 w-5 text-accent shrink-0 mt-0.5" />
+                      <div className="text-sm">
+                        <p className="font-semibold text-fg">Your team is ready!</p>
+                        <p className="text-fg-muted mt-0.5">
+                          Share the Team Code below with your teammates so they can join your team.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Prominent Team Code display with copy button */}
                     <div className="flex flex-col gap-4 rounded-xl border border-accent/25 bg-accent/5 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
                       <div className="flex min-w-0 items-center gap-3">
                         <IconTile icon={KeyRound} />
@@ -1232,6 +1622,30 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                             {currentTeam.rosterLocked ? "Unlock roster" : "Lock roster"}
                           </Button>
                         )}
+                      </div>
+                    </div>
+
+                    {/* Team Details Summary Grid */}
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 rounded-xl border border-line bg-surface/50 p-4">
+                      <div>
+                        <p className="eyebrow">Team Name</p>
+                        <p className="mt-1 font-semibold text-fg text-sm truncate">{currentTeam.name}</p>
+                      </div>
+                      <div>
+                        <p className="eyebrow">Competition</p>
+                        <p className="mt-1 font-semibold text-fg text-sm truncate">{activeSprint?.title || currentTeam.hackathon}</p>
+                      </div>
+                      <div>
+                        <p className="eyebrow">Team Leader</p>
+                        <p className="mt-1 font-semibold text-fg text-sm truncate">{currentTeam.lead || user?.fullName}</p>
+                      </div>
+                      <div>
+                        <p className="eyebrow">Roster Status</p>
+                        <div className="mt-1">
+                          <Badge tone={currentTeam.members?.length > 1 ? "success" : "warning"} dot>
+                            {currentTeam.members?.length > 1 ? `Active (${currentTeam.members.length} members)` : "Waiting for members"}
+                          </Badge>
+                        </div>
                       </div>
                     </div>
 
@@ -1395,14 +1809,18 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                     illustration="team"
                     icon={Users}
                     title="No team yet"
-                    description={`No team formed for ${activeSprint?.title || "this hackathon"}. Create a new team or enter an invite code to join an existing one.`}
+                    description={
+                      isLeaderRole
+                        ? `No team formed for ${activeSprint?.title || "this hackathon"}. Create a new team below to get started.`
+                        : `No team joined yet for ${activeSprint?.title || "this hackathon"}. Enter an invite code below to join an existing team.`
+                    }
                   />
                 )}
               </CardContent>
             </Card>
 
             <div className="space-y-6">
-              {!currentTeam && (
+              {!currentTeam && isLeaderRole && (
                 <Card>
                   <CardHeader>
                     <div className="flex items-center gap-3">
@@ -1410,11 +1828,28 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                       <CardTitle as="h2">Create a team</CardTitle>
                     </div>
                     <CardDescription>
-                      Start a team for <span className="text-fg">{activeSprint?.title}</span>. You will be the team leader.
+                      Start a team for <span className="text-fg">{activeSprint?.title || "an open hackathon"}</span>. You will be the team leader.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     <form onSubmit={handleCreateTeamSubmit} className="space-y-4">
+                      {availableOpenHackathons.length > 0 && (
+                        <Field label="Competition" required>
+                          <Select
+                            value={activeSprint?.id || createTeamHackathonId || (availableOpenHackathons[0]?.id || "")}
+                            onChange={(e) => {
+                              setCreateTeamHackathonId(e.target.value);
+                              setSelectedHackathonId(e.target.value);
+                            }}
+                          >
+                            {availableOpenHackathons.map((h) => (
+                              <option key={h.id} value={h.id}>
+                                {h.title}
+                              </option>
+                            ))}
+                          </Select>
+                        </Field>
+                      )}
                       <Field label="Team name" required>
                         <Input
                           type="text"
@@ -1423,7 +1858,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                           placeholder="e.g. ApexInnovators"
                         />
                       </Field>
-                      <Button type="submit" className="w-full">
+                      <Button type="submit" className="w-full" loading={teamActionLoading}>
                         <UserPlus aria-hidden="true" />
                         Create team
                       </Button>
@@ -1432,34 +1867,122 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                 </Card>
               )}
 
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <IconTile icon={KeyRound} />
-                    <CardTitle as="h2">Join with an invite code</CardTitle>
-                  </div>
-                  <CardDescription>
-                    Enter the unique invite code provided by your team leader.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <form onSubmit={handleJoinTeam} className="space-y-4">
-                    <Field label="Invite code" required>
-                      <Input
-                        type="text"
-                        value={joinCode}
-                        onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                        placeholder="e.g. HT-DEV-42"
-                        className="font-mono uppercase"
-                        autoComplete="off"
-                      />
-                    </Field>
-                    <Button type="submit" variant="secondary" className="w-full">
-                      Join team
+              {currentTeam && isLeaderRole && (
+                <Card className="border-accent/30 bg-accent/5">
+                  <CardHeader>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-3">
+                        <IconTile icon={CheckCircle2} tone="accent" />
+                        <CardTitle as="h2">Team formed</CardTitle>
+                      </div>
+                      <Badge tone="success" dot>Active squad</Badge>
+                    </div>
+                    <CardDescription>
+                      You have formed a team for <span className="font-semibold text-fg">{activeSprint?.title}</span>.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {availableOpenHackathons.length > 1 && (
+                      <Field label="Competition" hint="Switch competition to view or manage teams across hackathons.">
+                        <Select
+                          value={activeSprint?.id || selectedHackathonId || ""}
+                          onChange={(e) => {
+                            setSelectedHackathonId(e.target.value);
+                            setCreateTeamHackathonId(e.target.value);
+                          }}
+                        >
+                          {availableOpenHackathons.map((h) => (
+                            <option key={h.id} value={h.id}>
+                              {h.title}
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                    )}
+
+                    <div className="space-y-1">
+                      <p className="eyebrow">Formed team name</p>
+                      <p className="text-base font-semibold text-fg">{currentTeam.name}</p>
+                    </div>
+
+                    <div className="rounded-lg border border-line bg-surface p-3.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-fg-muted">Team Code</span>
+                        <code className="font-mono text-sm font-bold text-accent-text">{currentTeam.code}</code>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-fg-muted">Team Leader</span>
+                        <span className="text-xs font-semibold text-fg">{currentTeam.lead || user?.fullName}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-fg-muted">Roster Status</span>
+                        <Badge tone={currentTeam.members?.length > 1 ? "success" : "warning"}>
+                          {currentTeam.members?.length > 1 ? `${currentTeam.members.length} members` : "Waiting for members"}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => handleCopyCode(currentTeam.code)}
+                    >
+                      {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+                      {copied ? "Copied code" : "Copy team code"}
                     </Button>
-                  </form>
-                </CardContent>
-              </Card>
+
+                    <p className="text-xs text-fg-subtle">
+                      Duplicate team creation for {activeSprint?.title || "this competition"} is disabled. You are the registered leader of {currentTeam.name}.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {!currentTeam && !isLeaderRole && (
+                <Card className="border-accent/30 bg-accent/5">
+                  <CardContent className="p-4 flex items-start gap-3">
+                    <ShieldCheck className="h-5 w-5 text-accent shrink-0 mt-0.5" />
+                    <div className="text-sm">
+                      <p className="font-semibold text-fg">Participant Membership</p>
+                      <p className="text-fg-muted mt-0.5">
+                        As a Participant, you can join an existing team using a Team Code shared by your Team Leader. Only users with the Team Leader role can create new teams.
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {!isLeaderRole && (
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center gap-3">
+                      <IconTile icon={KeyRound} />
+                      <CardTitle as="h2">Join with an invite code</CardTitle>
+                    </div>
+                    <CardDescription>
+                      Enter the unique invite code provided by your team leader.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <form onSubmit={handleJoinTeam} className="space-y-4">
+                      <Field label="Invite code" required>
+                        <Input
+                          type="text"
+                          value={joinCode}
+                          onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                          placeholder="e.g. HT-DEV-42"
+                          className="font-mono uppercase"
+                          autoComplete="off"
+                        />
+                      </Field>
+                      <Button type="submit" variant="secondary" className="w-full">
+                        Join team
+                      </Button>
+                    </form>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </div>
         </TabPanel>
@@ -1526,11 +2049,17 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                     illustration="review"
                     icon={ClipboardCheck}
                     title="Nothing to screen yet"
-                    description="Submit deliverables first to enter the screening gateway."
+                    description={
+                      isLeaderRole
+                        ? "Submit deliverables first to enter the screening gateway."
+                        : "Your Team Leader will submit project deliverables to enter the screening gateway."
+                    }
                     action={
-                      <Button variant="secondary" onClick={() => setActiveTab("workspace")}>
-                        Go to project submission
-                      </Button>
+                      isLeaderRole ? (
+                        <Button variant="secondary" onClick={() => setActiveTab("workspace")}>
+                          Go to project submission
+                        </Button>
+                      ) : null
                     }
                   />
                 )}

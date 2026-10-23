@@ -118,6 +118,13 @@ class ApiClient {
     });
   }
 
+  async redeemCode(code) {
+    return this.request('/auth/redeem-code', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  }
+
   logout() {
     this.clearToken();
   }
@@ -164,6 +171,24 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ criteria }),
     });
+  }
+
+  async registerForHackathon(hackathonId) {
+    return this.request(`/hackathons/${hackathonId}/register`, {
+      method: 'POST',
+    });
+  }
+
+  async getHackathonRegistrations(hackathonId) {
+    return this.request(`/hackathons/${hackathonId}/registrations`);
+  }
+
+  async getAdminRegistrations(params = {}) {
+    const q = new URLSearchParams();
+    if (params.hackathonId && params.hackathonId !== 'all') q.set('hackathonId', params.hackathonId);
+    if (params.search) q.set('search', params.search);
+    const queryString = q.toString() ? `?${q.toString()}` : '';
+    return this.request(`/admin/registrations${queryString}`);
   }
 
   // ── Teams (FR-12 to FR-16) ───────────────────────────────────────────

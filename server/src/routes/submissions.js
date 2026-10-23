@@ -1,12 +1,12 @@
 import express from 'express';
 import store from '../database/store.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, optionalAuth } from '../middleware/auth.js';
 import { notifySubmissionSaved } from '../notifications/notifier.js';
 
 const router = express.Router();
 
 // GET /api/v1/submissions: List submissions for a hackathon
-router.get('/', (req, res) => {
+router.get('/', optionalAuth, (req, res) => {
   const { hackathonId } = req.query;
   if (!hackathonId) {
     return res.status(400).json({
@@ -14,6 +14,18 @@ router.get('/', (req, res) => {
       error: 'Bad Request',
       message: 'hackathonId query parameter is required.',
     });
+  }
+
+  // Organizer data isolation: organizers can only view submissions for hackathons they created or manage
+  if (req.user && req.user.role === 'organizer') {
+    const hackathon = store.getHackathonById(hackathonId);
+    if (!hackathon || (hackathon.createdBy !== req.user.id && !(hackathon.assignedOrganizers && hackathon.assignedOrganizers.includes(req.user.id)))) {
+      return res.status(403).json({
+        status: 403,
+        error: 'Forbidden',
+        message: 'Organizers can only view submissions for hackathons they created or manage.',
+      });
+    }
   }
 
   const submissions = store.getSubmissionsByHackathon(hackathonId).map((s) => {
@@ -32,7 +44,7 @@ router.get('/', (req, res) => {
 });
 
 // GET /api/v1/submissions/:id: Get single submission by ID
-router.get('/:id', (req, res) => {
+router.get('/:id', optionalAuth, (req, res) => {
   const submission = store.getSubmissionById(req.params.id);
   if (!submission) {
     return res.status(404).json({
@@ -40,6 +52,18 @@ router.get('/:id', (req, res) => {
       error: 'Not Found',
       message: 'Submission not found.',
     });
+  }
+
+  // Organizer data isolation: organizers cannot access submissions belonging to other hackathons
+  if (req.user && req.user.role === 'organizer') {
+    const hackathon = store.getHackathonById(submission.hackathonId);
+    if (!hackathon || (hackathon.createdBy !== req.user.id && !(hackathon.assignedOrganizers && hackathon.assignedOrganizers.includes(req.user.id)))) {
+      return res.status(403).json({
+        status: 403,
+        error: 'Forbidden',
+        message: 'Organizers cannot access submissions belonging to other hackathons.',
+      });
+    }
   }
 
   const team = store.findTeamById(submission.teamId);
@@ -53,7 +77,7 @@ router.get('/:id', (req, res) => {
 });
 
 // GET /api/v1/submissions/team/:teamId: Get submission by Team ID
-router.get('/team/:teamId', (req, res) => {
+router.get('/team/:teamId', optionalAuth, (req, res) => {
   const submission = store.getSubmissionByTeamId(req.params.teamId);
   if (!submission) {
     return res.status(404).json({
@@ -61,6 +85,18 @@ router.get('/team/:teamId', (req, res) => {
       error: 'Not Found',
       message: 'No project submission found for this team.',
     });
+  }
+
+  // Organizer data isolation: organizers cannot access submissions belonging to other hackathons
+  if (req.user && req.user.role === 'organizer') {
+    const hackathon = store.getHackathonById(submission.hackathonId);
+    if (!hackathon || (hackathon.createdBy !== req.user.id && !(hackathon.assignedOrganizers && hackathon.assignedOrganizers.includes(req.user.id)))) {
+      return res.status(403).json({
+        status: 403,
+        error: 'Forbidden',
+        message: 'Organizers cannot access submissions belonging to other hackathons.',
+      });
+    }
   }
 
   const team = store.findTeamById(submission.teamId);
@@ -94,6 +130,24 @@ router.post('/', requireAuth, (req, res) => {
     });
   }
 
+  const team = store.findTeamById(teamId);
+  if (!team) {
+    return res.status(404).json({
+      status: 404,
+      error: 'Not Found',
+      message: 'Team not found.',
+    });
+  }
+
+  // Verify that the logged-in user is the actual Team Leader of this specific team
+  if (team.leaderId !== req.user.id) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'Only the Team Leader of this team is authorized to submit a project (FR-17, BR-1).',
+    });
+  }
+
   try {
     const isNew = !store.getSubmissionByTeamId(teamId);
     const submission = store.createOrUpdateSubmission({
@@ -116,9 +170,10 @@ router.post('/', requireAuth, (req, res) => {
       submission,
     });
   } catch (err) {
-    return res.status(400).json({
-      status: 400,
-      error: 'Bad Request',
+    const status = err.statusCode || (err.message.includes('Team Leader') ? 403 : 400);
+    return res.status(status).json({
+      status,
+      error: status === 403 ? 'Forbidden' : 'Bad Request',
       message: err.message,
     });
   }
@@ -126,7 +181,7 @@ router.post('/', requireAuth, (req, res) => {
 
 // PATCH /api/v1/submissions/:id/lock: Team Leader or Admin locks the project submission
 router.patch('/:id/lock', requireAuth, (req, res) => {
-  const submission = store.lockSubmission(req.params.id);
+  const submission = store.getSubmissionById(req.params.id);
   if (!submission) {
     return res.status(404).json({
       status: 404,
@@ -135,10 +190,20 @@ router.patch('/:id/lock', requireAuth, (req, res) => {
     });
   }
 
+  const team = store.findTeamById(submission.teamId);
+  if (req.user.role !== 'admin' && (!team || team.leaderId !== req.user.id)) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'Only the Team Leader of this team or an Admin is authorized to lock the project submission.',
+    });
+  }
+
+  const lockedSubmission = store.lockSubmission(req.params.id);
   return res.json({
     status: 200,
     message: 'Project submission has been locked successfully (FR-21, BR-8).',
-    submission,
+    submission: lockedSubmission,
   });
 });
 

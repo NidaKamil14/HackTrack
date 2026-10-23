@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
 import EventCover from '../../components/art/EventCover';
 import { useAuth } from '../../context/AuthContext';
@@ -8,11 +8,14 @@ import {
   advanceHackathonStage,
   updateHackathon,
   generateHackathonCode,
-  getHackathonCommittee
+  getHackathonCommittee,
+  saveUserHackathonAssignment
 } from '../../utils/hackathonService';
 import { getAllTeams } from '../../utils/teamService';
 import { getSubmissions } from '../../utils/submissionService';
 import { addNotification } from '../../utils/notificationService';
+import { getRegistrations } from '../../utils/registrationService';
+import { subscribeToDataSync } from '../../utils/syncService';
 import api from '../../utils/api';
 import {
   ArrowDown,
@@ -35,6 +38,7 @@ import {
   Trash2,
   Trophy,
   Users,
+  UserPlus,
   X,
 } from 'lucide-react';
 import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, EmptyState, Field, Input, PageHeader, Select, StatCard, Textarea, cn, stageTone, stageProgress, stagePhase, STAGE_ORDER, toneStyles } from '../../components/ui';
@@ -49,8 +53,12 @@ export default function OrganizerDashboard() {
   const { user } = useAuth();
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Filter view: "my" (only hackathons organized by current user) or "all"
-  const [scopeFilter, setScopeFilter] = useState("my");
+  // Subscribe to live cross-dashboard changes
+  useEffect(() => {
+    return subscribeToDataSync(() => {
+      setRefreshKey((k) => k + 1);
+    });
+  }, []);
 
   // Fetch hackathons
   const allHackathons = useMemo(() => {
@@ -58,18 +66,22 @@ export default function OrganizerDashboard() {
     return getStoredHackathons();
   }, [refreshKey]);
 
-  // Filter based on organizer email / organization
+  const userEmail = (user?.email || "organizer@hacktrack.io").toLowerCase().trim();
+  const userId = user?.id;
+
+  // Organizer Data Isolation: only show hackathons created by or assigned to this Organizer
   const displayedHackathons = useMemo(() => {
-    if (scopeFilter === "all") return allHackathons;
-    const userEmail = user?.email?.toLowerCase() || "organizer@hacktrack.io";
     return allHackathons.filter((h) => {
-      if (h.organizerEmail && h.organizerEmail.toLowerCase() === userEmail) return true;
+      const hEmail = (h.organizerEmail || "").toLowerCase().trim();
+      if (hEmail && hEmail === userEmail) return true;
+      if (userId && (h.createdBy === userId || (Array.isArray(h.assignedOrganizers) && h.assignedOrganizers.includes(userId)))) return true;
       if (h.organizers && h.organizers.some((o) => typeof o === 'string' && o.toLowerCase().includes(userEmail))) return true;
-      // Default sample hackathon for demo organizer
-      if (userEmail === "organizer@hacktrack.io" && h.id === "devpulse-2026") return true;
+      if (userEmail === "organizer@hacktrack.io" && (h.id === "devpulse-2026" || h.id === "hack-001")) return true;
       return false;
     });
-  }, [allHackathons, scopeFilter, user]);
+  }, [allHackathons, userEmail, userId]);
+
+  const myHackathonIds = useMemo(() => new Set(displayedHackathons.map((h) => h.id)), [displayedHackathons]);
 
   const teams = useMemo(() => {
     if (refreshKey) { /* trigger */ }
@@ -81,7 +93,17 @@ export default function OrganizerDashboard() {
     return getSubmissions();
   }, [refreshKey]);
 
-  const teamsList = Object.entries(teams).map(([code, t]) => ({ ...t, code }));
+  // Data isolation: filter participant teams strictly to the Organizer's own hackathons
+  const teamsList = useMemo(() => {
+    return Object.entries(teams)
+      .map(([code, t]) => ({ ...t, code }))
+      .filter((t) => myHackathonIds.has(t.hackathonId));
+  }, [teams, myHackathonIds]);
+
+  // Data isolation: filter submissions strictly to the Organizer's own hackathons
+  const mySubmissions = useMemo(() => {
+    return submissions.filter((s) => myHackathonIds.has(s.hackathonId));
+  }, [submissions, myHackathonIds]);
 
   // Modal State: Create New Hackathon
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -112,10 +134,13 @@ export default function OrganizerDashboard() {
   // Modal State: Committee & Access Codes
   const [manageTarget, setManageTarget] = useState(null);
   const [copiedCode, setCopiedCode] = useState(null);
+  const [judgeAssignEmail, setJudgeAssignEmail] = useState("judge@hacktrack.io");
+  const [judgeAssignNotice, setJudgeAssignNotice] = useState(null);
 
   const openManageModal = (hackathon) => {
     setManageTarget(hackathon);
     setCopiedCode(null);
+    setJudgeAssignNotice(null);
   };
 
   const handleRegenerateCode = (role) => {
@@ -125,6 +150,44 @@ export default function OrganizerDashboard() {
       setRefreshKey((k) => k + 1);
       setNotice(`Generated new ${role.toUpperCase()} code: ${res.codeRecord.code}`);
       setTimeout(() => setNotice(null), 3500);
+    }
+  };
+
+  const handleAssignJudge = (e) => {
+    e.preventDefault();
+    if (!manageTarget || !judgeAssignEmail.trim()) return;
+    const cleanEmail = judgeAssignEmail.trim().toLowerCase();
+
+    // Check if already bound
+    const currentCommittee = getHackathonCommittee(manageTarget.id);
+    const isAlreadyJudge = currentCommittee.judges.some((j) => (j.email || j.userId || '').toLowerCase() === cleanEmail);
+    if (isAlreadyJudge) {
+      setJudgeAssignNotice({ type: 'error', text: `Judge ${cleanEmail} is already assigned to this hackathon.` });
+      return;
+    }
+
+    // Generate secure access code tied to judge role and hackathon
+    const res = generateHackathonCode(manageTarget.id, 'judge', user?.email || "organizer@hacktrack.io");
+    if (res.success) {
+      // Save user assignment directly
+      saveUserHackathonAssignment(cleanEmail, manageTarget.id);
+
+      // Send private persisted notification to the intended Judge
+      addNotification({
+        userEmail: cleanEmail,
+        title: `Judging Assignment: ${manageTarget.title}`,
+        message: `You have been assigned by ${user?.fullName || "Organizer"} to evaluate submissions for "${manageTarget.title}". Your secure access code is: ${res.codeRecord.code}.`,
+        type: "info",
+        link: "/dashboard/judge"
+      });
+
+      setRefreshKey((k) => k + 1);
+      setJudgeAssignNotice({
+        type: 'success',
+        text: `✓ Assigned ${cleanEmail} as Judge! Code ${res.codeRecord.code} sent via private notification.`
+      });
+      setNotice(`Judge ${cleanEmail} assigned to ${manageTarget.title}.`);
+      setTimeout(() => setNotice(null), 4000);
     }
   };
 
@@ -260,13 +323,44 @@ export default function OrganizerDashboard() {
     const organizerName = user?.fullName || "Hackathon Organizer";
     const organizerUniversity = user?.university || "Host Institution";
 
-    // 1. Create in local persistent store
+    let backendHackathon = null;
+    // 1. Try creating on backend API if authenticated
+    if (api.getToken()) {
+      try {
+        const apiRes = await api.createHackathon({
+          title: newHackathon.title.trim(),
+          tagLine: newHackathon.headline.trim() || `${newHackathon.track} Innovation Sprint`,
+          description: newHackathon.summary.trim(),
+          status: 'published',
+          registrationDeadline: new Date(Date.now() + 7 * 86400000).toISOString(),
+          submissionDeadline: new Date(Date.now() + 14 * 86400000).toISOString(),
+          minTeamSize: newHackathon.minTeamSize,
+          maxTeamSize: newHackathon.maxTeamSize,
+          hasScreeningRound: newHackathon.enabledModules.screeningGate,
+          hasMentorship: newHackathon.enabledModules.mentorship,
+        });
+        if (apiRes?.hackathon) {
+          backendHackathon = apiRes.hackathon;
+          try {
+            await api.publishHackathon(backendHackathon.id);
+          } catch {
+            // Already published
+          }
+        }
+      } catch (err) {
+        console.warn("API createHackathon fallback to local store:", err.message);
+      }
+    }
+
+    // 2. Create in local persistent store with canonical backend ID
     const res = createNewHackathon({
+      id: backendHackathon?.id || undefined,
       title: newHackathon.title.trim(),
       headline: newHackathon.headline.trim() || `${newHackathon.track} Innovation Sprint`,
       track: newHackathon.track,
       category: newHackathon.category,
       stage: "Registration Open",
+      status: "published",
       prizePool: newHackathon.prize,
       deadline: newHackathon.submissionDeadline || newHackathon.deadline,
       dates: `${newHackathon.registrationDeadline} - ${newHackathon.submissionDeadline}`,
@@ -280,24 +374,14 @@ export default function OrganizerDashboard() {
       organizers: [organizerName, organizerUniversity]
     });
 
-    // 2. Also try creating on backend API if available
-    try {
-      await api.createHackathon({
-        title: newHackathon.title.trim(),
-        tagLine: newHackathon.headline.trim() || `${newHackathon.track} Innovation Sprint`,
-        description: newHackathon.summary.trim(),
-        registrationDeadline: new Date(Date.now() + 7 * 86400000).toISOString(),
-        submissionDeadline: new Date(Date.now() + 14 * 86400000).toISOString(),
-        minTeamSize: newHackathon.minTeamSize,
-        maxTeamSize: newHackathon.maxTeamSize,
-        hasScreeningRound: newHackathon.enabledModules.screeningGate,
-        hasMentorship: newHackathon.enabledModules.mentorship,
-      });
-    } catch {
-      // Local store handles fallback seamlessly
-    }
-
     if (res.success) {
+      addNotification({
+        userEmail: user?.email,
+        title: "Hackathon Created Successfully",
+        message: `Competition "${res.hackathon?.title || 'New Hackathon'}" has been published. Tracks and rubrics are active.`,
+        type: "success",
+        link: `/hackathons/${res.hackathon?.id || ''}`
+      });
       setShowCreateModal(false);
       setNewHackathon({
         title: "",
@@ -345,24 +429,78 @@ export default function OrganizerDashboard() {
     });
 
     setConfigTarget(null);
+    addNotification({
+      userEmail: user?.email,
+      title: "Competition Settings Updated",
+      message: `Configuration and dates for "${configTarget.title}" have been saved.`,
+      type: "info",
+      link: "/dashboard/organizer"
+    });
     setRefreshKey((k) => k + 1);
     setNotice(`Settings updated for "${configTarget.title}".`);
     setTimeout(() => setNotice(null), 3500);
   };
 
-  const handleBroadcastAnnouncement = (e) => {
+  const handleBroadcastAnnouncement = async (e) => {
     e.preventDefault();
     if (!announcementText.trim()) return;
 
-    addNotification({
-      userEmail: "all",
-      title: `Announcement: ${user?.fullName || "Organizer"}`,
-      message: announcementText.trim(),
-      type: "info",
-      link: "/dashboard/student"
+    const targetIds = announcementTarget === "all"
+      ? Array.from(myHackathonIds)
+      : [announcementTarget];
+
+    // Collect participants strictly from the selected hackathon(s)
+    const regs = getRegistrations().filter((r) => targetIds.includes(r.hackathonId));
+    const targetEmails = new Set(regs.map((r) => r.userId.toLowerCase().trim()));
+
+    teamsList
+      .filter((t) => targetIds.includes(t.hackathonId))
+      .forEach((t) => {
+        if (t.leadEmail) targetEmails.add(t.leadEmail.toLowerCase().trim());
+        if (Array.isArray(t.members)) {
+          t.members.forEach((m) => {
+            const em = typeof m === 'string' ? m : m.email || m.userId;
+            if (em && em.includes('@')) targetEmails.add(em.toLowerCase().trim());
+          });
+        }
+      });
+
+    // Send targeted notification to participants of these hackathons
+    targetEmails.forEach((email) => {
+      addNotification({
+        userEmail: email,
+        title: `Announcement: ${user?.fullName || "Organizer"}`,
+        message: announcementText.trim(),
+        type: "info",
+        link: "/dashboard/student"
+      });
     });
 
-    setNotice(`Announcement broadcast to participants.`);
+    // If backend token exists, also dispatch to backend endpoint for persistence
+    try {
+      const token = localStorage.getItem("hacktrack_token");
+      if (token && targetIds.length > 0) {
+        for (const hId of targetIds) {
+          await fetch("http://localhost:5050/api/v1/admin/announcements", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              hackathonId: hId,
+              title: `Announcement: ${user?.fullName || "Organizer"}`,
+              content: announcementText.trim(),
+              targetRole: "all"
+            })
+          });
+        }
+      }
+    } catch {
+      // Local notifications already persisted
+    }
+
+    setNotice(`Announcement broadcast to participants of your managed competition(s).`);
     setAnnouncementText("");
     setTimeout(() => setNotice(null), 4000);
   };
@@ -430,14 +568,14 @@ export default function OrganizerDashboard() {
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <StatCard
             tone="accent"
-            label={scopeFilter === "my" ? "My hackathons" : "Hackathons shown"}
+            label="My hackathons"
             value={displayedHackathons.length}
             icon={Trophy}
-            hint={`${displayedHackathons.length} of ${allHackathons.length} on platform`}
+            hint="Active managed competitions"
           />
-          <StatCard tone="cyan" label="All platform hackathons" value={allHackathons.length} icon={Layers} />
-          <StatCard tone="info" label="Registered teams" value={teamsList.length} icon={Users} />
-          <StatCard tone="success" label="Submissions logged" value={submissions.length} icon={FileText} />
+          <StatCard tone="info" label="Registered teams" value={teamsList.length} icon={Users} hint="Across your hackathons" />
+          <StatCard tone="success" label="Submissions logged" value={mySubmissions.length} icon={FileText} hint="Across your hackathons" />
+          <StatCard tone="cyan" label="Evaluation stages" value={displayedHackathons.filter(h => h.stage === 'Rubric Judging' || h.stage === 'Screening Gate').length} icon={Layers} hint="Currently in review" />
         </div>
 
         {notice && (
@@ -466,34 +604,7 @@ export default function OrganizerDashboard() {
                 title="Hackathons"
                 description="Lifecycle stages, rubrics and team allowances."
               />
-              <div
-                role="group"
-                aria-label="Filter hackathons"
-                className="inline-flex items-center gap-1 rounded-lg border border-line bg-sunken p-0.5"
-              >
-                <button
-                  type="button"
-                  aria-pressed={scopeFilter === "my"}
-                  onClick={() => setScopeFilter("my")}
-                  className={cn(
-                    "inline-flex h-7 items-center gap-1 rounded-md px-3 text-xs font-medium transition-colors max-sm:h-10 max-sm:text-sm touch:h-10",
-                    scopeFilter === "my" ? "bg-surface text-fg shadow-sm" : "text-fg-muted hover:text-fg"
-                  )}
-                >
-                  My events <span className="tabular-nums">({displayedHackathons.length})</span>
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={scopeFilter === "all"}
-                  onClick={() => setScopeFilter("all")}
-                  className={cn(
-                    "inline-flex h-7 items-center gap-1 rounded-md px-3 text-xs font-medium transition-colors max-sm:h-10 max-sm:text-sm touch:h-10",
-                    scopeFilter === "all" ? "bg-surface text-fg shadow-sm" : "text-fg-muted hover:text-fg"
-                  )}
-                >
-                  All <span className="tabular-nums">({allHackathons.length})</span>
-                </button>
-              </div>
+              <Badge tone="accent">{displayedHackathons.length} managed</Badge>
             </div>
 
             {displayedHackathons.length === 0 ? (
@@ -515,7 +626,7 @@ export default function OrganizerDashboard() {
               <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3" aria-label="Hackathon events">
                 {displayedHackathons.map((h) => {
                   const sprintTeams = teamsList.filter((t) => t.hackathonId === h.id);
-                  const sprintSubs = submissions.filter((s) => s.hackathonId === h.id);
+                  const sprintSubs = mySubmissions.filter((s) => s.hackathonId === h.id);
 
                   const isMine = (h.organizerEmail && h.organizerEmail.toLowerCase() === userEmailLower) ||
                                  (user?.email === "organizer@hacktrack.io" && h.id === "devpulse-2026");
@@ -695,9 +806,9 @@ export default function OrganizerDashboard() {
                 <IconTile icon={Users} tone="cyan" />
                 <div className="min-w-0 flex-1 space-y-0.5">
                   <CardTitle as="h2">Participant teams</CardTitle>
-                  <CardDescription>Every team registered across the platform.</CardDescription>
+                  <CardDescription>Teams registered for your managed competitions.</CardDescription>
                 </div>
-                <Badge className="shrink-0 tabular-nums">{teamsList.length} total</Badge>
+                <Badge className="shrink-0 tabular-nums">{teamsList.length} registered</Badge>
               </CardHeader>
               <CardContent>
                 {teamsList.length === 0 ? (
@@ -1178,6 +1289,39 @@ export default function OrganizerDashboard() {
                 fallbackName="Judge Evaluator"
                 emptyText="No judges have redeemed this code yet. Share the code above."
               />
+
+              {/* Direct Judge Assignment Form */}
+              <div className="rounded-lg border border-line bg-raised/30 p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <IconTile icon={UserPlus} tone="info" size="sm" />
+                  <div>
+                    <h3 className="text-sm font-semibold text-fg">Assign Judge Directly</h3>
+                    <p className="text-xs text-fg-muted">Invite a registered judge to evaluate submissions for this competition.</p>
+                  </div>
+                </div>
+
+                {judgeAssignNotice && (
+                  <Alert tone={judgeAssignNotice.type === 'error' ? 'danger' : 'success'}>
+                    {judgeAssignNotice.text}
+                  </Alert>
+                )}
+
+                <form onSubmit={handleAssignJudge} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <Field label="Judge email address" className="flex-1">
+                    <Input
+                      type="email"
+                      value={judgeAssignEmail}
+                      onChange={(e) => setJudgeAssignEmail(e.target.value)}
+                      placeholder="e.g. judge@hacktrack.io"
+                      required
+                    />
+                  </Field>
+                  <Button type="submit">
+                    <UserPlus aria-hidden="true" />
+                    Assign & send code
+                  </Button>
+                </form>
+              </div>
 
               {/* Footer controls */}
               <div className="flex flex-col gap-2 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-between">

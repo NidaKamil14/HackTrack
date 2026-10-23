@@ -26,9 +26,15 @@ export default function Register({ navigate: propNavigate }) {
   const roles = [
     {
       id: "student",
-      title: "Student / Team Leader",
-      desc: "Join competitions, share invite codes & build repos",
+      title: "Student / Participant",
+      desc: "Browse hackathons, join teams using Team Codes & view deliverables",
       target: "/dashboard/student"
+    },
+    {
+      id: "leader",
+      title: "Team Leader",
+      desc: "Create teams, share invite codes, manage rosters & submit projects",
+      target: "/dashboard/leader"
     },
     {
       id: "organizer",

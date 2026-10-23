@@ -1,8 +1,20 @@
 import express from 'express';
 import store from '../database/store.js';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth, requireRole, optionalAuth } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// Helper to verify organizer ownership or assignment
+export function checkOrganizerAccess(user, hackathon) {
+  if (!user || !hackathon) return false;
+  if (user.role === 'admin') return false; // Admin cannot manage hackathons as an organizer
+  if (user.role === 'organizer') {
+    if (hackathon.createdBy === user.id) return true;
+    if (hackathon.assignedOrganizers && Array.isArray(hackathon.assignedOrganizers) && hackathon.assignedOrganizers.includes(user.id)) return true;
+    return false;
+  }
+  return false;
+}
 
 // Helper to determine if registration is open (FR-11)
 function enrichHackathonStatus(hackathon) {
@@ -24,10 +36,15 @@ function enrichHackathonStatus(hackathon) {
   };
 }
 
-// GET /api/v1/hackathons: Browse all published hackathons (public / student)
-router.get('/', (req, res) => {
+// GET /api/v1/hackathons: Browse published hackathons (public / student) or own hackathons (organizer data isolation)
+router.get('/', optionalAuth, (req, res) => {
   const { status } = req.query;
   let all = store.getAllHackathons();
+
+  // Organizer data isolation: organizers see only hackathons they created or are assigned to manage
+  if (req.user && req.user.role === 'organizer') {
+    all = all.filter((h) => checkOrganizerAccess(req.user, h));
+  }
 
   if (status) {
     all = all.filter((h) => h.status === status);
@@ -58,9 +75,10 @@ router.get('/:id', (req, res) => {
   });
 });
 
-// POST /api/v1/hackathons: Admin or Organizer creates a new hackathon (FR-6, BR-4)
-router.post('/', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
+// POST /api/v1/hackathons: Organizer creates a new hackathon (Admins blocked with 403 Forbidden)
+router.post('/', requireAuth, requireRole('organizer'), (req, res) => {
   const {
+    id,
     title,
     tagLine,
     description,
@@ -76,6 +94,7 @@ router.post('/', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
     hasMentorship,
     evaluationWorkflow,
     criteria,
+    status,
   } = req.body || {};
 
   if (!title || !registrationDeadline || !submissionDeadline) {
@@ -97,9 +116,11 @@ router.post('/', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
 
   try {
     const created = store.createHackathon({
+      id: id || undefined,
       title,
       tagLine,
       description,
+      status: status || 'published',
       startDate: startDate || new Date().toISOString(),
       endDate: endDate || new Date(Date.now() + 7 * 86400000).toISOString(),
       registrationDeadline,
@@ -129,8 +150,20 @@ router.post('/', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
   }
 });
 
-// PUT /api/v1/hackathons/:id: Admin or Organizer updates hackathon configuration (FR-6, FR-7, FR-8, FR-23)
-router.put('/:id', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
+// PUT /api/v1/hackathons/:id: Organizer updates hackathon configuration (FR-6, FR-7, FR-8, FR-23)
+router.put('/:id', requireAuth, requireRole('organizer'), (req, res) => {
+  const hackathon = store.getHackathonById(req.params.id);
+  if (!hackathon) {
+    return res.status(404).json({ status: 404, error: 'Not Found', message: 'Hackathon not found.' });
+  }
+  if (!checkOrganizerAccess(req.user, hackathon)) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'Organizers can only modify hackathons they created or manage.',
+    });
+  }
+
   try {
     const updated = store.updateHackathon(req.params.id, req.body);
     return res.json({
@@ -147,8 +180,20 @@ router.put('/:id', requireAuth, requireRole('admin', 'organizer'), (req, res) =>
   }
 });
 
-// DELETE /api/v1/hackathons/:id: Admin deletes a hackathon (FR-6)
-router.delete('/:id', requireAuth, requireRole('admin'), (req, res) => {
+// DELETE /api/v1/hackathons/:id: Organizer deletes a hackathon (FR-6)
+router.delete('/:id', requireAuth, requireRole('organizer'), (req, res) => {
+  const hackathon = store.getHackathonById(req.params.id);
+  if (!hackathon) {
+    return res.status(404).json({ status: 404, error: 'Not Found', message: 'Hackathon not found.' });
+  }
+  if (!checkOrganizerAccess(req.user, hackathon)) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'Organizers can only delete hackathons they created or manage.',
+    });
+  }
+
   try {
     const deleted = store.deleteHackathon(req.params.id);
     return res.json({
@@ -165,8 +210,20 @@ router.delete('/:id', requireAuth, requireRole('admin'), (req, res) => {
   }
 });
 
-// POST /api/v1/hackathons/:id/publish: Admin or Organizer publishes hackathon for participant registration (FR-10)
-router.post('/:id/publish', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
+// POST /api/v1/hackathons/:id/publish: Organizer publishes hackathon for participant registration (FR-10)
+router.post('/:id/publish', requireAuth, requireRole('organizer'), (req, res) => {
+  const hackathon = store.getHackathonById(req.params.id);
+  if (!hackathon) {
+    return res.status(404).json({ status: 404, error: 'Not Found', message: 'Hackathon not found.' });
+  }
+  if (!checkOrganizerAccess(req.user, hackathon)) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'Organizers can only publish hackathons they created or manage.',
+    });
+  }
+
   try {
     const updated = store.updateHackathon(req.params.id, { status: 'published' });
     return res.json({
@@ -183,8 +240,20 @@ router.post('/:id/publish', requireAuth, requireRole('admin', 'organizer'), (req
   }
 });
 
-// POST /api/v1/hackathons/:id/criteria: Admin or Organizer configures rubric criteria (FR-9)
-router.post('/:id/criteria', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
+// POST /api/v1/hackathons/:id/criteria: Organizer configures rubric criteria (FR-9)
+router.post('/:id/criteria', requireAuth, requireRole('organizer'), (req, res) => {
+  const hackathon = store.getHackathonById(req.params.id);
+  if (!hackathon) {
+    return res.status(404).json({ status: 404, error: 'Not Found', message: 'Hackathon not found.' });
+  }
+  if (!checkOrganizerAccess(req.user, hackathon)) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'Organizers can only configure criteria for hackathons they created or manage.',
+    });
+  }
+
   const { criteria } = req.body || {};
   if (!Array.isArray(criteria) || criteria.length === 0) {
     return res.status(400).json({
@@ -211,7 +280,19 @@ router.post('/:id/criteria', requireAuth, requireRole('admin', 'organizer'), (re
 });
 
 // POST /api/v1/hackathons/:id/codes: Organizer generates a judge or screening access code
-router.post('/:id/codes', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
+router.post('/:id/codes', requireAuth, requireRole('organizer'), (req, res) => {
+  const hackathon = store.getHackathonById(req.params.id);
+  if (!hackathon) {
+    return res.status(404).json({ status: 404, error: 'Not Found', message: 'Hackathon not found.' });
+  }
+  if (!checkOrganizerAccess(req.user, hackathon)) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'Organizers can only generate codes for hackathons they created or manage.',
+    });
+  }
+
   const { role } = req.body || {};
   if (!['judge', 'screening'].includes(role)) {
     return res.status(400).json({
@@ -238,11 +319,19 @@ router.post('/:id/codes', requireAuth, requireRole('admin', 'organizer'), (req, 
 });
 
 // GET /api/v1/hackathons/:id/codes: Get all access codes and redeemers for a hackathon
-router.get('/:id/codes', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
+router.get('/:id/codes', requireAuth, requireRole('organizer'), (req, res) => {
   const hackathon = store.getHackathonById(req.params.id);
   if (!hackathon) {
     return res.status(404).json({ status: 404, error: 'Not Found', message: 'Hackathon not found.' });
   }
+  if (!checkOrganizerAccess(req.user, hackathon)) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'Organizers can only view codes for hackathons they created or manage.',
+    });
+  }
+
   const codes = store.getCodesForHackathon(req.params.id);
   const judges = store.getHackathonAssignedUsers(req.params.id, 'judge');
   const screeners = store.getHackathonAssignedUsers(req.params.id, 'screening');
@@ -255,11 +344,111 @@ router.get('/:id/codes', requireAuth, requireRole('admin', 'organizer'), (req, r
   });
 });
 
-// GET /api/v1/hackathons/:id/assigned-users: Admin view of all assigned judges+screeners
-router.get('/:id/assigned-users', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
+// GET /api/v1/hackathons/:id/assigned-users: Organizer view of assigned judges+screeners
+router.get('/:id/assigned-users', requireAuth, requireRole('organizer'), (req, res) => {
+  const hackathon = store.getHackathonById(req.params.id);
+  if (!hackathon) {
+    return res.status(404).json({ status: 404, error: 'Not Found', message: 'Hackathon not found.' });
+  }
+  if (!checkOrganizerAccess(req.user, hackathon)) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'Organizers can only view assigned users for hackathons they created or manage.',
+    });
+  }
+
   const { role } = req.query;
   const users = store.getHackathonAssignedUsers(req.params.id, role || null);
   return res.json({ status: 200, users });
+});
+
+// POST /api/v1/hackathons/:id/register: Student or Team Leader registers for a published hackathon
+router.post('/:id/register', requireAuth, (req, res) => {
+  const hackathon = store.getHackathonById(req.params.id);
+  if (!hackathon) {
+    return res.status(404).json({
+      status: 404,
+      error: 'Not Found',
+      message: 'Hackathon with specified ID does not exist.',
+    });
+  }
+
+  if (hackathon.status === 'draft') {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: 'Hackathon is not published for registration.',
+    });
+  }
+
+  if (new Date() > new Date(hackathon.registrationDeadline)) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: 'Registration deadline has passed for this hackathon.',
+    });
+  }
+
+  try {
+    const registration = store.registerUserForHackathon({
+      hackathonId: hackathon.id,
+      userId: req.user.id,
+      userEmail: req.user.email,
+      status: 'Registration Verified',
+    });
+
+    return res.status(201).json({
+      status: 201,
+      message: `Successfully registered for ${hackathon.title}.`,
+      registration,
+    });
+  } catch (err) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: err.message,
+    });
+  }
+});
+
+// GET /api/v1/hackathons/:id/registrations: Get registered participants for a hackathon
+router.get('/:id/registrations', requireAuth, (req, res) => {
+  const hackathon = store.getHackathonById(req.params.id);
+  if (!hackathon) {
+    return res.status(404).json({
+      status: 404,
+      error: 'Not Found',
+      message: 'Hackathon with specified ID does not exist.',
+    });
+  }
+
+  // Organizers can only view registrations for their own hackathons
+  if (req.user.role === 'organizer' && !checkOrganizerAccess(req.user, hackathon)) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'Organizers can only view registrations for hackathons they manage.',
+    });
+  }
+
+  // Only organizers and admins can access participant lists
+  if (!['admin', 'organizer'].includes(req.user.role)) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'Only organizers and admins can view hackathon registrations.',
+    });
+  }
+
+  const registrations = store.getRegistrationsForHackathon(hackathon.id);
+  return res.json({
+    status: 200,
+    hackathonId: hackathon.id,
+    hackathonTitle: hackathon.title,
+    count: registrations.length,
+    registrations,
+  });
 });
 
 export default router;

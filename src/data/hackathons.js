@@ -129,7 +129,62 @@ export const HACKATHONS = [
     organizerEmail: "elena.iot@hacktrack.io",
     organizerName: "Prof. Elena Rostova",
     organizerUniversity: "Campus IoT Consortium"
+  },
+  {
+    id: "hack-shesolves-001",
+    title: "She Solves 2026",
+    headline: "Empowering Women Technologists & AI Innovators",
+    deadline: "Nov 15, 2026",
+    dates: "Nov 15 - Nov 18, 2026",
+    stage: "Registration Open",
+    category: "AI & ML",
+    track: "Women in Tech & AI",
+    teamSize: "2 - 4 Members",
+    prizePool: "$25,000 USD",
+    summary: "Premier collegiate hackathon for women developers, engineers and researchers building high-impact tech solutions.",
+    overview: "She Solves brings together women technologists from across universities to engineer transformative AI applications, healthcare platforms, and social impact systems.",
+    eligibility: [
+      "Open to collegiate women engineers, developers, and researchers.",
+      "Cross-university teams are welcome.",
+      "Valid student or developer verification required."
+    ],
+    rules: [
+      "Projects must be conceived and created during the sprint timeframe.",
+      "All major code contributions must be authored by team members.",
+      "Open-source packages and frameworks are permitted with clear attribution."
+    ],
+    submissionReqs: [
+      "GitHub repository with clear documentation and setup instructions.",
+      "Live deployment or working interactive endpoint.",
+      "Video walkthrough demonstration."
+    ],
+    screeningReqs: [
+      "Active HTTPS deployment responding with 200 OK status.",
+      "Clean commit logs throughout the sprint timeline.",
+      "Configured documentation and architectural overview."
+    ],
+    rubrics: [
+      { name: "Innovation & Impact", weight: "25%", desc: "Novelty, creativity and direct societal impact." },
+      { name: "Technical Execution", weight: "25%", desc: "Code quality, technical architecture and robust APIs." },
+      { name: "UI / UX Design", weight: "25%", desc: "Design accessibility, visual aesthetics and user experience." },
+      { name: "Real-world Feasibility", weight: "25%", desc: "Deployment readiness and scalability." }
+    ],
+    tags: ["Women in Tech", "AI", "Healthcare", "Social Good"],
+    organizerEmail: "organizer@hacktrack.io",
+    organizerName: "Kavita Rao",
+    organizerUniversity: "PCCOE Pune"
   }
 ];
 
-export const getHackathonById = (id) => HACKATHONS.find((h) => h.id === id);
+export const getHackathonById = (id) => {
+  if (!id) return null;
+  const clean = String(id).trim().toLowerCase();
+  const alpha = clean.replace(/[^a-z0-9]/g, '');
+  return HACKATHONS.find((h) => {
+    if (h.id === id || h.id.toLowerCase() === clean) return true;
+    if (h.id.replace(/[^a-z0-9]/g, '') === alpha) return true;
+    const hTitleSlug = h.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    if (hTitleSlug === clean || h.title.toLowerCase() === clean) return true;
+    return false;
+  }) || null;
+};

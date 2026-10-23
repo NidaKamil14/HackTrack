@@ -227,10 +227,11 @@ router.post('/redeem-code', requireAuth, (req, res) => {
       user: req.user,
     });
   } catch (err) {
+    console.warn(`[AccessCode] Failed redemption for user ${req.user.id}: ${err.message}`);
     return res.status(400).json({
       status: 400,
       error: 'Bad Request',
-      message: err.message,
+      message: 'Invalid or unavailable access code.',
     });
   }
 });

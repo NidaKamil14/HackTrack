@@ -1,4 +1,5 @@
 import { addNotification } from './notificationService.js';
+import { triggerDataSync } from './syncService.js';
 
 const STORAGE_EVALS_KEY = "hacktrack_evaluations";
 const STORAGE_RESULTS_KEY = "hacktrack_published_results";
@@ -70,6 +71,7 @@ export function getEvaluations(hackathonId = null) {
 export function saveAllEvaluations(evals) {
   try {
     localStorage.setItem(STORAGE_EVALS_KEY, JSON.stringify(evals));
+    triggerDataSync("evaluations_updated");
   } catch (err) {
     console.error("Failed to save evaluations:", err);
   }
@@ -169,6 +171,7 @@ export function setResultsPublished(hackathonId, published = true) {
   map[hackathonId] = published;
   try {
     localStorage.setItem(STORAGE_RESULTS_KEY, JSON.stringify(map));
+    triggerDataSync("results_published");
   } catch (err) {
     console.error("Failed to update published results map:", err);
   }

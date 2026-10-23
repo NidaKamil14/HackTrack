@@ -221,6 +221,17 @@ router.get('/reports/hackathon/:id', requireAuth, requireRole('admin'), (req, re
   });
 });
 
+// GET /api/v1/admin/registrations: Platform-wide participant registrations across hackathons
+router.get('/registrations', requireAuth, requireRole('admin'), (req, res) => {
+  const { hackathonId, search } = req.query || {};
+  const registrations = store.getAllRegistrations({ hackathonId, search });
+  return res.json({
+    status: 200,
+    count: registrations.length,
+    registrations,
+  });
+});
+
 // Announcements (FR-46)
 router.get('/announcements', (req, res) => {
   const announcements = store.getAnnouncements(req.query.hackathonId);
@@ -230,7 +241,7 @@ router.get('/announcements', (req, res) => {
   });
 });
 
-router.post('/announcements', requireAuth, requireRole('admin'), (req, res) => {
+router.post('/announcements', requireAuth, requireRole('admin', 'organizer'), (req, res) => {
   const { hackathonId, title, content, targetRole } = req.body || {};
   if (!title || !content) {
     return res.status(400).json({
@@ -238,6 +249,25 @@ router.post('/announcements', requireAuth, requireRole('admin'), (req, res) => {
       error: 'Bad Request',
       message: 'Title and content are required.',
     });
+  }
+
+  // Organizer data isolation: organizers can announce ONLY to hackathons they created or manage
+  if (req.user.role === 'organizer') {
+    if (!hackathonId) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'hackathonId is required. Organizers can only announce to their own hackathons.',
+      });
+    }
+    const hackathon = store.getHackathonById(hackathonId);
+    if (!hackathon || (hackathon.createdBy !== req.user.id && !(hackathon.assignedOrganizers && hackathon.assignedOrganizers.includes(req.user.id)))) {
+      return res.status(403).json({
+        status: 403,
+        error: 'Forbidden',
+        message: 'Organizers can only broadcast announcements to hackathons they create or manage.',
+      });
+    }
   }
 
   const announcement = store.createAnnouncement({

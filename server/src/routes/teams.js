@@ -1,12 +1,12 @@
 import express from 'express';
 import store from '../database/store.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, optionalAuth } from '../middleware/auth.js';
 import { notifyJoinDecision, notifyJoinRequested, notifyTeamCreated } from '../notifications/notifier.js';
 
 const router = express.Router();
 
 // GET /api/v1/teams: List teams for a specific hackathon
-router.get('/', (req, res) => {
+router.get('/', optionalAuth, (req, res) => {
   const { hackathonId } = req.query;
   if (!hackathonId) {
     return res.status(400).json({
@@ -14,6 +14,18 @@ router.get('/', (req, res) => {
       error: 'Bad Request',
       message: 'hackathonId query parameter is required.',
     });
+  }
+
+  // Organizer data isolation: organizers can only view teams for hackathons they created or manage
+  if (req.user && req.user.role === 'organizer') {
+    const hackathon = store.getHackathonById(hackathonId);
+    if (!hackathon || (hackathon.createdBy !== req.user.id && !(hackathon.assignedOrganizers && hackathon.assignedOrganizers.includes(req.user.id)))) {
+      return res.status(403).json({
+        status: 403,
+        error: 'Forbidden',
+        message: 'Organizers can only access teams for hackathons they created or are assigned to manage.',
+      });
+    }
   }
 
   const teams = store.getTeamsByHackathon(hackathonId).map((team) => {
@@ -107,7 +119,7 @@ router.put('/:id/roster-lock', requireAuth, (req, res) => {
 });
 
 // GET /api/v1/teams/:id: Get team details, code, and members
-router.get('/:id', (req, res) => {
+router.get('/:id', optionalAuth, (req, res) => {
   const team = store.findTeamById(req.params.id);
   if (!team) {
     return res.status(404).json({
@@ -115,6 +127,18 @@ router.get('/:id', (req, res) => {
       error: 'Not Found',
       message: 'Team not found.',
     });
+  }
+
+  // Organizer data isolation: organizers cannot access team details or codes belonging to other hackathons
+  if (req.user && req.user.role === 'organizer') {
+    const hackathon = store.getHackathonById(team.hackathonId);
+    if (!hackathon || (hackathon.createdBy !== req.user.id && !(hackathon.assignedOrganizers && hackathon.assignedOrganizers.includes(req.user.id)))) {
+      return res.status(403).json({
+        status: 403,
+        error: 'Forbidden',
+        message: 'Organizers cannot access team details or codes belonging to other hackathons.',
+      });
+    }
   }
 
   const members = store.getTeamMembers(team.id);
@@ -248,6 +272,14 @@ router.put('/:id/requests/:requestId', requireAuth, (req, res) => {
 
 // PATCH /api/v1/teams/:id/screening: Screening committee / Admin updates screening status
 router.patch('/:id/screening', requireAuth, (req, res) => {
+  if (!['screening', 'admin'].includes(req.user.role)) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'Only the Screening Committee or Platform Admin is authorized to update screening status.',
+    });
+  }
+
   const { status } = req.body || {};
   if (!['pending', 'shortlisted', 'rejected'].includes(status)) {
     return res.status(400).json({

@@ -116,6 +116,17 @@ const RAW_DEMO_USERS = [
     isActive: true,
   },
   {
+    id: 'usr-organizer-008',
+    email: 'marcus.ai@hacktrack.io',
+    password: 'password123',
+    fullName: 'Dr. Marcus Vance (Organizer)',
+    role: 'organizer',
+    roleCategory: 'Hackathon Organizer',
+    university: 'AI Catalyst Foundation',
+    memberId: 'ORG-201',
+    isActive: true,
+  },
+  {
     id: 'usr-mentor-008',
     email: 'mentor@hacktrack.io',
     password: 'password123',
@@ -149,7 +160,7 @@ const INITIAL_HACKATHONS = [
     evaluationWorkflow: 'screening_first',
     resultsPublished: false,
     resultsPublishedAt: null,
-    createdBy: 'usr-admin-006',
+    createdBy: 'usr-organizer-007',
     criteria: [
       { id: 'crit-101', name: 'Innovation & Novelty', maxScore: 25, weightage: 1.0, description: 'Originality and creativity of the proposed solution.' },
       { id: 'crit-102', name: 'Technical Execution', maxScore: 25, weightage: 1.0, description: 'Architectural soundess, code quality, and technical completeness.' },
@@ -176,7 +187,7 @@ const INITIAL_HACKATHONS = [
     evaluationWorkflow: 'direct_judging',
     resultsPublished: true,
     resultsPublishedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-    createdBy: 'usr-admin-006',
+    createdBy: 'usr-organizer-007',
     criteria: [
       { id: 'crit-201', name: 'Problem Impact', maxScore: 30, weightage: 1.0, description: 'Significance of problem addressed.' },
       { id: 'crit-202', name: 'Implementation', maxScore: 40, weightage: 1.0, description: 'Working prototype and code structure.' },
@@ -202,7 +213,7 @@ const INITIAL_HACKATHONS = [
     evaluationWorkflow: 'screening_first',
     resultsPublished: false,
     resultsPublishedAt: null,
-    createdBy: 'usr-admin-006',
+    createdBy: 'usr-organizer-008',
     criteria: [
       { id: 'crit-ss-101', name: 'Innovation & Impact', maxScore: 25, weightage: 1.0, description: 'Novelty, creativity and direct societal impact.' },
       { id: 'crit-ss-102', name: 'Technical Execution', maxScore: 25, weightage: 1.0, description: 'Code quality, technical architecture and robust APIs.' },
@@ -586,6 +597,26 @@ class HackTrackStore {
         createdAt: new Date().toISOString(),
         redeemedBy: [],
       },
+      {
+        id: 'code-demo-5',
+        hackathonId: 'hack-shesolves-001',
+        hackathonTitle: 'She Solves 2026',
+        role: 'judge',
+        code: 'JUDGE-SHES-9R2M',
+        createdBy: 'usr-organizer-008',
+        createdAt: new Date().toISOString(),
+        redeemedBy: [],
+      },
+      {
+        id: 'code-demo-6',
+        hackathonId: 'hack-shesolves-001',
+        hackathonTitle: 'She Solves 2026',
+        role: 'screening',
+        code: 'SCREEN-SHES-4L8K',
+        createdBy: 'usr-organizer-008',
+        createdAt: new Date().toISOString(),
+        redeemedBy: [],
+      },
     ];
 
     // Pre-assign demo users to hack-001
@@ -593,6 +624,49 @@ class HackTrackStore {
     if (judgeUser) judgeUser.assignedHackathonIds = ['hack-001'];
     const screenUser = this.users.find((u) => u.id === 'usr-screening-004');
     if (screenUser) screenUser.assignedHackathonIds = ['hack-001'];
+
+    // Seed initial hackathon registrations
+    this.registrations = [
+      {
+        id: 'reg-demo-alex',
+        hackathonId: 'hack-001',
+        hackathonTitle: 'DevPulse National Sprint 2026',
+        userId: 'usr-leader-001',
+        userEmail: 'alex@university.edu',
+        fullName: 'Alex Chen',
+        role: 'leader',
+        university: 'Stanford University',
+        memberId: 'LEAD-88219',
+        status: 'Registration Verified',
+        registeredAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+      },
+      {
+        id: 'reg-demo-nida',
+        hackathonId: 'hack-shesolves-001',
+        hackathonTitle: 'She Solves 2026',
+        userId: 'usr-leader-nida',
+        userEmail: 'nida@university.edu',
+        fullName: 'Nida',
+        role: 'leader',
+        university: 'PCCOE Pune',
+        memberId: 'LEAD-99214',
+        status: 'Registration Verified',
+        registeredAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+      },
+      {
+        id: 'reg-demo-priya',
+        hackathonId: 'hack-001',
+        hackathonTitle: 'DevPulse National Sprint 2026',
+        userId: 'usr-student-002',
+        userEmail: 'priya@university.edu',
+        fullName: 'Priya Sharma',
+        role: 'student',
+        university: 'Stanford University',
+        memberId: 'STU-55412',
+        status: 'Registration Verified',
+        registeredAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+      },
+    ];
   }
 
   async loadFromDatabase() {
@@ -980,6 +1054,57 @@ class HackTrackStore {
         console.warn('hackathon_codes sync warning:', codeErr.message);
       }
 
+      // 9. Hackathon Registrations
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS hackathon_registrations (
+            id VARCHAR(50) NOT NULL,
+            hackathon_id VARCHAR(50) NOT NULL,
+            user_id VARCHAR(50) NOT NULL,
+            user_email VARCHAR(255) NOT NULL,
+            status VARCHAR(50) NOT NULL DEFAULT 'Registration Verified',
+            registered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY idx_user_hackathon_reg (hackathon_id, user_id),
+            INDEX idx_reg_hackathon (hackathon_id),
+            INDEX idx_reg_user (user_id),
+            INDEX idx_reg_email (user_email)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+
+        const [dbRegs] = await pool.query('SELECT * FROM hackathon_registrations');
+        if (dbRegs.length === 0) {
+          for (const r of this.registrations) {
+            await pool.query(
+              `INSERT INTO hackathon_registrations (id, hackathon_id, user_id, user_email, status, registered_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE status = VALUES(status)`,
+              [r.id, r.hackathonId, r.userId, r.userEmail, r.status || 'Registration Verified', toSqlDate(r.registeredAt) || toSqlDate(new Date())]
+            );
+          }
+        } else {
+          this.registrations = dbRegs.map((r) => {
+            const user = this.findUserById(r.user_id) || this.findUserByEmail(r.user_email);
+            const hackathon = this.getHackathonById(r.hackathon_id);
+            return {
+              id: r.id,
+              hackathonId: r.hackathon_id,
+              hackathonTitle: hackathon?.title || r.hackathon_id,
+              userId: r.user_id,
+              userEmail: r.user_email,
+              fullName: user?.fullName || 'Registered Participant',
+              role: user?.role || 'student',
+              university: user?.university || 'University / Organization',
+              memberId: user?.memberId || null,
+              status: r.status || 'Registration Verified',
+              registeredAt: r.registered_at ? new Date(r.registered_at).toISOString() : new Date().toISOString(),
+            };
+          });
+        }
+      } catch (regErr) {
+        console.warn('hackathon_registrations sync warning:', regErr.message);
+      }
+
       console.log('✓ Store successfully synchronized with MySQL database.');
       return true;
     } catch (err) {
@@ -1358,21 +1483,218 @@ class HackTrackStore {
   }
 
   getHackathonById(id) {
-    return this.hackathons.find((h) => h.id === id) || null;
+    if (!id) return null;
+    const raw = String(id).trim();
+    const cleanId = raw.toLowerCase();
+    const alphaNumericOnly = cleanId.replace(/[^a-z0-9]/g, '');
+
+    // 1. Exact ID match (case-sensitive or case-insensitive)
+    const exact = this.hackathons.find((h) => h.id === raw || h.id.toLowerCase() === cleanId);
+    if (exact) return exact;
+
+    // 2. Known standard platform aliases
+    const aliases = {
+      'devpulse-2026': 'hack-001',
+      'devpulse': 'hack-001',
+      'devpulse-sprint': 'hack-001',
+      'pccoe-innovatex-2026': 'hack-002',
+      'innovatex-2026': 'hack-002',
+      'innovatex': 'hack-002',
+      'she-solves-2026': 'hack-shesolves-001',
+      'shesolves': 'hack-shesolves-001',
+      'she-solves': 'hack-shesolves-001',
+      'shesolves-2026': 'hack-shesolves-001',
+      'shesolves2026': 'hack-shesolves-001',
+      'hack-shesolves': 'hack-shesolves-001',
+      'ai-catalyst-2026': 'hack-001',
+      'smart-campus-2026': 'hack-002',
+    };
+    if (aliases[cleanId]) {
+      const target = this.hackathons.find((h) => h.id === aliases[cleanId]);
+      if (target) return target;
+    }
+
+    // 3. Exact title or title slug match
+    const titleMatch = this.hackathons.find((h) => {
+      const hTitle = (h.title || '').toLowerCase();
+      const hSlug = hTitle.replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      return hTitle === cleanId || hSlug === cleanId;
+    });
+    if (titleMatch) return titleMatch;
+
+    // 4. Normalized alphanumeric match (stripping all hyphens, spaces, symbols)
+    const normMatch = this.hackathons.find((h) => {
+      const hNormId = h.id.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const hNormTitle = (h.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return hNormId === alphaNumericOnly || hNormTitle === alphaNumericOnly;
+    });
+    if (normMatch) return normMatch;
+
+    // 5. Keyword containment (e.g. "shesolves" in "she solves", "devpulse" in "devpulse national sprint")
+    if (alphaNumericOnly.length >= 4) {
+      const containMatch = this.hackathons.find((h) => {
+        const hNormId = h.id.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const hNormTitle = (h.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        return (
+          hNormId.includes(alphaNumericOnly) ||
+          alphaNumericOnly.includes(hNormId) ||
+          hNormTitle.includes(alphaNumericOnly) ||
+          alphaNumericOnly.includes(hNormTitle)
+        );
+      });
+      if (containMatch) return containMatch;
+    }
+
+    return null;
+  }
+
+  // --- Hackathon Registrations ---
+  registerUserForHackathon({ hackathonId, userId, userEmail, status }) {
+    const hackathon = this.getHackathonById(hackathonId);
+    if (!hackathon) throw new Error('Hackathon not found');
+
+    const canonicalHackathonId = hackathon.id;
+
+    let user = null;
+    if (userId) user = this.findUserById(userId);
+    if (!user && userEmail) user = this.findUserByEmail(userEmail);
+    if (!user) throw new Error('User not found');
+
+    // Check if already registered
+    const existing = this.registrations.find(
+      (r) =>
+        r.hackathonId === canonicalHackathonId &&
+        (r.userId === user.id || (r.userEmail && r.userEmail.toLowerCase() === user.email.toLowerCase()))
+    );
+    if (existing) {
+      return existing;
+    }
+
+    const id = `reg-${crypto.randomBytes(4).toString('hex')}`;
+    const newReg = {
+      id,
+      hackathonId: canonicalHackathonId,
+      hackathonTitle: hackathon.title,
+      userId: user.id,
+      userEmail: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      university: user.university || 'University / Organization',
+      memberId: user.memberId || null,
+      status: status || 'Registration Verified',
+      registeredAt: new Date().toISOString(),
+    };
+
+    this.registrations.push(newReg);
+
+    // Persist to MySQL
+    asyncDbWrite(() =>
+      pool.query(
+        `INSERT INTO hackathon_registrations (id, hackathon_id, user_id, user_email, status, registered_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE status = VALUES(status)`,
+        [id, canonicalHackathonId, user.id, user.email, newReg.status, toSqlDate(newReg.registeredAt)]
+      )
+    );
+
+    return newReg;
+  }
+
+  isUserRegisteredForHackathon(userIdOrEmail, hackathonId) {
+    if (!userIdOrEmail || !hackathonId) return false;
+    const hackathon = this.getHackathonById(hackathonId);
+    const targetHackId = hackathon ? hackathon.id : hackathonId;
+    const cleanUser = String(userIdOrEmail).trim().toLowerCase();
+    const user = this.findUserById(userIdOrEmail) || this.findUserByEmail(userIdOrEmail);
+    const targetUserId = user ? user.id : cleanUser;
+    const targetUserEmail = user ? user.email.toLowerCase() : cleanUser;
+
+    return this.registrations.some(
+      (r) =>
+        (r.hackathonId === targetHackId || (hackathon && r.hackathonId === hackathon.id)) &&
+        (r.userId === targetUserId || (r.userEmail && r.userEmail.toLowerCase() === targetUserEmail))
+    );
+  }
+
+  getRegistrationsForHackathon(hackathonId) {
+    const hackathon = this.getHackathonById(hackathonId);
+    if (!hackathon) return [];
+    const canonicalId = hackathon.id;
+
+    return this.registrations
+      .filter((r) => r.hackathonId === canonicalId)
+      .map((r) => {
+        const user = this.findUserById(r.userId) || this.findUserByEmail(r.userEmail);
+        const teamMember = this.teamMembers.find(
+          (m) => m.hackathonId === canonicalId && m.userId === (user?.id || r.userId) && m.status === 'accepted'
+        );
+        const team = teamMember ? this.findTeamById(teamMember.teamId) : null;
+        return {
+          ...r,
+          fullName: user?.fullName || r.fullName || 'Registered Participant',
+          email: user?.email || r.userEmail,
+          role: user?.role || r.role || 'student',
+          university: user?.university || r.university || 'University / Organization',
+          memberId: user?.memberId || r.memberId || null,
+          isActive: user ? user.isActive : true,
+          team: team ? { id: team.id, name: team.teamName, code: team.teamCode, role: teamMember.role } : null,
+        };
+      });
+  }
+
+  getAllRegistrations(filters = {}) {
+    let list = this.registrations.map((r) => {
+      const user = this.findUserById(r.userId) || this.findUserByEmail(r.userEmail);
+      const hackathon = this.getHackathonById(r.hackathonId);
+      const teamMember = this.teamMembers.find(
+        (m) => m.hackathonId === r.hackathonId && m.userId === (user?.id || r.userId) && m.status === 'accepted'
+      );
+      const team = teamMember ? this.findTeamById(teamMember.teamId) : null;
+      return {
+        ...r,
+        hackathonTitle: hackathon?.title || r.hackathonTitle || r.hackathonId,
+        fullName: user?.fullName || r.fullName || 'Registered Participant',
+        email: user?.email || r.userEmail,
+        role: user?.role || r.role || 'student',
+        university: user?.university || r.university || 'University / Organization',
+        memberId: user?.memberId || r.memberId || null,
+        isActive: user ? user.isActive : true,
+        team: team ? { id: team.id, name: team.teamName, code: team.teamCode, role: teamMember.role } : null,
+      };
+    });
+
+    if (filters.hackathonId && filters.hackathonId !== 'all') {
+      const hackathon = this.getHackathonById(filters.hackathonId);
+      const targetId = hackathon ? hackathon.id : filters.hackathonId;
+      list = list.filter((r) => r.hackathonId === targetId);
+    }
+
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      list = list.filter(
+        (r) =>
+          (r.fullName && r.fullName.toLowerCase().includes(q)) ||
+          (r.email && r.email.toLowerCase().includes(q)) ||
+          (r.hackathonTitle && r.hackathonTitle.toLowerCase().includes(q)) ||
+          (r.university && r.university.toLowerCase().includes(q))
+      );
+    }
+
+    return list;
   }
 
   createHackathon(data) {
-    const id = `hack-${crypto.randomBytes(3).toString('hex')}`;
+    const id = data.id || `hack-${crypto.randomBytes(3).toString('hex')}`;
     const newHackathon = {
       id,
       title: data.title,
       tagLine: data.tagLine || '',
       description: data.description || '',
-      status: data.status || 'draft',
+      status: data.status || 'published',
       minTeamSize: data.minTeamSize || 1,
       maxTeamSize: data.maxTeamSize || 4,
-      startDate: data.startDate,
-      endDate: data.endDate,
+      startDate: data.startDate || new Date().toISOString(),
+      endDate: data.endDate || new Date(Date.now() + 7 * 86400000).toISOString(),
       registrationDeadline: data.registrationDeadline,
       submissionDeadline: data.submissionDeadline,
       evaluationDeadline: data.evaluationDeadline || null,
@@ -1383,6 +1705,7 @@ class HackTrackStore {
       resultsPublished: false,
       resultsPublishedAt: null,
       createdBy: data.createdBy,
+      assignedOrganizers: [data.createdBy],
       criteria: data.criteria || [
         { id: `crit-${Date.now()}-1`, name: 'Innovation', maxScore: 25, weightage: 1.0 },
         { id: `crit-${Date.now()}-2`, name: 'Execution', maxScore: 25, weightage: 1.0 },
@@ -1392,6 +1715,38 @@ class HackTrackStore {
       createdAt: new Date().toISOString(),
     };
     this.hackathons.push(newHackathon);
+
+    // Persist to MySQL
+    asyncDbWrite(() =>
+      pool.query(
+        `INSERT INTO hackathons (id, title, tag_line, description, status, min_team_size, max_team_size, start_date, end_date, registration_deadline, submission_deadline, evaluation_deadline, has_screening_round, screening_rounds_count, has_mentorship, evaluation_workflow, results_published, results_published_at, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE title = VALUES(title), status = VALUES(status), registration_deadline = VALUES(registration_deadline), submission_deadline = VALUES(submission_deadline)`,
+        [
+          newHackathon.id,
+          newHackathon.title,
+          newHackathon.tagLine || null,
+          newHackathon.description || null,
+          newHackathon.status || 'published',
+          newHackathon.minTeamSize || 1,
+          newHackathon.maxTeamSize || 4,
+          toSqlDate(newHackathon.startDate),
+          toSqlDate(newHackathon.endDate),
+          toSqlDate(newHackathon.registrationDeadline),
+          toSqlDate(newHackathon.submissionDeadline),
+          toSqlDate(newHackathon.evaluationDeadline),
+          newHackathon.hasScreeningRound ? 1 : 0,
+          newHackathon.screeningRoundsCount || 1,
+          newHackathon.hasMentorship ? 1 : 0,
+          newHackathon.evaluationWorkflow || 'direct_judging',
+          newHackathon.resultsPublished ? 1 : 0,
+          toSqlDate(newHackathon.resultsPublishedAt),
+          newHackathon.createdBy || 'usr-admin-006',
+          toSqlDate(newHackathon.createdAt) || toSqlDate(new Date()),
+        ]
+      )
+    );
+
     return newHackathon;
   }
 
@@ -1399,6 +1754,14 @@ class HackTrackStore {
     const hackathon = this.getHackathonById(id);
     if (!hackathon) throw new Error('Hackathon not found');
     Object.assign(hackathon, updates, { updatedAt: new Date().toISOString() });
+
+    // Persist to MySQL
+    asyncDbWrite(() =>
+      pool.query(
+        `UPDATE hackathons SET status = ?, title = ?, tag_line = ?, description = ? WHERE id = ?`,
+        [hackathon.status, hackathon.title, hackathon.tagLine || null, hackathon.description || null, hackathon.id]
+      )
+    );
     return hackathon;
   }
 
@@ -1406,6 +1769,7 @@ class HackTrackStore {
     const index = this.hackathons.findIndex((h) => h.id === id);
     if (index === -1) throw new Error('Hackathon not found');
     const [deleted] = this.hackathons.splice(index, 1);
+    asyncDbWrite(() => pool.query('DELETE FROM hackathons WHERE id = ?', [id]));
     return deleted;
   }
 
@@ -1498,6 +1862,10 @@ class HackTrackStore {
     const hackathon = this.getHackathonById(hackathonId);
     if (!hackathon) throw new Error('Hackathon not found');
 
+    if (hackathon.status === 'draft') {
+      throw new Error('Hackathon is not published for team registration.');
+    }
+
     // Deadline check (FR-11)
     if (new Date() > new Date(hackathon.registrationDeadline)) {
       throw new Error('Registration deadline has passed for this hackathon.');
@@ -1511,8 +1879,20 @@ class HackTrackStore {
     }
 
     // Single team membership check (FR-16, BR-2)
+    const canonicalHackathonId = hackathon.id;
+
+    // Ensure leader is recorded in registrations for this hackathon
+    if (!this.isUserRegisteredForHackathon(leaderId, canonicalHackathonId)) {
+      this.registerUserForHackathon({
+        hackathonId: canonicalHackathonId,
+        userId: leaderId,
+        userEmail: leader.email,
+        status: 'Registration Verified',
+      });
+    }
+
     const existingMembership = this.teamMembers.find(
-      (m) => m.hackathonId === hackathonId && m.userId === leaderId && m.status === 'accepted'
+      (m) => m.hackathonId === canonicalHackathonId && m.userId === leaderId && m.status === 'accepted'
     );
     if (existingMembership) {
       throw new Error('You are already a member of a team in this hackathon (BR-2).');
@@ -1527,7 +1907,8 @@ class HackTrackStore {
     const id = `team-${crypto.randomBytes(4).toString('hex')}`;
     const newTeam = {
       id,
-      hackathonId,
+      hackathonId: canonicalHackathonId,
+      hackathonTitle: hackathon.title,
       leaderId,
       teamName: teamName.trim(),
       teamCode,
@@ -1544,7 +1925,7 @@ class HackTrackStore {
     const leaderMember = {
       id: `tm-${crypto.randomBytes(4).toString('hex')}`,
       teamId: id,
-      hackathonId,
+      hackathonId: canonicalHackathonId,
       userId: leaderId,
       role: 'leader',
       status: 'accepted',
@@ -1752,7 +2133,9 @@ class HackTrackStore {
 
     // Only leader role can submit (FR-17, BR-1)
     if (team.leaderId !== submittedBy) {
-      throw new Error('Only the Team Leader is permitted to submit a project on behalf of the team (FR-17, BR-1).');
+      const err = new Error('Only the Team Leader is permitted to submit a project on behalf of the team (FR-17, BR-1).');
+      err.statusCode = 403;
+      throw err;
     }
 
     const hackathon = this.getHackathonById(team.hackathonId);
@@ -2193,14 +2576,15 @@ class HackTrackStore {
   redeemHackathonCode(code, userId) {
     const clean = (code || '').trim().toUpperCase();
     const record = this.hackathonCodes.find((c) => c.code.toUpperCase() === clean);
-    if (!record) throw new Error('Invalid access code. Please check the code and try again.');
+    if (!record) throw new Error('Invalid or unavailable access code.');
 
     const user = this.findUserById(userId);
-    if (!user) throw new Error('User not found.');
+    if (!user) throw new Error('Invalid or unavailable access code.');
 
     // Check role matches — judge code for judge role, etc.
     if (user.role !== record.role) {
-      throw new Error(`This code is for the '${record.role}' role but you are logged in as '${user.role}'.`);
+      console.warn(`[AccessCode] Role mismatch for user ${userId} (${user.role}) attempting to redeem ${record.role} code.`);
+      throw new Error('Invalid or unavailable access code.');
     }
 
     // Check if already redeemed by this user

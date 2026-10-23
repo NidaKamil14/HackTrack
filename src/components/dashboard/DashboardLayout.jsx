@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ExternalLink, LogOut, Mail } from 'lucide-react';
+import { Bell, ExternalLink, LogOut, Mail } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import ThemeToggle from '../ThemeToggle';
 import EmailPreferencesDialog from '../notifications/EmailPreferencesDialog';
+import NotificationCenterDialog from '../notifications/NotificationCenterDialog';
+import { getUnreadNotificationCount } from '../../utils/notificationService';
 import { AppBackdrop, Badge, Button, Logo, PageHeaderVariantContext } from '../ui';
 
 export default function DashboardLayout({
@@ -15,6 +17,16 @@ export default function DashboardLayout({
   const navigate = useNavigate();
 
   const [emailSettingsOpen, setEmailSettingsOpen] = useState(false);
+  const [notifCenterOpen, setNotifCenterOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(() => (user ? getUnreadNotificationCount(user) : 0));
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      if (user) setUnreadCount(getUnreadNotificationCount(user));
+    };
+    window.addEventListener('hacktrack_notifications_updated', handleUpdate);
+    return () => window.removeEventListener('hacktrack_notifications_updated', handleUpdate);
+  }, [user]);
 
   const handleLogout = () => {
     logout();
@@ -47,6 +59,21 @@ export default function DashboardLayout({
               <Button as={Link} to="/" variant="ghost" size="sm" className="hidden md:inline-flex">
                 Public site
                 <ExternalLink aria-hidden="true" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setNotifCenterOpen(true)}
+                aria-label="Notification center"
+                title="Notifications"
+                className="relative"
+              >
+                <Bell aria-hidden="true" />
+                {unreadCount > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-fg">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
               </Button>
               <Button
                 variant="ghost"
@@ -104,6 +131,7 @@ export default function DashboardLayout({
         </div>
       </footer>
       <EmailPreferencesDialog open={emailSettingsOpen} onClose={() => setEmailSettingsOpen(false)} />
+      <NotificationCenterDialog open={notifCenterOpen} onClose={() => setNotifCenterOpen(false)} user={user} />
     </div>
   );
 }

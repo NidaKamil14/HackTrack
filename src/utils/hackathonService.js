@@ -1,4 +1,5 @@
 import { HACKATHONS } from '../data/hackathons.js';
+import { triggerDataSync } from './syncService.js';
 
 const STORAGE_KEY = "hacktrack_hackathons";
 
@@ -10,7 +11,17 @@ export function getStoredHackathons() {
       return HACKATHONS;
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : HACKATHONS;
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return HACKATHONS;
+    }
+    // Merge any missing seeded hackathons (e.g. hack-shesolves-001)
+    const combined = [...parsed];
+    for (const def of HACKATHONS) {
+      if (!combined.some((h) => h.id === def.id || (h.title && h.title.toLowerCase() === def.title.toLowerCase()))) {
+        combined.push(def);
+      }
+    }
+    return combined;
   } catch {
     return HACKATHONS;
   }
@@ -19,14 +30,46 @@ export function getStoredHackathons() {
 export function saveStoredHackathons(hackathons) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(hackathons));
+    triggerDataSync("hackathons_updated");
   } catch (err) {
     console.error("Failed to save hackathons:", err);
   }
 }
 
 export function getHackathonById(id) {
+  if (!id) return null;
   const list = getStoredHackathons();
-  return list.find((h) => h.id === id) || null;
+  const raw = String(id).trim();
+  const clean = raw.toLowerCase();
+  const alpha = clean.replace(/[^a-z0-9]/g, '');
+
+  const exact = list.find((h) => h.id === raw || h.id.toLowerCase() === clean);
+  if (exact) return exact;
+
+  const aliases = {
+    'devpulse-2026': 'hack-001',
+    'devpulse': 'hack-001',
+    'pccoe-innovatex-2026': 'hack-002',
+    'she-solves-2026': 'hack-shesolves-001',
+    'shesolves': 'hack-shesolves-001',
+    'she-solves': 'hack-shesolves-001',
+    'shesolves-2026': 'hack-shesolves-001',
+  };
+  if (aliases[clean]) {
+    const aliasMatch = list.find((h) => h.id === aliases[clean]);
+    if (aliasMatch) return aliasMatch;
+  }
+
+  return list.find((h) => {
+    if (h.id.replace(/[^a-z0-9]/g, '') === alpha) return true;
+    const hTitle = (h.title || '').toLowerCase();
+    const hSlug = hTitle.replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    if (hTitle === clean || hSlug === clean) return true;
+    const hNormTitle = hTitle.replace(/[^a-z0-9]/g, '');
+    if (hNormTitle === alpha) return true;
+    if (alpha.length >= 4 && (hNormTitle.includes(alpha) || alpha.includes(hNormTitle))) return true;
+    return false;
+  }) || null;
 }
 
 export function createNewHackathon(hackathonData) {
@@ -94,12 +137,14 @@ export function createNewHackathon(hackathonData) {
 
 export function getHackathonsByOrganizer(organizerEmail) {
   const list = getStoredHackathons();
-  if (!organizerEmail) return list;
-  return list.filter((h) =>
-    h.organizerEmail === organizerEmail ||
-    (h.organizers && h.organizers.some((o) => typeof o === 'string' && o.toLowerCase().includes(organizerEmail.toLowerCase()))) ||
-    h.id === "devpulse-2026"
-  );
+  if (!organizerEmail) return [];
+  const cleanEmail = organizerEmail.toLowerCase().trim();
+  return list.filter((h) => {
+    if (h.organizerEmail && h.organizerEmail.toLowerCase().trim() === cleanEmail) return true;
+    if (h.organizers && h.organizers.some((o) => typeof o === 'string' && o.toLowerCase().includes(cleanEmail))) return true;
+    if (cleanEmail === "organizer@hacktrack.io" && h.id === "devpulse-2026") return true;
+    return false;
+  });
 }
 
 export function updateHackathon(id, updates) {
@@ -231,6 +276,7 @@ export function getAllAccessCodes() {
 export function saveAllAccessCodes(codes) {
   try {
     localStorage.setItem(CODES_STORAGE_KEY, JSON.stringify(codes));
+    triggerDataSync("access_codes_updated");
   } catch (err) {
     console.error("Failed to save access codes:", err);
   }
@@ -285,14 +331,14 @@ export function redeemAccessCode(rawCode, user) {
   const record = allCodes.find((c) => c.code.toUpperCase() === cleanCode);
 
   if (!record) {
-    return { success: false, error: "Invalid access code. Please check with the hackathon organizer." };
+    return { success: false, error: "Invalid or unavailable access code." };
   }
 
-  // Role validation
+  // Role validation: generic error on mismatch to prevent information leakage
   if (user?.role && user.role !== 'admin' && user.role !== record.role) {
     return {
       success: false,
-      error: `This code is intended for the '${record.role.toUpperCase()}' role. You are logged in as '${user.role}'.`
+      error: "Invalid or unavailable access code."
     };
   }
 
@@ -363,6 +409,7 @@ export function saveUserHackathonAssignment(userIdentifier, hackathonId) {
       list.push(hackathonId);
     }
     localStorage.setItem(key, JSON.stringify(list));
+    triggerDataSync("assignment_saved");
   } catch (err) {
     console.error("Failed to save user assignment:", err);
   }

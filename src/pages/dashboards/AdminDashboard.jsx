@@ -6,7 +6,6 @@ import {
   CalendarRange,
   Check,
   ClipboardCheck,
-  Copy,
   ExternalLink,
   Layers,
   Loader2,
@@ -31,9 +30,6 @@ import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, C
 import { useAuth } from '../../context/AuthContext';
 import {
   getStoredHackathons,
-  createNewHackathon,
-  advanceHackathonStage,
-  updateHackathon,
   getHackathonCommittee
 } from '../../utils/hackathonService';
 import api from '../../utils/api';
@@ -45,6 +41,8 @@ import {
   isResultsPublished
 } from '../../utils/evaluationService';
 import { issueCertificate } from '../../utils/certificateService';
+import { addNotification } from '../../utils/notificationService';
+import { subscribeToDataSync } from '../../utils/syncService';
 
 const TAB_ITEMS = [
   { value: 'hackathons', label: 'Hackathons', icon: <CalendarRange aria-hidden="true" /> },
@@ -61,35 +59,7 @@ function screeningDecisionTone(status) {
   return 'warning';
 }
 
-// One access-code well in the scoped hackathon header (copy logic lives in the page).
-function AccessCodeWell({ label, code, boundText, copied, onCopy }) {
-  return (
-    <div className="min-w-0 space-y-1 rounded-lg bg-raised/50 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-fg-subtle">{label}</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onCopy}
-          disabled={!code}
-          aria-label={copied ? `${label} copied` : `Copy ${label.toLowerCase()}`}
-        >
-          {copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
-          {copied ? "Copied" : "Copy"}
-        </Button>
-      </div>
-      <p className="break-all font-mono text-sm font-semibold text-fg">{code || "Not generated"}</p>
-      <p className="text-xs text-fg-subtle">{boundText}</p>
-    </div>
-  );
-}
-
-const MODULE_OPTIONS = [
-  { key: 'screeningGate', label: 'Screening Gate' },
-  { key: 'rubricJudging', label: 'Rubric Judging' },
-  { key: 'mentorship', label: 'Mentorship' },
-  { key: 'certificates', label: 'Certificates' },
-];
+// Presentation-only: Badge tone per role so each role reads distinctly.
 
 const ROLE_OPTIONS = [
   { value: 'student', label: 'Student / Participant' },
@@ -159,29 +129,7 @@ function StageProgressBar({ value, label, className }) {
 // Same stage → progress mapping the page has always used.
 // Stage → % lives in components/ui (shared with the other dashboards).
 
-// Checkbox grid for enabled modules. `isChecked(key)` and `onToggle(key, checked)`
-// keep each form's original checked/onChange semantics.
-function ModuleCheckboxes({ legend, isChecked, onToggle }) {
-  return (
-    <fieldset className="space-y-3 rounded-lg bg-raised/50 p-4">
-      <legend className="sr-only">{legend}</legend>
-      <p className="text-sm font-medium text-fg" aria-hidden="true">{legend}</p>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {MODULE_OPTIONS.map((m) => (
-          <label key={m.key} className="flex cursor-pointer items-center gap-2 text-sm text-fg-muted">
-            <input
-              type="checkbox"
-              checked={isChecked(m.key)}
-              onChange={(e) => onToggle(m.key, e.target.checked)}
-              className="h-4 w-4 rounded border-line accent-accent"
-            />
-            <span>{m.label}</span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  );
-}
+
 
 export default function AdminDashboard() {
   const { user } = useAuth();
@@ -195,10 +143,82 @@ export default function AdminDashboard() {
   };
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Live state from persistent services
+  useEffect(() => {
+    const handleFocus = () => setRefreshKey((k) => k + 1);
+    window.addEventListener('focus', handleFocus);
+    const unsubscribe = subscribeToDataSync(() => {
+      setRefreshKey((k) => k + 1);
+    });
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      unsubscribe();
+    };
+  }, []);
+
+  // Server hackathons state synced from live MySQL backend API
+  const [serverHackathons, setServerHackathons] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getHackathons()
+      .then((res) => {
+        if (!cancelled && Array.isArray(res?.hackathons)) {
+          setServerHackathons(res.hackathons);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [refreshKey]);
+
+  // Combined hackathons list with backend live data priority
   const hackathons = useMemo(() => {
     if (refreshKey) { /* trigger */ }
-    return getStoredHackathons();
+    const local = getStoredHackathons();
+    if (!serverHackathons.length) return local;
+
+    const combined = [...local];
+    serverHackathons.forEach((sh) => {
+      const idx = combined.findIndex((h) => h.id === sh.id || h.title?.toLowerCase() === sh.title?.toLowerCase());
+      const normalized = {
+        id: sh.id,
+        title: sh.title,
+        headline: sh.tagLine || `${sh.title} Innovation Sprint`,
+        deadline: sh.submissionDeadline ? new Date(sh.submissionDeadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : "TBD",
+        dates: `${sh.startDate ? new Date(sh.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''} - ${sh.endDate ? new Date(sh.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}`,
+        stage: sh.isRegistrationClosed ? "Registration Closed" : "Registration Open",
+        status: sh.status,
+        isRegistrationClosed: sh.isRegistrationClosed,
+        registrationDeadline: sh.registrationDeadline,
+        submissionDeadline: sh.submissionDeadline,
+        track: sh.track || "General Track",
+        category: sh.category || "Full-Stack",
+        teamSize: `${sh.minTeamSize || 1} - ${sh.maxTeamSize || 4} Members`,
+        summary: sh.description || sh.summary || `Official ${sh.title} competition.`,
+      };
+      if (idx >= 0) {
+        combined[idx] = { ...combined[idx], ...normalized, id: sh.id };
+      } else {
+        combined.push(normalized);
+      }
+    });
+    return combined;
+  }, [refreshKey, serverHackathons]);
+
+  // Live registrations fetched directly from MySQL database
+  const [registrationsList, setRegistrationsList] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getAdminRegistrations()
+      .then((data) => {
+        if (!cancelled && Array.isArray(data?.registrations)) {
+          setRegistrationsList(data.registrations);
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not load registrations from API:', err.message);
+      });
+    return () => { cancelled = true; };
   }, [refreshKey]);
 
   const [usersList, setUsersList] = useState([]);
@@ -302,91 +322,16 @@ export default function AdminDashboard() {
   // Hackathon-Scoped Inspection State
   const [selectedHackathonId, setSelectedHackathonId] = useState("all");
   const [hackathonViewTab, setHackathonViewTab] = useState("teams"); // 'teams' | 'screening' | 'judges' | 'submissions'
-  const [copiedCode, setCopiedCode] = useState(null);
-
-  const handleCopyCode = (code) => {
-    if (!code) return;
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(code);
-    }
-    setCopiedCode(code);
-    setTimeout(() => setCopiedCode(null), 2500);
-  };
 
   const handleSelectHackathon = (id) => {
     setSelectedHackathonId(id);
     if (id !== "all") setHackathonViewTab("teams");
   };
 
-  // Modal: Create Hackathon
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newHackathon, setNewHackathon] = useState({
-    title: "",
-    track: "Full-Stack & Cloud Systems",
-    stage: "Registration Open",
-    prize: "$10,000 USD",
-    deadline: "Nov 30, 2026",
-    teamSize: "2 - 4 Members",
-    enabledModules: {
-      screeningGate: true,
-      rubricJudging: true,
-      mentorship: true,
-      certificates: true
-    }
-  });
-
-  // Modal: Edit Hackathon Modules / Settings
-  const [configTarget, setConfigTarget] = useState(null);
-
   // Dynamic Metrics
   const shortlistedSubs = allSubmissions.filter((s) => s.screeningStatus === "Shortlisted").length;
   const reviewedSubs = allSubmissions.filter((s) => s.screeningStatus === "Shortlisted" || s.screeningStatus === "Rejected").length;
   const clearanceRate = reviewedSubs > 0 ? `${((shortlistedSubs / reviewedSubs) * 100).toFixed(1)}%` : "100%";
-
-  const handleAdvanceStage = (id) => {
-    const res = advanceHackathonStage(id);
-    if (res.success) {
-      setAdminNotice(`Stage advanced for "${res.hackathon.title}" → ${res.hackathon.stage}`);
-      setRefreshKey((k) => k + 1);
-      setTimeout(() => setAdminNotice(null), 3500);
-    }
-  };
-
-  const handleCreateHackathon = (e) => {
-    e.preventDefault();
-    if (!newHackathon.title.trim()) return;
-
-    const res = createNewHackathon({
-      title: newHackathon.title.trim(),
-      track: newHackathon.track,
-      stage: newHackathon.stage,
-      prizePool: newHackathon.prize,
-      deadline: newHackathon.deadline,
-      teamSize: newHackathon.teamSize,
-      enabledModules: newHackathon.enabledModules
-    });
-
-    if (res.success) {
-      setShowCreateModal(false);
-      setNewHackathon({
-        title: "",
-        track: "Full-Stack & Cloud Systems",
-        stage: "Registration Open",
-        prize: "$10,000 USD",
-        deadline: "Nov 30, 2026",
-        teamSize: "2 - 4 Members",
-        enabledModules: {
-          screeningGate: true,
-          rubricJudging: true,
-          mentorship: true,
-          certificates: true
-        }
-      });
-      setAdminNotice(`✓ Sanctioned new hackathon: "${res.hackathon.title}".`);
-      setRefreshKey((k) => k + 1);
-      setTimeout(() => setAdminNotice(null), 3500);
-    }
-  };
 
   const handleRoleChange = async (userRecord, newRole) => {
     const idOrEmail = userRecord.id || userRecord.email;
@@ -414,6 +359,13 @@ export default function AdminDashboard() {
     try {
       const idOrEmail = deactivateConfirmUser.id || deactivateConfirmUser.email;
       await api.deactivateUser(idOrEmail);
+      addNotification({
+        userEmail: user?.email,
+        title: "User Deactivated",
+        message: `Account for ${deactivateConfirmUser.fullName} (${deactivateConfirmUser.email}) has been deactivated.`,
+        type: "info",
+        link: "/dashboard/admin?tab=users"
+      });
       setAdminNotice(`✓ Successfully deactivated ${deactivateConfirmUser.fullName} (${deactivateConfirmUser.email}).`);
       setDeactivateConfirmUser(null);
       setRefreshKey((k) => k + 1);
@@ -433,6 +385,13 @@ export default function AdminDashboard() {
     try {
       const idOrEmail = reactivateConfirmUser.id || reactivateConfirmUser.email;
       await api.reactivateUser(idOrEmail);
+      addNotification({
+        userEmail: user?.email,
+        title: "User Reactivated",
+        message: `Account for ${reactivateConfirmUser.fullName} (${reactivateConfirmUser.email}) has been restored to active status.`,
+        type: "success",
+        link: "/dashboard/admin?tab=users"
+      });
       setAdminNotice(`✓ Successfully reactivated ${reactivateConfirmUser.fullName} (${reactivateConfirmUser.email}).`);
       setReactivateConfirmUser(null);
       setRefreshKey((k) => k + 1);
@@ -459,6 +418,13 @@ export default function AdminDashboard() {
     setAddUserError(null);
     try {
       await api.createUser(newUserForm);
+      addNotification({
+        userEmail: user?.email,
+        title: "User Created by Admin",
+        message: `Registered user ${newUserForm.fullName} (${newUserForm.email}) with role "${newUserForm.role}".`,
+        type: "success",
+        link: "/dashboard/admin?tab=users"
+      });
       setAdminNotice(`✓ Successfully added ${newUserForm.fullName} (${newUserForm.email}) to MySQL database.`);
       setShowAddUserModal(false);
       setNewUserForm({
@@ -505,21 +471,7 @@ export default function AdminDashboard() {
     setTimeout(() => setAdminNotice(null), 5000);
   };
 
-  const handleSaveModulesConfig = (e) => {
-    e.preventDefault();
-    if (!configTarget) return;
 
-    updateHackathon(configTarget.id, {
-      teamSize: configTarget.teamSize,
-      deadline: configTarget.deadline,
-      enabledModules: configTarget.enabledModules
-    });
-
-    setConfigTarget(null);
-    setAdminNotice(`✓ Updated configuration rules for "${configTarget.title}".`);
-    setRefreshKey((k) => k + 1);
-    setTimeout(() => setAdminNotice(null), 3500);
-  };
 
   // Platform-wide actions (bodies unchanged from the previous inline handlers).
   const handleIntegrityScan = () => {
@@ -556,16 +508,17 @@ export default function AdminDashboard() {
       (s.hackathonTitle && s.hackathonTitle.toLowerCase().includes(activeH.title.toLowerCase()))
     );
 
-    scoped = { committee, judgeCodeRecord, screenCodeRecord, hackTeams, hackSubs };
+    // Filter registrations belonging to this hackathon
+    const hackRegistrations = registrationsList.filter(
+      (r) =>
+        r.hackathonId === activeH.id ||
+        (r.hackathonTitle && r.hackathonTitle.toLowerCase().includes(activeH.title.toLowerCase()))
+    );
+
+    scoped = { committee, judgeCodeRecord, screenCodeRecord, hackTeams, hackSubs, hackRegistrations };
   }
 
   const publishedCount = hackathons.filter((h) => isResultsPublished(h.id)).length;
-  const createAction = (
-    <Button onClick={() => setShowCreateModal(true)}>
-      <Plus className="h-4 w-4" aria-hidden="true" />
-      Create hackathon
-    </Button>
-  );
 
   return (
     <DashboardLayout
@@ -579,7 +532,6 @@ export default function AdminDashboard() {
           title="Platform administration"
           description="Run hackathons, manage who can do what, and release certified results and certificates."
           meta={<span>{user?.university || "HackTrack Central HQ"}</span>}
-          actions={createAction}
         />
 
         <section aria-label="Platform statistics" className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-5">
@@ -671,34 +623,17 @@ export default function AdminDashboard() {
                       <span className="text-xs tabular-nums text-fg-subtle">{stageProgress(activeH.stage)}%</span>
                     </div>
                   </div>
-                  <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    <Button variant="ghost" size="sm" onClick={() => setConfigTarget(activeH)}>
-                      Configure
-                    </Button>
-                    <Button variant="secondary" size="sm" onClick={() => handleAdvanceStage(activeH.id)}>
-                      Advance stage
-                    </Button>
-                  </div>
                 </div>
 
-                {/* Access codes & metrics */}
+                {/* Scoped metrics & participant oversight */}
                 <div className="relative grid grid-cols-1 gap-3 border-t border-line pt-5 sm:grid-cols-2 lg:grid-cols-4">
-                  <AccessCodeWell
-                    label="Screening code"
-                    code={scoped.screenCodeRecord?.code}
-                    boundText={`${scoped.committee.screeners.length} reviewer(s) bound`}
-                    copied={Boolean(scoped.screenCodeRecord?.code) && copiedCode === scoped.screenCodeRecord?.code}
-                    onCopy={() => handleCopyCode(scoped.screenCodeRecord?.code)}
-                  />
-                  <AccessCodeWell
-                    label="Judge code"
-                    code={scoped.judgeCodeRecord?.code}
-                    boundText={`${scoped.committee.judges.length} evaluator(s) bound`}
-                    copied={Boolean(scoped.judgeCodeRecord?.code) && copiedCode === scoped.judgeCodeRecord?.code}
-                    onCopy={() => handleCopyCode(scoped.judgeCodeRecord?.code)}
-                  />
                   <div className="min-w-0 space-y-1 rounded-lg bg-raised/50 p-3">
-                    <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">Enrolled teams</p>
+                    <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">Registered participants</p>
+                    <p className="text-lg font-semibold tabular-nums text-fg">{scoped.hackRegistrations?.length || 0} Participants</p>
+                    <p className="text-xs text-fg-subtle">Persisted in MySQL database</p>
+                  </div>
+                  <div className="min-w-0 space-y-1 rounded-lg bg-raised/50 p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">Enrolled squads</p>
                     <p className="text-lg font-semibold tabular-nums text-fg">{scoped.hackTeams.length} Teams</p>
                     <p className="text-xs text-fg-subtle">{scoped.hackSubs.length} deliverable(s) submitted</p>
                   </div>
@@ -706,6 +641,11 @@ export default function AdminDashboard() {
                     <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">Rubric criteria</p>
                     <p className="text-lg font-semibold tabular-nums text-fg">{(activeH.rubrics || []).length} Criteria</p>
                     <p className="text-xs text-fg-subtle">{activeH.prizePool || activeH.prize || "Prizes set"}</p>
+                  </div>
+                  <div className="min-w-0 space-y-1 rounded-lg bg-raised/50 p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">Oversight status</p>
+                    <p className="text-lg font-semibold tabular-nums text-fg">{activeH.stage || "Published"}</p>
+                    <p className="text-xs text-fg-subtle">Organizer management only</p>
                   </div>
                 </div>
             </section>
@@ -726,51 +666,130 @@ export default function AdminDashboard() {
               />
               <p className="text-xs text-fg-subtle">Scoped to {activeH.title}</p>
 
-              {/* TAB 1: TEAMS */}
-              <TabPanel value="teams" activeValue={hackathonViewTab} idPrefix="admin-hackathon" className="focus:outline-none">
-                {scoped.hackTeams.length === 0 ? (
-                  <Card>
-                    <EmptyState
-                      illustration="team"
-                      icon={UsersRound}
-                      title="No teams enrolled"
-                      description="No squads currently enrolled in this specific sprint."
-                    />
-                  </Card>
-                ) : (
-                  <TableContainer>
-                    <table className={tableClasses.table}>
-                      <thead className={tableClasses.thead}>
-                        <tr>
-                          <th scope="col" className={tableClasses.th}>Team code</th>
-                          <th scope="col" className={tableClasses.th}>Squad name</th>
-                          <th scope="col" className={tableClasses.th}>Team lead</th>
-                          <th scope="col" className={tableClasses.th}>Members roster</th>
-                          <th scope="col" className={tableClasses.th}>Track</th>
-                          <th scope="col" className={cn(tableClasses.th, 'text-right')}>Screening status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {scoped.hackTeams.map((t, idx) => (
-                          <tr key={idx} className={tableClasses.tr}>
-                            <td className={cn(tableClasses.td, 'whitespace-nowrap font-mono text-xs font-semibold text-fg')}>{t.code}</td>
-                            <td className={cn(tableClasses.td, 'font-medium text-fg')}>{t.name}</td>
-                            <td className={tableClasses.td}>{t.lead || "Lead Member"}</td>
-                            <td className={tableClasses.td}>
-                              {(t.members || []).map((m) => (typeof m === 'string' ? m : m.name || m.email)).join(', ')}
-                            </td>
-                            <td className={tableClasses.td}>{t.track || activeH.track}</td>
-                            <td className={cn(tableClasses.td, 'text-right')}>
-                              <Badge tone={t.screeningStatus ? screeningDecisionTone(t.screeningStatus) : 'info'}>
-                                {t.screeningStatus || "Registered"}
-                              </Badge>
-                            </td>
+              {/* TAB 1: TEAMS & REGISTERED PARTICIPANTS */}
+              <TabPanel value="teams" activeValue={hackathonViewTab} idPrefix="admin-hackathon" className="space-y-6 focus:outline-none">
+                {/* 1. Enrolled Squads */}
+                <div className="space-y-3">
+                  <IconSectionHeader
+                    icon={UsersRound}
+                    title="Enrolled Squads"
+                    description={`Teams currently participating in ${activeH.title}.`}
+                    actions={<Badge>{scoped.hackTeams.length} squads</Badge>}
+                  />
+                  {scoped.hackTeams.length === 0 ? (
+                    <Card>
+                      <EmptyState
+                        illustration="team"
+                        icon={UsersRound}
+                        title="No teams formed yet"
+                        description="No squads currently formed in this specific sprint."
+                      />
+                    </Card>
+                  ) : (
+                    <TableContainer>
+                      <table className={tableClasses.table}>
+                        <thead className={tableClasses.thead}>
+                          <tr>
+                            <th scope="col" className={tableClasses.th}>Team code</th>
+                            <th scope="col" className={tableClasses.th}>Squad name</th>
+                            <th scope="col" className={tableClasses.th}>Team lead</th>
+                            <th scope="col" className={tableClasses.th}>Members roster</th>
+                            <th scope="col" className={tableClasses.th}>Track</th>
+                            <th scope="col" className={cn(tableClasses.th, 'text-right')}>Screening status</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </TableContainer>
-                )}
+                        </thead>
+                        <tbody>
+                          {scoped.hackTeams.map((t, idx) => (
+                            <tr key={idx} className={tableClasses.tr}>
+                              <td className={cn(tableClasses.td, 'whitespace-nowrap font-mono text-xs font-semibold text-fg')}>{t.code}</td>
+                              <td className={cn(tableClasses.td, 'font-medium text-fg')}>{t.name}</td>
+                              <td className={tableClasses.td}>{t.lead || "Lead Member"}</td>
+                              <td className={tableClasses.td}>
+                                {(t.members || []).map((m) => (typeof m === 'string' ? m : m.name || m.email)).join(', ')}
+                              </td>
+                              <td className={tableClasses.td}>{t.track || activeH.track}</td>
+                              <td className={cn(tableClasses.td, 'text-right')}>
+                                <Badge tone={t.screeningStatus ? screeningDecisionTone(t.screeningStatus) : 'info'}>
+                                  {t.screeningStatus || "Registered"}
+                                </Badge>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </TableContainer>
+                  )}
+                </div>
+
+                {/* 2. Registered Participants Table (MySQL backed) */}
+                <div className="space-y-3 pt-6 border-t border-line">
+                  <IconSectionHeader
+                    icon={UserCheck}
+                    title="Registered Participants"
+                    description={`Individual student and leader registrations for ${activeH.title} persisted in MySQL.`}
+                    actions={<Badge tone="success">{scoped.hackRegistrations?.length || 0} registered</Badge>}
+                  />
+                  {(scoped.hackRegistrations?.length || 0) === 0 ? (
+                    <Card>
+                      <EmptyState
+                        illustration="user"
+                        icon={UserCheck}
+                        title="No registered participants yet"
+                        description={`No participants have registered for ${activeH.title} yet.`}
+                      />
+                    </Card>
+                  ) : (
+                    <TableContainer>
+                      <table className={tableClasses.table}>
+                        <thead className={tableClasses.thead}>
+                          <tr>
+                            <th scope="col" className={tableClasses.th}>Participant</th>
+                            <th scope="col" className={tableClasses.th}>Email</th>
+                            <th scope="col" className={tableClasses.th}>University / Org</th>
+                            <th scope="col" className={tableClasses.th}>Role</th>
+                            <th scope="col" className={tableClasses.th}>Registered on</th>
+                            <th scope="col" className={tableClasses.th}>Squad / Team</th>
+                            <th scope="col" className={cn(tableClasses.th, 'text-right')}>Registration status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {scoped.hackRegistrations.map((r) => (
+                            <tr key={r.id || r.userId} className={tableClasses.tr}>
+                              <td className={cn(tableClasses.td, 'font-medium text-fg')}>
+                                <div className="flex items-center gap-2">
+                                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-accent/15 text-xs font-semibold text-accent-text">
+                                    {(r.fullName || r.userEmail || 'U').charAt(0).toUpperCase()}
+                                  </span>
+                                  <span>{r.fullName || 'Participant'}</span>
+                                </div>
+                              </td>
+                              <td className={cn(tableClasses.td, 'font-mono text-xs')}>{r.userEmail || r.email}</td>
+                              <td className={tableClasses.td}>{r.university || 'PCCOE Pune'}</td>
+                              <td className={tableClasses.td}>
+                                <Badge tone={ROLE_TONES[r.role] || 'neutral'}>{r.role || 'student'}</Badge>
+                              </td>
+                              <td className={cn(tableClasses.td, 'tabular-nums text-xs whitespace-nowrap')}>
+                                {r.registeredAt ? new Date(r.registeredAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Verified'}
+                              </td>
+                              <td className={tableClasses.td}>
+                                {r.team ? (
+                                  <span className="inline-flex items-center gap-1.5 font-medium text-fg">
+                                    {r.team.name} <code className="font-mono text-xs text-accent-text">({r.team.code})</code>
+                                  </span>
+                                ) : (
+                                  <span className="text-fg-subtle italic text-xs">Individual (Not in squad yet)</span>
+                                )}
+                              </td>
+                              <td className={cn(tableClasses.td, 'text-right')}>
+                                <Badge tone="success" dot>{r.status || 'Registration Verified'}</Badge>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </TableContainer>
+                  )}
+                </div>
               </TabPanel>
 
               {/* TAB 2: SCREENING COMMITTEE */}
@@ -793,9 +812,7 @@ export default function AdminDashboard() {
                       {scoped.committee.screeners.length === 0 ? (
                         <tr>
                           <td colSpan="5" className={cn(tableClasses.td, 'py-8 text-center')}>
-                            No screening reviewers bound yet. Share code{' '}
-                            <span className="break-all font-mono text-fg">{scoped.screenCodeRecord?.code}</span>{' '}
-                            with your review team.
+                            No screening committee members assigned yet. Organizer manages committee onboarding.
                           </td>
                         </tr>
                       ) : (
@@ -807,7 +824,7 @@ export default function AdminDashboard() {
                               <Badge tone="warning">Screening Gatekeeper</Badge>
                             </td>
                             <td className={cn(tableClasses.td, 'font-mono text-xs')}>
-                              Code Redemption ({scoped.screenCodeRecord?.code || "Direct"})
+                              Access Code Redemption
                             </td>
                             <td className={cn(tableClasses.td, 'text-right')}>
                               <Badge tone="success" dot>Active</Badge>
@@ -840,9 +857,7 @@ export default function AdminDashboard() {
                       {scoped.committee.judges.length === 0 ? (
                         <tr>
                           <td colSpan="5" className={cn(tableClasses.td, 'py-8 text-center')}>
-                            No judges bound yet. Share code{' '}
-                            <span className="break-all font-mono text-fg">{scoped.judgeCodeRecord?.code}</span>{' '}
-                            with your evaluator panel.
+                            No judges bound yet. Organizer manages evaluator panel onboarding.
                           </td>
                         </tr>
                       ) : (
@@ -854,7 +869,7 @@ export default function AdminDashboard() {
                               {(activeH.rubrics || []).map((r) => r.name).slice(0, 2).join(', ') || "Standard Rubrics"}...
                             </td>
                             <td className={cn(tableClasses.td, 'font-mono text-xs')}>
-                              Code Redemption ({scoped.judgeCodeRecord?.code || "Direct"})
+                              Access Code Redemption
                             </td>
                             <td className={cn(tableClasses.td, 'text-right')}>
                               <Badge tone="success" dot>Active</Badge>
@@ -968,8 +983,7 @@ export default function AdminDashboard() {
                     illustration="calendar"
                     icon={CalendarRange}
                     title="No hackathons yet"
-                    description="Create the first hackathon to open registration and start tracking stages."
-                    action={createAction}
+                    description="Hackathons created by organizers will appear here for governance and tracking."
                   />
                 </Card>
               ) : (
@@ -1013,12 +1027,17 @@ export default function AdminDashboard() {
                               {isPub ? <Badge tone="success" dot>Released</Badge> : <Badge>Private</Badge>}
                             </td>
                             <td className={tableClasses.td}>
-                              <div className="flex items-center justify-end gap-2">
-                                <Button variant="ghost" size="sm" onClick={() => setConfigTarget(h)} aria-label={`Configure ${h.title}`}>
-                                  Configure
-                                </Button>
-                                <Button variant="secondary" size="sm" onClick={() => handleAdvanceStage(h.id)} aria-label={`Advance stage of ${h.title}`}>
-                                  Advance stage
+                              <div className="flex items-center justify-end">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedHackathonId(h.id);
+                                    window.scrollTo({ top: 300, behavior: 'smooth' });
+                                  }}
+                                  aria-label={`Inspect ${h.title}`}
+                                >
+                                  Inspect
                                 </Button>
                               </div>
                             </td>
@@ -1289,7 +1308,6 @@ export default function AdminDashboard() {
                       icon={Trophy}
                       title="Nothing to publish"
                       description="Results can be released once a hackathon exists and its submissions have been evaluated."
-                      action={createAction}
                     />
                   </Card>
                 ) : (
@@ -1368,118 +1386,7 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* DIALOG: CREATE NEW HACKATHON */}
-        <Dialog
-          open={showCreateModal}
-          onClose={() => setShowCreateModal(false)}
-          title="Create hackathon"
-          description="Sanction a new competition on the platform."
-        >
-          <form onSubmit={handleCreateHackathon} className="space-y-4">
-            <Field label="Competition title" required>
-              <Input
-                type="text"
-                value={newHackathon.title}
-                onChange={(e) => setNewHackathon({ ...newHackathon, title: e.target.value })}
-                placeholder="e.g. NextGen Web3 Sprint"
-              />
-            </Field>
 
-            <Field label="Track">
-              <Select
-                value={newHackathon.track}
-                onChange={(e) => setNewHackathon({ ...newHackathon, track: e.target.value })}
-              >
-                <option value="Full-Stack & Cloud Systems">Full-Stack & Cloud Systems</option>
-                <option value="Applied Machine Learning & Agents">Applied Machine Learning & Agents</option>
-                <option value="IoT & Campus Optimization">IoT & Campus Optimization</option>
-                <option value="Web3 & Smart Contracts">Web3 & Smart Contracts</option>
-              </Select>
-            </Field>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Prize pool">
-                <Input
-                  type="text"
-                  value={newHackathon.prize}
-                  onChange={(e) => setNewHackathon({ ...newHackathon, prize: e.target.value })}
-                />
-              </Field>
-              <Field label="Deadline">
-                <Input
-                  type="text"
-                  value={newHackathon.deadline}
-                  onChange={(e) => setNewHackathon({ ...newHackathon, deadline: e.target.value })}
-                />
-              </Field>
-            </div>
-
-            <Field label="Team size limits">
-              <Input
-                type="text"
-                value={newHackathon.teamSize}
-                onChange={(e) => setNewHackathon({ ...newHackathon, teamSize: e.target.value })}
-                placeholder="e.g. 2 - 4 Members"
-              />
-            </Field>
-
-            <ModuleCheckboxes
-              legend="Enabled modules"
-              isChecked={(key) => newHackathon.enabledModules[key]}
-              onToggle={(key, checked) => setNewHackathon({
-                ...newHackathon,
-                enabledModules: { ...newHackathon.enabledModules, [key]: checked }
-              })}
-            />
-
-            <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
-              <Button variant="ghost" onClick={() => setShowCreateModal(false)}>Cancel</Button>
-              <Button type="submit">Create hackathon</Button>
-            </div>
-          </form>
-        </Dialog>
-
-        {/* DIALOG: EDIT HACKATHON CONFIGURATION */}
-        <Dialog
-          open={Boolean(configTarget)}
-          onClose={() => setConfigTarget(null)}
-          title="Configure rules"
-          description={configTarget?.title}
-        >
-          {configTarget && (
-            <form onSubmit={handleSaveModulesConfig} className="space-y-4">
-              <Field label="Submission deadline">
-                <Input
-                  type="text"
-                  value={configTarget.deadline || ""}
-                  onChange={(e) => setConfigTarget({ ...configTarget, deadline: e.target.value })}
-                />
-              </Field>
-
-              <Field label="Team size limits">
-                <Input
-                  type="text"
-                  value={configTarget.teamSize || ""}
-                  onChange={(e) => setConfigTarget({ ...configTarget, teamSize: e.target.value })}
-                />
-              </Field>
-
-              <ModuleCheckboxes
-                legend="Active modules"
-                isChecked={(key) => configTarget.enabledModules?.[key] !== false}
-                onToggle={(key, checked) => setConfigTarget({
-                  ...configTarget,
-                  enabledModules: { ...configTarget.enabledModules, [key]: checked }
-                })}
-              />
-
-              <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
-                <Button variant="ghost" onClick={() => setConfigTarget(null)}>Cancel</Button>
-                <Button type="submit">Save configuration</Button>
-              </div>
-            </form>
-          )}
-        </Dialog>
 
         {/* DIALOG: ADD NEW USER (MySQL) */}
         <Dialog

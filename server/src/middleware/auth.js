@@ -88,3 +88,18 @@ export function requireRole(...allowedRoles) {
     next();
   };
 }
+
+export function optionalAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    const decoded = verifyToken(token);
+    if (decoded) {
+      const user = store.findUserById(decoded.id);
+      if (user && user.isActive !== false && user.is_active !== 0) {
+        req.user = user;
+      }
+    }
+  }
+  next();
+}
