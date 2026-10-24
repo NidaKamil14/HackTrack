@@ -8,6 +8,8 @@ let adminToken;
 let leaderToken;
 let studentToken;
 let judgeToken;
+let organizerToken;
+let otherOrganizerToken;
 
 test.before(async () => {
   await new Promise((resolve) => {
@@ -49,6 +51,22 @@ test.before(async () => {
     body: JSON.stringify({ email: 'judge@hacktrack.io', password: 'password123' }),
   });
   judgeToken = (await judgeRes.json()).token;
+
+  // Authorized Organizer login (Kavita Rao, creator of hack-001)
+  const orgRes = await fetch(`${baseUrl}/api/v1/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'organizer@hacktrack.io', password: 'password123' }),
+  });
+  organizerToken = (await orgRes.json()).token;
+
+  // Another Organizer login (Marcus Vance, creator of hack-shesolves-001)
+  const otherOrgRes = await fetch(`${baseUrl}/api/v1/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'marcus.ai@hacktrack.io', password: 'password123' }),
+  });
+  otherOrganizerToken = (await otherOrgRes.json()).token;
 });
 
 test.after(async () => {
@@ -183,10 +201,30 @@ test('HackTrack Submissions, Evaluation & Results (FR-17 to FR-31, BR-7 to BR-9)
     assert.equal(body.leaderboard[0].rank, 1);
   });
 
-  await t.test('8. FR-30, FR-31 & BR-9: Admin publishes results and generates certificates', async () => {
+  await t.test('8. Admin cannot publish results (HTTP 403 Forbidden)', async () => {
     const res = await fetch(`${baseUrl}/api/v1/evaluations/publish-results/hack-001`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    assert.equal(res.status, 403);
+    const body = await res.json();
+    assert.equal(body.error, 'Forbidden');
+  });
+
+  await t.test('9. Unauthorized Organizer cannot publish results for another organizer event (HTTP 403 Forbidden)', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/evaluations/publish-results/hack-001`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${otherOrganizerToken}` },
+    });
+    assert.equal(res.status, 403);
+    const body = await res.json();
+    assert.equal(body.error, 'Forbidden');
+  });
+
+  await t.test('10. FR-30, FR-31 & BR-9: Authorized Organizer publishes results and generates certificates', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/evaluations/publish-results/hack-001`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${organizerToken}` },
     });
 
     assert.equal(res.status, 200);

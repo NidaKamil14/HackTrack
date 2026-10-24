@@ -6,6 +6,7 @@ let server;
 let baseUrl;
 let adminToken;
 let studentToken;
+let organizerToken;
 
 test.before(async () => {
   await new Promise((resolve) => {
@@ -33,6 +34,15 @@ test.before(async () => {
   });
   const studentData = await studentRes.json();
   studentToken = studentData.token;
+
+  // Login as organizer
+  const orgRes = await fetch(`${baseUrl}/api/v1/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'organizer@hacktrack.io', password: 'password123' }),
+  });
+  const orgData = await orgRes.json();
+  organizerToken = orgData.token;
 });
 
 test.after(async () => {
@@ -106,11 +116,19 @@ test('HackTrack Admin, Reports, Announcements & Certificates (FR-32 to FR-46)', 
   });
 
   await t.test('7. FR-32 & FR-34: Participant views their issued certificates', async () => {
-    // Publish results to trigger certificate generation for hack-001
-    await fetch(`${baseUrl}/api/v1/evaluations/publish-results/hack-001`, {
+    // Admin attempt to publish results is forbidden (HTTP 403)
+    const adminAttempt = await fetch(`${baseUrl}/api/v1/evaluations/publish-results/hack-001`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${adminToken}` },
     });
+    assert.equal(adminAttempt.status, 403);
+
+    // Authorized Organizer publishes results to trigger certificate generation for hack-001
+    const orgRes = await fetch(`${baseUrl}/api/v1/evaluations/publish-results/hack-001`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${organizerToken}` },
+    });
+    assert.equal(orgRes.status, 200);
 
     const res = await fetch(`${baseUrl}/api/v1/certificates/my-certificates`, {
       headers: { Authorization: `Bearer ${studentToken}` },

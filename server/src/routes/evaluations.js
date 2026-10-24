@@ -100,12 +100,49 @@ router.get('/leaderboard/:hackathonId', (req, res) => {
   });
 });
 
-// POST /api/v1/evaluations/publish-results/:hackathonId: Admin publishes results (FR-30, FR-31, BR-9)
-router.post('/publish-results/:hackathonId', requireAuth, requireRole('admin'), (req, res) => {
+// POST /api/v1/evaluations/publish-results/:hackathonId: Organizer publishes results (FR-30, FR-31, BR-9)
+// Admin is strictly restricted from publishing, modifying, or finalizing results (HTTP 403 Forbidden).
+router.post('/publish-results/:hackathonId', requireAuth, (req, res) => {
   try {
-    const updatedHackathon = store.publishResults(req.params.hackathonId);
-    // Results + certificates are committed at this point; emails follow.
-    notifyResultsPublished(req.params.hackathonId);
+    if (req.user.role === 'admin') {
+      return res.status(403).json({
+        status: 403,
+        error: 'Forbidden',
+        message: 'Administrators are not permitted to publish, modify, or finalize hackathon results. Result publication is reserved exclusively for authorized event organizers.',
+      });
+    }
+
+    if (req.user.role !== 'organizer') {
+      return res.status(403).json({
+        status: 403,
+        error: 'Forbidden',
+        message: 'Only authorized event organizers can publish results.',
+      });
+    }
+
+    const hackathon = store.getHackathonById(req.params.hackathonId);
+    if (!hackathon) {
+      return res.status(404).json({
+        status: 404,
+        error: 'Not Found',
+        message: 'Hackathon not found.',
+      });
+    }
+
+    const isOwner = hackathon.createdBy === req.user.id;
+    const isAssigned = Array.isArray(hackathon.assignedOrganizers) && hackathon.assignedOrganizers.includes(req.user.id);
+
+    if (!isOwner && !isAssigned) {
+      return res.status(403).json({
+        status: 403,
+        error: 'Forbidden',
+        message: 'You are not authorized to publish results for another organizer\'s hackathon.',
+      });
+    }
+
+    const updatedHackathon = store.publishResults(hackathon.id);
+    // Results + certificates are committed at this point; notifications follow.
+    notifyResultsPublished(hackathon.id);
     return res.json({
       status: 200,
       message: 'Hackathon results successfully published and certificates issued to participants (FR-30, FR-31, FR-32, BR-9).',

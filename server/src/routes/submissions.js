@@ -5,10 +5,46 @@ import { notifySubmissionSaved } from '../notifications/notifier.js';
 
 const router = express.Router();
 
-// GET /api/v1/submissions: List submissions for a hackathon
+// GET /api/v1/submissions: List submissions for a hackathon or platform-wide (Admin)
 router.get('/', optionalAuth, (req, res) => {
   const { hackathonId } = req.query;
-  if (!hackathonId) {
+
+  if (!hackathonId || hackathonId === 'all') {
+    if (req.user && req.user.role === 'admin') {
+      const submissions = (store.submissions || []).map((s) => {
+        const team = store.findTeamById(s.teamId);
+        return {
+          ...s,
+          teamName: team?.teamName || 'Unknown Team',
+        };
+      });
+      return res.json({
+        status: 200,
+        count: submissions.length,
+        submissions,
+      });
+    }
+
+    if (req.user && req.user.role === 'organizer') {
+      const myHackathons = (store.hackathons || [])
+        .filter((h) => h.createdBy === req.user.id || (h.assignedOrganizers && h.assignedOrganizers.includes(req.user.id)))
+        .map((h) => h.id);
+      const submissions = (store.submissions || [])
+        .filter((s) => myHackathons.includes(s.hackathonId))
+        .map((s) => {
+          const team = store.findTeamById(s.teamId);
+          return {
+            ...s,
+            teamName: team?.teamName || 'Unknown Team',
+          };
+        });
+      return res.json({
+        status: 200,
+        count: submissions.length,
+        submissions,
+      });
+    }
+
     return res.status(400).json({
       status: 400,
       error: 'Bad Request',
@@ -17,9 +53,9 @@ router.get('/', optionalAuth, (req, res) => {
   }
 
   // Organizer data isolation: organizers can only view submissions for hackathons they created or manage
+  const targetHackathon = store.getHackathonById(hackathonId);
   if (req.user && req.user.role === 'organizer') {
-    const hackathon = store.getHackathonById(hackathonId);
-    if (!hackathon || (hackathon.createdBy !== req.user.id && !(hackathon.assignedOrganizers && hackathon.assignedOrganizers.includes(req.user.id)))) {
+    if (!targetHackathon || (targetHackathon.createdBy !== req.user.id && !(targetHackathon.assignedOrganizers && targetHackathon.assignedOrganizers.includes(req.user.id)))) {
       return res.status(403).json({
         status: 403,
         error: 'Forbidden',
@@ -28,7 +64,7 @@ router.get('/', optionalAuth, (req, res) => {
     }
   }
 
-  const submissions = store.getSubmissionsByHackathon(hackathonId).map((s) => {
+  const submissions = store.getSubmissionsByHackathon(targetHackathon ? targetHackathon.id : hackathonId).map((s) => {
     const team = store.findTeamById(s.teamId);
     return {
       ...s,

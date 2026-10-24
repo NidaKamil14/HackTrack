@@ -21,6 +21,7 @@ import {
   ArrowDown,
   ArrowRight,
   ArrowUp,
+  Award,
   CalendarClock,
   CalendarRange,
   Check,
@@ -418,6 +419,19 @@ export default function OrganizerDashboard() {
     }
   };
 
+  const handlePublishResults = async (hackathonId, title) => {
+    try {
+      await api.publishResults(hackathonId);
+      setNotice(`✓ Official results published and certificates issued to participants for "${title}"!`);
+      setRefreshKey((k) => k + 1);
+      setTimeout(() => setNotice(null), 4500);
+    } catch (err) {
+      console.error('Failed to publish results:', err);
+      setNotice(`❌ Error publishing results: ${err.message}`);
+      setTimeout(() => setNotice(null), 4500);
+    }
+  };
+
   const handleSaveConfig = (e) => {
     e.preventDefault();
     if (!configTarget) return;
@@ -746,7 +760,20 @@ export default function OrganizerDashboard() {
                             <ListChecks aria-hidden="true" />
                             Rubrics <span className="tabular-nums">({(h.rubrics || []).length})</span>
                           </Button>
-                          <Button variant="secondary" size="sm" className="ml-auto" onClick={() => handleAdvance(h.id)}>
+                          {h.resultsPublished ? (
+                            <Badge tone="success" dot className="ml-auto">Results certified</Badge>
+                          ) : (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="ml-auto"
+                              onClick={() => handlePublishResults(h.id, h.title)}
+                            >
+                              <Award className="h-3.5 w-3.5" aria-hidden="true" />
+                              Publish results
+                            </Button>
+                          )}
+                          <Button variant="secondary" size="sm" onClick={() => handleAdvance(h.id)}>
                             Advance stage
                             <ArrowRight aria-hidden="true" />
                           </Button>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Bell, ExternalLink, LogOut, Mail } from 'lucide-react';
+import { Bell, ExternalLink, LogOut, Mail, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import ThemeToggle from '../ThemeToggle';
 import EmailPreferencesDialog from '../notifications/EmailPreferencesDialog';
@@ -19,6 +19,26 @@ export default function DashboardLayout({
   const [emailSettingsOpen, setEmailSettingsOpen] = useState(false);
   const [notifCenterOpen, setNotifCenterOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(() => (user ? getUnreadNotificationCount(user) : 0));
+  const [loginToast, setLoginToast] = useState(null);
+
+  useEffect(() => {
+    if (!user) {
+      setLoginToast(null);
+      return;
+    }
+    const count = getUnreadNotificationCount(user);
+
+    // Brief unread notification toast after login (approx 3s, only once per session)
+    const sessionKey = `ht_login_toast_${user.id || user.email}`;
+    if (count > 0 && !sessionStorage.getItem(sessionKey)) {
+      sessionStorage.setItem(sessionKey, 'shown');
+      setLoginToast({ count });
+      const timer = setTimeout(() => {
+        setLoginToast(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [user]);
 
   useEffect(() => {
     const handleUpdate = () => {
@@ -29,6 +49,9 @@ export default function DashboardLayout({
   }, [user]);
 
   const handleLogout = () => {
+    if (user) {
+      sessionStorage.removeItem(`ht_login_toast_${user.id || user.email}`);
+    }
     logout();
     navigate('/login');
   };
@@ -44,7 +67,7 @@ export default function DashboardLayout({
       <div>
         <header className="sticky top-0 z-40 border-b border-line/70 bg-canvas/75 backdrop-blur-xl supports-[backdrop-filter]:bg-canvas/60">
           <span className="hairline-gradient pointer-events-none absolute inset-x-0 bottom-0 h-px opacity-60" aria-hidden="true" />
-          <div className="container-page flex h-14 items-center justify-between gap-3">
+          <div className="container-page flex h-16 items-center justify-between gap-3 sm:h-16">
             <div className="flex min-w-0 items-center gap-3">
               <Link to="/" className="inline-flex min-h-10 items-center rounded-md" aria-label="HackTrack home">
                 <Logo />
@@ -55,35 +78,37 @@ export default function DashboardLayout({
               </Badge>
             </div>
 
-            <div className="flex items-center gap-1 sm:gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2.5">
               <Button as={Link} to="/" variant="ghost" size="sm" className="hidden md:inline-flex">
                 Public site
                 <ExternalLink aria-hidden="true" />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
+              <button
+                type="button"
                 onClick={() => setNotifCenterOpen(true)}
-                aria-label="Notification center"
+                aria-label={`Notification center${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
                 title="Notifications"
-                className="relative"
+                className="relative flex h-10 w-10 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-raised hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent"
               >
-                <Bell aria-hidden="true" />
+                <Bell className="h-5 w-5" aria-hidden="true" />
                 {unreadCount > 0 && (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-fg">
-                    {unreadCount > 9 ? '9+' : unreadCount}
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-1 right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-fg shadow-sm ring-2 ring-canvas pointer-events-none"
+                  >
+                    {unreadCount > 99 ? '99+' : unreadCount}
                   </span>
                 )}
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
+              </button>
+              <button
+                type="button"
                 onClick={() => setEmailSettingsOpen(true)}
                 aria-label="Email notification settings"
                 title="Email notification settings"
+                className="flex h-10 w-10 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-raised hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent"
               >
-                <Mail aria-hidden="true" />
-              </Button>
+                <Mail className="h-5 w-5" aria-hidden="true" />
+              </button>
               <ThemeToggle />
 
               {user && (
@@ -132,6 +157,35 @@ export default function DashboardLayout({
       </footer>
       <EmailPreferencesDialog open={emailSettingsOpen} onClose={() => setEmailSettingsOpen(false)} />
       <NotificationCenterDialog open={notifCenterOpen} onClose={() => setNotifCenterOpen(false)} user={user} />
+
+      {/* Brief unread-notification toast after login */}
+      {loginToast && (
+        <aside
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl border border-accent/40 bg-surface/95 p-3.5 shadow-2xl backdrop-blur-md transition-all duration-300 ease-out text-fg animate-in fade-in slide-in-from-bottom-2"
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/20 text-accent">
+            <Bell className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <div className="min-w-0 pr-2">
+            <p className="text-sm font-semibold text-fg">
+              {loginToast.count} new notification{loginToast.count === 1 ? '' : 's'}
+            </p>
+            <p className="text-xs text-fg-muted">
+              Tap the bell in the top bar to review updates.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLoginToast(null)}
+            className="rounded-md p-1.5 text-fg-muted transition-colors hover:bg-raised hover:text-fg"
+            aria-label="Dismiss toast"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </aside>
+      )}
     </div>
   );
 }

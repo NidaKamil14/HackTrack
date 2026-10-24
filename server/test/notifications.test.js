@@ -269,9 +269,13 @@ test('Email notifications for team, submission, results and admin workflows', as
     assert.ok(!recipients.includes('admin@hacktrack.io'), 'the author is not emailed');
   });
 
-  await t.test('results published → members get results + certificate email once', async () => {
+  await t.test('results published → members get results + certificate email once (restricted to Organizer)', async () => {
     const adminToken = await login('admin@hacktrack.io');
-    const res = await api('/api/v1/evaluations/publish-results/hack-001', { method: 'POST', token: adminToken });
+    const adminRes = await api('/api/v1/evaluations/publish-results/hack-001', { method: 'POST', token: adminToken });
+    assert.equal(adminRes.status, 403, 'admin is forbidden from publishing results');
+
+    const orgToken = await login('organizer@hacktrack.io');
+    const res = await api('/api/v1/evaluations/publish-results/hack-001', { method: 'POST', token: orgToken });
     assert.equal(res.status, 200);
     await settle();
     const mine = sentTo(member.email);
@@ -280,7 +284,7 @@ test('Email notifications for team, submission, results and admin workflows', as
     assert.match(mine[0].text, /certificate has been issued/);
 
     memoryProvider.reset();
-    await api('/api/v1/evaluations/publish-results/hack-001', { method: 'POST', token: adminToken });
+    await api('/api/v1/evaluations/publish-results/hack-001', { method: 'POST', token: orgToken });
     await settle();
     assert.equal(memoryProvider.sent.length, 0, 're-publishing does not resend');
   });

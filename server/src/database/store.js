@@ -1646,12 +1646,27 @@ class HackTrackStore {
     let list = this.registrations.map((r) => {
       const user = this.findUserById(r.userId) || this.findUserByEmail(r.userEmail);
       const hackathon = this.getHackathonById(r.hackathonId);
-      const teamMember = this.teamMembers.find(
-        (m) => m.hackathonId === r.hackathonId && m.userId === (user?.id || r.userId) && m.status === 'accepted'
-      );
+      const canonicalHackId = hackathon ? hackathon.id : r.hackathonId;
+
+      const teamMember = this.teamMembers.find((m) => {
+        const matchHack = m.hackathonId === r.hackathonId || m.hackathonId === canonicalHackId;
+        const matchUser = m.userId === (user?.id || r.userId) ||
+          (user && this.findUserById(m.userId)?.email?.toLowerCase() === user.email.toLowerCase());
+        return matchHack && matchUser && m.status === 'accepted';
+      });
       const team = teamMember ? this.findTeamById(teamMember.teamId) : null;
+
+      const pendingMember = !teamMember ? this.teamMembers.find((m) => {
+        const matchHack = m.hackathonId === r.hackathonId || m.hackathonId === canonicalHackId;
+        const matchUser = m.userId === (user?.id || r.userId) ||
+          (user && this.findUserById(m.userId)?.email?.toLowerCase() === user.email.toLowerCase());
+        return matchHack && matchUser && m.status === 'pending';
+      }) : null;
+      const pendingTeam = pendingMember ? this.findTeamById(pendingMember.teamId) : null;
+
       return {
         ...r,
+        hackathonId: canonicalHackId,
         hackathonTitle: hackathon?.title || r.hackathonTitle || r.hackathonId,
         fullName: user?.fullName || r.fullName || 'Registered Participant',
         email: user?.email || r.userEmail,
@@ -1659,14 +1674,15 @@ class HackTrackStore {
         university: user?.university || r.university || 'University / Organization',
         memberId: user?.memberId || r.memberId || null,
         isActive: user ? user.isActive : true,
-        team: team ? { id: team.id, name: team.teamName, code: team.teamCode, role: teamMember.role } : null,
+        team: team ? { id: team.id, name: team.teamName, code: team.teamCode, role: teamMember.role, status: 'Active' } : null,
+        pendingRequest: pendingTeam ? { id: pendingTeam.id, name: pendingTeam.teamName, code: pendingTeam.teamCode, status: 'Pending' } : null,
       };
     });
 
     if (filters.hackathonId && filters.hackathonId !== 'all') {
       const hackathon = this.getHackathonById(filters.hackathonId);
       const targetId = hackathon ? hackathon.id : filters.hackathonId;
-      list = list.filter((r) => r.hackathonId === targetId);
+      list = list.filter((r) => r.hackathonId === targetId || (hackathon && r.hackathonId === filters.hackathonId));
     }
 
     if (filters.search) {
@@ -1845,7 +1861,9 @@ class HackTrackStore {
   }
 
   getTeamsByHackathon(hackathonId) {
-    return this.teams.filter((t) => t.hackathonId === hackathonId);
+    const hackathon = this.getHackathonById(hackathonId);
+    const targetId = hackathon ? hackathon.id : hackathonId;
+    return this.teams.filter((t) => t.hackathonId === targetId || (hackathon && t.hackathonId === hackathonId));
   }
 
   findTeamById(teamId) {
@@ -2107,7 +2125,9 @@ class HackTrackStore {
         const user = this.findUserById(m.userId);
         return {
           ...m,
+          name: user?.fullName || 'Unknown User',
           userName: user?.fullName || 'Unknown User',
+          email: user?.email || '',
           userEmail: user?.email || '',
           userUniversity: user?.university || '',
         };
@@ -2116,7 +2136,9 @@ class HackTrackStore {
 
   // --- Submissions (FR-17 to FR-21, BR-1, BR-8) ---
   getSubmissionsByHackathon(hackathonId) {
-    return this.submissions.filter((s) => s.hackathonId === hackathonId);
+    const hackathon = this.getHackathonById(hackathonId);
+    const canonicalId = hackathon ? hackathon.id : hackathonId;
+    return this.submissions.filter((s) => s.hackathonId === hackathonId || s.hackathonId === canonicalId);
   }
 
   getSubmissionById(submissionId) {

@@ -5,10 +5,35 @@ import { notifyJoinDecision, notifyJoinRequested, notifyTeamCreated } from '../n
 
 const router = express.Router();
 
-// GET /api/v1/teams: List teams for a specific hackathon
+// GET /api/v1/teams: List teams for a specific hackathon or platform-wide for Admin
 router.get('/', optionalAuth, (req, res) => {
   const { hackathonId } = req.query;
-  if (!hackathonId) {
+
+  // Platform admin oversight: Admin can list all teams across all hackathons
+  if (!hackathonId || hackathonId === 'all') {
+    if (req.user && req.user.role === 'admin') {
+      const teams = store.teams.map((team) => {
+        const members = store.getTeamMembers(team.id);
+        const hackathon = store.getHackathonById(team.hackathonId);
+        const leaderUser = store.findUserById(team.leaderId);
+        return {
+          ...team,
+          name: team.teamName,
+          code: team.teamCode,
+          lead: leaderUser ? leaderUser.fullName : 'Lead Member',
+          leaderName: leaderUser ? leaderUser.fullName : 'Lead Member',
+          leaderEmail: leaderUser ? leaderUser.email : '',
+          hackathonTitle: hackathon?.title || team.hackathonId,
+          memberCount: members.filter((m) => m.status === 'accepted').length,
+          members,
+        };
+      });
+      return res.json({
+        status: 200,
+        count: teams.length,
+        teams,
+      });
+    }
     return res.status(400).json({
       status: 400,
       error: 'Bad Request',
@@ -16,10 +41,12 @@ router.get('/', optionalAuth, (req, res) => {
     });
   }
 
+  const targetHackathon = store.getHackathonById(hackathonId);
+  const canonicalId = targetHackathon ? targetHackathon.id : hackathonId;
+
   // Organizer data isolation: organizers can only view teams for hackathons they created or manage
   if (req.user && req.user.role === 'organizer') {
-    const hackathon = store.getHackathonById(hackathonId);
-    if (!hackathon || (hackathon.createdBy !== req.user.id && !(hackathon.assignedOrganizers && hackathon.assignedOrganizers.includes(req.user.id)))) {
+    if (!targetHackathon || (targetHackathon.createdBy !== req.user.id && !(targetHackathon.assignedOrganizers && targetHackathon.assignedOrganizers.includes(req.user.id)))) {
       return res.status(403).json({
         status: 403,
         error: 'Forbidden',
@@ -28,10 +55,18 @@ router.get('/', optionalAuth, (req, res) => {
     }
   }
 
-  const teams = store.getTeamsByHackathon(hackathonId).map((team) => {
+  const teams = store.getTeamsByHackathon(canonicalId).map((team) => {
     const members = store.getTeamMembers(team.id);
+    const hackathon = store.getHackathonById(team.hackathonId);
+    const leaderUser = store.findUserById(team.leaderId);
     return {
       ...team,
+      name: team.teamName,
+      code: team.teamCode,
+      lead: leaderUser ? leaderUser.fullName : 'Lead Member',
+      leaderName: leaderUser ? leaderUser.fullName : 'Lead Member',
+      leaderEmail: leaderUser ? leaderUser.email : '',
+      hackathonTitle: hackathon?.title || team.hackathonId,
       memberCount: members.filter((m) => m.status === 'accepted').length,
       members,
     };

@@ -37,10 +37,8 @@ import { getAllTeams } from '../../utils/teamService';
 import { getSubmissions } from '../../utils/submissionService';
 import {
   getEvaluations,
-  setResultsPublished,
   isResultsPublished
 } from '../../utils/evaluationService';
-import { issueCertificate } from '../../utils/certificateService';
 import { addNotification } from '../../utils/notificationService';
 import { subscribeToDataSync } from '../../utils/syncService';
 
@@ -217,6 +215,40 @@ export default function AdminDashboard() {
       })
       .catch((err) => {
         console.warn('Could not load registrations from API:', err.message);
+      });
+    return () => { cancelled = true; };
+  }, [refreshKey]);
+
+  // Live teams fetched directly from MySQL database backend
+  const [serverTeams, setServerTeams] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getTeams('all')
+      .then((data) => {
+        if (!cancelled && Array.isArray(data?.teams)) {
+          setServerTeams(data.teams);
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not load teams from backend API:', err.message);
+      });
+    return () => { cancelled = true; };
+  }, [refreshKey]);
+
+  // Live submissions fetched directly from MySQL database backend
+  const [serverSubmissions, setServerSubmissions] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getSubmissions('all')
+      .then((data) => {
+        if (!cancelled && Array.isArray(data?.submissions)) {
+          setServerSubmissions(data.submissions);
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not load submissions from backend API:', err.message);
       });
     return () => { cancelled = true; };
   }, [refreshKey]);
@@ -445,45 +477,23 @@ export default function AdminDashboard() {
     }
   };
 
-  const handlePublishResults = (hackathonId, title) => {
-    setResultsPublished(hackathonId, true);
-
-    // Issue certificates for all evaluated teams in this sprint
-    const sprintEvals = allEvaluations.filter((e) => e.hackathonId === hackathonId || !e.hackathonId);
-    sprintEvals.forEach((ev, idx) => {
-      const award = idx === 0 ? "Grand Prize Champion (1st Place)" : idx === 1 ? "1st Runner Up (2nd Place)" : "Technical Finalist Award";
-      issueCertificate({
-        recipientName: ev.leadName || "Alex Chen",
-        recipientEmail: ev.submittedBy || "alex@university.edu",
-        teamName: ev.teamName,
-        projectTitle: ev.projectTitle || "Hackathon Project",
-        hackathonId,
-        hackathonTitle: title,
-        track: ev.track || "General Track",
-        awardTitle: award,
-        rank: `${idx + 1}th Place`,
-        score: ev.totalScore
-      });
-    });
-
-    setAdminNotice(`✓ Official results & digital certificates certified and released for "${title}"! Visible to all participants.`);
-    setRefreshKey((k) => k + 1);
-    setTimeout(() => setAdminNotice(null), 5000);
-  };
-
-
-
-  // Platform-wide actions (bodies unchanged from the previous inline handlers).
+  // Platform-wide audit action
   const handleIntegrityScan = () => {
     setAdminNotice("Executed repository integrity scan. Zero commit discrepancies detected across active submissions.");
     setTimeout(() => setAdminNotice(null), 3500);
   };
 
-  const handlePublishAll = () => {
-    hackathons.forEach((h) => setResultsPublished(h.id, true));
-    setAdminNotice("Official rankings compiled and certified for platform-wide release.");
-    setRefreshKey((k) => k + 1);
-    setTimeout(() => setAdminNotice(null), 3500);
+  const matchesHackathon = (targetIdOrTitle, hackathon) => {
+    if (!targetIdOrTitle || !hackathon) return false;
+    const target = String(targetIdOrTitle).toLowerCase().trim();
+    const hId = String(hackathon.id || '').toLowerCase().trim();
+    const hTitle = String(hackathon.title || '').toLowerCase().trim();
+    if (target === hId || target === hTitle) return true;
+    if (hId === 'hack-shesolves-001' && (target === 'she-solves-2026' || target.includes('shesolve') || target.includes('she solves'))) return true;
+    if (hId === 'hack-001' && (target === 'devpulse-2026' || target.includes('devpulse'))) return true;
+    if (hId === 'hack-002' && (target === 'pccoe-innovatex-2026' || target.includes('innovatex'))) return true;
+    if (target.includes(hTitle) || (hTitle.length > 5 && target.includes(hTitle.slice(0, 8)))) return true;
+    return false;
   };
 
   // CONDITION 1: a specific hackathon is selected → scoped inspection data.
@@ -496,23 +506,25 @@ export default function AdminDashboard() {
     const judgeCodeRecord = (committee.codes || []).find((c) => c.role === "judge");
     const screenCodeRecord = (committee.codes || []).find((c) => c.role === "screening");
 
-    const hackTeams = Object.entries(allTeams)
-      .filter(([, t]) =>
-        t.hackathonId === activeH.id ||
-        (t.hackathon && t.hackathon.toLowerCase().includes(activeH.title.toLowerCase()))
-      )
-      .map(([code, t]) => ({ ...t, code }));
+    // Live MySQL teams take precedence, fallback to local store if not yet returned
+    const rawTeams = serverTeams.length > 0
+      ? serverTeams
+      : Object.entries(allTeams).map(([code, t]) => ({ ...t, code }));
+    const hackTeams = rawTeams.filter((t) =>
+      matchesHackathon(t.hackathonId, activeH) ||
+      matchesHackathon(t.hackathonTitle || t.hackathon, activeH)
+    );
 
-    const hackSubs = allSubmissions.filter((s) =>
-      s.hackathonId === activeH.id ||
-      (s.hackathonTitle && s.hackathonTitle.toLowerCase().includes(activeH.title.toLowerCase()))
+    const rawSubs = serverSubmissions.length > 0 ? serverSubmissions : allSubmissions;
+    const hackSubs = rawSubs.filter((s) =>
+      matchesHackathon(s.hackathonId, activeH) ||
+      matchesHackathon(s.hackathonTitle, activeH)
     );
 
     // Filter registrations belonging to this hackathon
-    const hackRegistrations = registrationsList.filter(
-      (r) =>
-        r.hackathonId === activeH.id ||
-        (r.hackathonTitle && r.hackathonTitle.toLowerCase().includes(activeH.title.toLowerCase()))
+    const hackRegistrations = registrationsList.filter((r) =>
+      matchesHackathon(r.hackathonId, activeH) ||
+      matchesHackathon(r.hackathonTitle, activeH)
     );
 
     scoped = { committee, judgeCodeRecord, screenCodeRecord, hackTeams, hackSubs, hackRegistrations };
@@ -530,7 +542,7 @@ export default function AdminDashboard() {
           icon={ShieldCheck}
           eyebrow="Admin console"
           title="Platform administration"
-          description="Run hackathons, manage who can do what, and release certified results and certificates."
+          description="Administer platform-level user governance, hackathon registration roster, and compliance oversight."
           meta={<span>{user?.university || "HackTrack Central HQ"}</span>}
         />
 
@@ -546,8 +558,8 @@ export default function AdminDashboard() {
           <StatCard
             tone="info"
             label="Teams formed"
-            value={Object.keys(allTeams).length}
-            hint={`${allSubmissions.length} submissions received`}
+            value={serverTeams.length > 0 ? serverTeams.length : Object.keys(allTeams).length}
+            hint={`${serverSubmissions.length > 0 ? serverSubmissions.length : allSubmissions.length} submissions received`}
             icon={UsersRound}
           />
           <StatCard
@@ -694,27 +706,68 @@ export default function AdminDashboard() {
                             <th scope="col" className={tableClasses.th}>Squad name</th>
                             <th scope="col" className={tableClasses.th}>Team lead</th>
                             <th scope="col" className={tableClasses.th}>Members roster</th>
+                            <th scope="col" className={tableClasses.th}>Member count</th>
                             <th scope="col" className={tableClasses.th}>Track</th>
-                            <th scope="col" className={cn(tableClasses.th, 'text-right')}>Screening status</th>
+                            <th scope="col" className={cn(tableClasses.th, 'text-right')}>Status / Screening</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {scoped.hackTeams.map((t, idx) => (
-                            <tr key={idx} className={tableClasses.tr}>
-                              <td className={cn(tableClasses.td, 'whitespace-nowrap font-mono text-xs font-semibold text-fg')}>{t.code}</td>
-                              <td className={cn(tableClasses.td, 'font-medium text-fg')}>{t.name}</td>
-                              <td className={tableClasses.td}>{t.lead || "Lead Member"}</td>
-                              <td className={tableClasses.td}>
-                                {(t.members || []).map((m) => (typeof m === 'string' ? m : m.name || m.email)).join(', ')}
-                              </td>
-                              <td className={tableClasses.td}>{t.track || activeH.track}</td>
-                              <td className={cn(tableClasses.td, 'text-right')}>
-                                <Badge tone={t.screeningStatus ? screeningDecisionTone(t.screeningStatus) : 'info'}>
-                                  {t.screeningStatus || "Registered"}
-                                </Badge>
-                              </td>
-                            </tr>
-                          ))}
+                          {scoped.hackTeams.map((t, idx) => {
+                            const acceptedMembers = Array.isArray(t.members)
+                              ? t.members.filter((m) => m.status === 'accepted')
+                              : [];
+                            const pendingMembers = Array.isArray(t.members)
+                              ? t.members.filter((m) => m.status === 'pending')
+                              : [];
+                            const memberCount = acceptedMembers.length || t.memberCount || 1;
+
+                            return (
+                              <tr key={t.id || t.code || idx} className={tableClasses.tr}>
+                                <td className={cn(tableClasses.td, 'whitespace-nowrap font-mono text-xs font-semibold text-fg')}>
+                                  {t.code || t.teamCode}
+                                </td>
+                                <td className={cn(tableClasses.td, 'font-medium text-fg')}>
+                                  {t.name || t.teamName}
+                                </td>
+                                <td className={tableClasses.td}>
+                                  <div>
+                                    <span className="font-medium text-fg">{t.lead || t.leaderName || "Lead Member"}</span>
+                                    {t.leaderEmail && <p className="text-xs text-fg-subtle">{t.leaderEmail}</p>}
+                                  </div>
+                                </td>
+                                <td className={tableClasses.td}>
+                                  <div className="space-y-1">
+                                    <div className="text-sm">
+                                      {acceptedMembers.length > 0
+                                        ? acceptedMembers.map((m) => (typeof m === 'string' ? m : m.name || m.userName || m.userEmail || m.email)).join(', ')
+                                        : (t.lead || "Leader only")}
+                                    </div>
+                                    {pendingMembers.length > 0 && (
+                                      <div className="flex items-center gap-1.5 text-xs">
+                                        <Badge tone="warning" className="text-[10px] px-1 py-0">
+                                          {pendingMembers.length} pending join request{pendingMembers.length > 1 ? 's' : ''}
+                                        </Badge>
+                                        <span className="text-fg-subtle truncate max-w-[200px]">
+                                          ({pendingMembers.map((m) => m.name || m.userName || m.userEmail).join(', ')})
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className={cn(tableClasses.td, 'tabular-nums text-xs')}>
+                                  <Badge tone="accent">
+                                    {memberCount} member{memberCount === 1 ? '' : 's'}
+                                  </Badge>
+                                </td>
+                                <td className={tableClasses.td}>{t.track || activeH.track || 'General'}</td>
+                                <td className={cn(tableClasses.td, 'text-right')}>
+                                  <Badge tone={t.screeningStatus ? screeningDecisionTone(t.screeningStatus) : 'info'}>
+                                    {t.screeningStatus || "Registered"}
+                                  </Badge>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </TableContainer>
@@ -1297,8 +1350,8 @@ export default function AdminDashboard() {
                 <IconSectionHeader
                   icon={Award}
                   tone="success"
-                  title="Results publication"
-                  description="Publishing a hackathon's results makes rankings visible to all participants and issues certificates to every evaluated team. This cannot be undone from here."
+                  title="Results release status (Platform Oversight)"
+                  description="Inspect public ranking release status and participant certificate issuance across competitions. Official results are published exclusively by authorized event organizers."
                   actions={<Badge>{publishedCount} of {hackathons.length} released</Badge>}
                 />
                 {hackathons.length === 0 ? (
@@ -1306,36 +1359,35 @@ export default function AdminDashboard() {
                     <EmptyState
                       illustration="award"
                       icon={Trophy}
-                      title="Nothing to publish"
-                      description="Results can be released once a hackathon exists and its submissions have been evaluated."
+                      title="No hackathons found"
+                      description="Results status will appear once hackathons exist."
                     />
                   </Card>
                 ) : (
                   <Card>
                     <ul className="divide-y divide-line">
                       {hackathons.map((h) => {
-                        const isPub = isResultsPublished(h.id);
+                        const isPub = h.resultsPublished || isResultsPublished(h.id);
                         return (
                           <li key={h.id} className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
                             <div className="min-w-0 space-y-1.5">
                               <p className="font-medium text-fg">{h.title}</p>
                               <div className="flex flex-wrap items-center gap-2">
                                 <Badge tone={stageTone(h.stage)}>{h.stage}</Badge>
-                                {isPub ? <Badge tone="success" dot>Results released</Badge> : <Badge>Results private</Badge>}
+                                {isPub ? (
+                                  <Badge tone="success" dot>Results released</Badge>
+                                ) : (
+                                  <Badge>Results private</Badge>
+                                )}
                               </div>
                             </div>
-                            {isPub ? (
-                              <p className="text-sm text-fg-subtle sm:text-right">Results and certificates released</p>
-                            ) : (
-                              <Button
-                                className="shrink-0"
-                                onClick={() => handlePublishResults(h.id, h.title)}
-                                aria-label={`Publish results & issue certificates for ${h.title}`}
-                              >
-                                <Award className="h-4 w-4" aria-hidden="true" />
-                                Publish results & issue certificates
-                              </Button>
-                            )}
+                            <div className="text-sm sm:text-right">
+                              {isPub ? (
+                                <span className="font-medium text-success">Rankings & certificates released by Organizer</span>
+                              ) : (
+                                <span className="text-fg-subtle">Pending Organizer release</span>
+                              )}
+                            </div>
                           </li>
                         );
                       })}
@@ -1348,35 +1400,21 @@ export default function AdminDashboard() {
                 <IconSectionHeader
                   icon={ShieldCheck}
                   tone="warning"
-                  title="Platform actions"
-                  description="System-wide audit scans and bulk results release."
+                  title="Platform governance actions"
+                  description="System-wide audit scans and repository integrity checks."
                 />
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-1">
                   <Card className="flex flex-col">
                     <CardHeader>
                       <CardTitle>Repository integrity scan</CardTitle>
                       <CardDescription>
-                        Scan all {allSubmissions.length} participant repositories for pre-dated commits and tampering.
+                        Scan all {serverSubmissions.length > 0 ? serverSubmissions.length : allSubmissions.length} participant repositories for pre-dated commits and tampering.
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="mt-auto">
                       <Button variant="secondary" onClick={handleIntegrityScan}>
                         <ScanSearch className="h-4 w-4" aria-hidden="true" />
                         Run integrity scan
-                      </Button>
-                    </CardContent>
-                  </Card>
-                  <Card className="flex flex-col">
-                    <CardHeader>
-                      <CardTitle>Publish all leaderboards</CardTitle>
-                      <CardDescription>
-                        Marks results as released for every hackathon at once and reveals final public standings. This does not issue certificates; use the per-hackathon action above for that.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="mt-auto">
-                      <Button variant="secondary" onClick={handlePublishAll}>
-                        <Trophy className="h-4 w-4" aria-hidden="true" />
-                        Publish results for all hackathons
                       </Button>
                     </CardContent>
                   </Card>
