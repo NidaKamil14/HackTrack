@@ -488,4 +488,15 @@ test('HackTrack Hackathons & Criteria (FR-6 to FR-11, FR-23, BR-4, BR-5)', async
     assert.ok(created);
     assert.equal(created.hackathonId, 'hack-shesolves-001');
   });
+
+  await t.test('18. Duplicate hackathon registration is rejected with HTTP 400 Bad Request', async () => {
+    // Attempt duplicate registration for already-registered student in shesolves
+    const dupRes = await fetch(`${baseUrl}/api/v1/hackathons/hack-shesolves-001/register`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${studentToken}` },
+    });
+    assert.equal(dupRes.status, 400);
+    const body = await dupRes.json();
+    assert.match(body.message, /already registered/i);
+  });
 });

@@ -173,4 +173,20 @@ test('HackTrack Team Management & Join Code (FR-12 to FR-16, BR-1 to BR-3)', asy
     const body = await res.json();
     assert.match(body.message, /already an accepted member/i);
   });
+
+  await t.test('7. BR-2: Team leader cannot submit join request to another team in the same hackathon', async () => {
+    // leaderToken is already leader of createdTeam in hack-001
+    const res = await fetch(`${baseUrl}/api/v1/teams/join`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${leaderToken}`,
+      },
+      body: JSON.stringify({ teamCode: 'HT-CPV881' }),
+    });
+
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.message, /(already an accepted member|already the leader of a team)/i);
+  });
 });

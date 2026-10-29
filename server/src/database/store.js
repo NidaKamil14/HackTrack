@@ -680,10 +680,11 @@ class HackTrackStore {
       console.log('🔄 Syncing store with MySQL database hacktrack_db...');
 
       // 1. Users
+      const initialDemoUsers = [...this.users];
       const [dbUsers] = await pool.query('SELECT * FROM users');
       if (dbUsers.length === 0) {
         console.log('🌱 Seeding initial users into MySQL...');
-        for (const u of this.users) {
+        for (const u of initialDemoUsers) {
           await pool.query(
             `INSERT INTO users (id, email, password_hash, full_name, role, role_category, university, member_id, is_active, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -703,7 +704,31 @@ class HackTrackStore {
           );
         }
       } else {
-        this.users = dbUsers.map((r) => ({
+        // Ensure any core demo accounts are present in MySQL
+        for (const u of initialDemoUsers) {
+          if (!dbUsers.some((d) => d.id === u.id || d.email.toLowerCase() === u.email.toLowerCase())) {
+            await pool.query(
+              `INSERT INTO users (id, email, password_hash, full_name, role, role_category, university, member_id, is_active, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE full_name = VALUES(full_name)`,
+              [
+                u.id,
+                u.email,
+                u.passwordHash,
+                u.fullName,
+                u.role,
+                u.roleCategory || this.getRoleCategory(u.role),
+                u.university || 'University / Organization',
+                u.memberId || null,
+                u.isActive ? 1 : 0,
+                toSqlDate(u.createdAt) || toSqlDate(new Date()),
+              ]
+            );
+          }
+        }
+
+        const [refreshedUsers] = await pool.query('SELECT * FROM users');
+        this.users = refreshedUsers.map((r) => ({
           id: r.id,
           email: r.email,
           passwordHash: r.password_hash,
@@ -1994,6 +2019,20 @@ class HackTrackStore {
       throw new Error('You are already an accepted member of a team for this hackathon (BR-2).');
     }
 
+    const isLeading = this.teams.some(
+      (t) => (t.hackathonId === team.hackathonId || t.hackathonId === hackathon.id) && t.leaderId === userId
+    );
+    if (isLeading) {
+      throw new Error('You are already the leader of a team in this hackathon (BR-2).');
+    }
+
+    const hasPendingOtherTeam = this.teamMembers.find(
+      (m) => (m.hackathonId === team.hackathonId || m.hackathonId === hackathon.id) && m.userId === userId && m.status === 'pending' && m.teamId !== team.id
+    );
+    if (hasPendingOtherTeam) {
+      throw new Error('You already have a pending join request for another team in this hackathon (BR-2).');
+    }
+
     // Check if request already pending
     const pending = this.teamMembers.find((m) => m.teamId === team.id && m.userId === userId);
     if (pending) {
@@ -2313,7 +2352,13 @@ class HackTrackStore {
 
     // Record criteria scores
     const recorded = [];
-    scores.forEach(({ criterionId, score }) => {
+    scores.forEach((s) => {
+      const criterionId = s.criterionId || s.criteriaId || s.rubricId || s.id;
+      const score = s.score;
+      if (!criterionId) {
+        throw new Error('criterionId is required for each evaluation score item.');
+      }
+
       let evalRecord = this.evaluations.find(
         (e) => e.submissionId === submissionId && e.judgeId === judgeId && e.criterionId === criterionId
       );

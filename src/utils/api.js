@@ -233,6 +233,13 @@ class ApiClient {
     });
   }
 
+  async updateTeamScreening(teamId, status) {
+    return this.request(`/teams/${teamId}/screening`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  }
+
   // ── Submissions (FR-17 to FR-21) ─────────────────────────────────────
 
   async getSubmissions(hackathonId) {

@@ -390,6 +390,20 @@ router.post('/:id/register', requireAuth, (req, res) => {
     });
   }
 
+  // Reject duplicate registration attempts (FR-10, BR-2)
+  const isAlreadyRegistered = store.registrations.some(
+    (r) =>
+      (r.hackathonId === hackathon.id || r.hackathonId === req.params.id) &&
+      (r.userId === req.user.id || (r.userEmail && r.userEmail.toLowerCase() === req.user.email.toLowerCase()))
+  );
+  if (isAlreadyRegistered) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: 'You are already registered for this hackathon.',
+    });
+  }
+
   try {
     const registration = store.registerUserForHackathon({
       hackathonId: hackathon.id,

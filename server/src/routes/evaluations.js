@@ -5,8 +5,8 @@ import { notifyJudgeAssigned, notifyResultsPublished } from '../notifications/no
 
 const router = express.Router();
 
-// POST /api/v1/evaluations/assign: Admin assigns Judge to Submission (FR-24, BR-7)
-router.post('/assign', requireAuth, requireRole('admin'), (req, res) => {
+// POST /api/v1/evaluations/assign: Organizer or Admin assigns Judge to Submission (FR-24, BR-7)
+router.post('/assign', requireAuth, (req, res) => {
   const { hackathonId, judgeId, submissionId } = req.body || {};
 
   if (!hackathonId || !judgeId || !submissionId) {
@@ -15,6 +15,30 @@ router.post('/assign', requireAuth, requireRole('admin'), (req, res) => {
       error: 'Bad Request',
       message: 'hackathonId, judgeId, and submissionId are required.',
     });
+  }
+
+  if (req.user.role !== 'admin' && req.user.role !== 'organizer') {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'Only organizers and administrators are authorized to assign judges.',
+    });
+  }
+
+  if (req.user.role === 'organizer') {
+    const hackathon = store.getHackathonById(hackathonId);
+    if (!hackathon) {
+      return res.status(404).json({ status: 404, error: 'Not Found', message: 'Hackathon not found.' });
+    }
+    const isOwner = hackathon.createdBy === req.user.id;
+    const isAssigned = Array.isArray(hackathon.assignedOrganizers) && hackathon.assignedOrganizers.includes(req.user.id);
+    if (!isOwner && !isAssigned) {
+      return res.status(403).json({
+        status: 403,
+        error: 'Forbidden',
+        message: 'You are not authorized to assign judges for another organizer\'s hackathon.',
+      });
+    }
   }
 
   try {
