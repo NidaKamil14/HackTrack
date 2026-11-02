@@ -730,6 +730,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     try {
       if (api.getToken()) {
         await api.joinTeam(clean);
+        triggerDataSync("team_join_requested", { teamCode: clean, userEmail: user.email });
         addNotification({
           userEmail: user.email,
           title: "Join Request Submitted",
@@ -776,6 +777,10 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     try {
       if (api.getToken() && currentTeam.id) {
         await api.respondToJoinRequest(currentTeam.id, requestId, action);
+        triggerDataSync(action === 'accept' ? "team_member_joined" : "team_member_declined", {
+          teamId: currentTeam.id,
+          requestId
+        });
         addNotification({
           userEmail: user.email,
           title: action === 'accept' ? "Team Member Accepted" : "Join Request Declined",
@@ -813,6 +818,8 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
       }
       if (willLock) lockTeamRoster(currentTeam.code, user);
       else unlockTeamRoster(currentTeam.code, user);
+
+      triggerDataSync("team_roster_updated", { teamCode: currentTeam.code, willLock });
 
       setTeamActionFeedback({
         type: "success",

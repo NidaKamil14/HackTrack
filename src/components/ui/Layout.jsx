@@ -28,7 +28,7 @@ function HeroOrbit() {
  * Inside DashboardLayout it renders as a hero panel (see PageHeaderVariantContext);
  * pass `variant` to override.
  */
-export function PageHeader({ eyebrow, title, description, actions, meta, icon: Icon, variant, className }) {
+export function PageHeader({ eyebrow, title, description, actions, meta, icon: Icon, variant, className, children }) {
   const contextVariant = useContext(PageHeaderVariantContext);
   const hero = (variant || contextVariant) === 'hero';
 
@@ -59,6 +59,7 @@ export function PageHeader({ eyebrow, title, description, actions, meta, icon: I
     return (
       <header className={cn('flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between', className)}>
         {body}
+        {children}
       </header>
     );
   }
@@ -72,6 +73,7 @@ export function PageHeader({ eyebrow, title, description, actions, meta, icon: I
     >
       <HeroOrbit />
       {body}
+      {children}
     </header>
   );
 }

@@ -6,6 +6,7 @@ import ThemeToggle from '../ThemeToggle';
 import EmailPreferencesDialog from '../notifications/EmailPreferencesDialog';
 import NotificationCenterDialog from '../notifications/NotificationCenterDialog';
 import { getUnreadNotificationCount } from '../../utils/notificationService';
+import { subscribeToDataSync } from '../../utils/syncService';
 import { AppBackdrop, Badge, Button, Logo, PageHeaderVariantContext } from '../ui';
 
 export default function DashboardLayout({
@@ -45,7 +46,13 @@ export default function DashboardLayout({
       if (user) setUnreadCount(getUnreadNotificationCount(user));
     };
     window.addEventListener('hacktrack_notifications_updated', handleUpdate);
-    return () => window.removeEventListener('hacktrack_notifications_updated', handleUpdate);
+    const unsubscribe = subscribeToDataSync(() => {
+      if (user) setUnreadCount(getUnreadNotificationCount(user));
+    });
+    return () => {
+      window.removeEventListener('hacktrack_notifications_updated', handleUpdate);
+      unsubscribe();
+    };
   }, [user]);
 
   const handleLogout = () => {

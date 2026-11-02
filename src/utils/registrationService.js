@@ -36,14 +36,20 @@ export function normalizeHackathonId(id) {
   const map = {
     'devpulse-2026': 'hack-001',
     'devpulse': 'hack-001',
+    'devpulse-sprint': 'hack-001',
+    'codesprint-global-2026': 'hack-001',
+    'codesprint-2026': 'hack-001',
+    'codesprint': 'hack-001',
     'pccoe-innovatex-2026': 'hack-002',
     'innovatex-2026': 'hack-002',
     'innovatex': 'hack-002',
+    'smart-campus-2026': 'hack-002',
     'she-solves-2026': 'hack-shesolves-001',
     'shesolves': 'hack-shesolves-001',
     'she-solves': 'hack-shesolves-001',
     'shesolves-2026': 'hack-shesolves-001',
     'shesolves2026': 'hack-shesolves-001',
+    'hack-shesolves': 'hack-shesolves-001',
   };
   return map[clean] || clean;
 }
@@ -119,7 +125,7 @@ export function registerForHackathon(userId, hackathonId) {
   const updated = [newReg, ...all];
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    triggerDataSync("registration_created");
+    triggerDataSync("registration_created", { hackathonId, userEmail: cleanId, registration: newReg });
   } catch (err) {
     console.error("Failed to persist registration:", err);
   }
@@ -131,6 +137,7 @@ export function registerForHackathon(userId, hackathonId) {
     });
   }
 
+  // Notify student
   addNotification({
     userEmail: cleanId,
     title: "Registration Confirmed",
@@ -138,6 +145,26 @@ export function registerForHackathon(userId, hackathonId) {
     type: "success",
     link: "/dashboard/student?tab=workspace"
   });
+
+  // Notify organizer in real-time
+  try {
+    const rawHacks = localStorage.getItem("hacktrack_hackathons");
+    const storedHacks = rawHacks ? JSON.parse(rawHacks) : [];
+    const targetHack = storedHacks.find(
+      (h) => h.id === hackathonId || normalizeHackathonId(h.id) === normTarget
+    );
+    if (targetHack?.organizerEmail) {
+      addNotification({
+        userEmail: targetHack.organizerEmail,
+        title: "New Participant Registered",
+        message: `Participant "${cleanId}" registered for your competition "${targetHack.title || hackathonId}".`,
+        type: "info",
+        link: "/dashboard/organizer"
+      });
+    }
+  } catch {
+    // Non-critical notification dispatch failure
+  }
 
   return { success: true, registration: newReg };
 }

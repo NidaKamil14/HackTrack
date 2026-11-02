@@ -10,6 +10,7 @@ import evaluationRoutes from './routes/evaluations.js';
 import certificateRoutes from './routes/certificates.js';
 import adminRoutes from './routes/admin.js';
 import notificationRoutes from './routes/notifications.js';
+import statsRoutes from './routes/stats.js';
 import { requireAuth, requireRole } from './middleware/auth.js';
 import store from './database/store.js';
 
@@ -81,6 +82,8 @@ app.use('/api/v1/evaluations', evaluationRoutes);
 app.use('/api/v1/certificates', certificateRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
+app.use('/api/v1/stats', statsRoutes);
+app.use('/api/v1/statistics', statsRoutes);
 
 // Direct aliases for users API (FR-42)
 const usersHandler = async (req, res) => {

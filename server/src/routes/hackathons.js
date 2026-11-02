@@ -136,6 +136,24 @@ router.post('/', requireAuth, requireRole('organizer'), (req, res) => {
       createdBy: req.user.id,
     });
 
+    // Platform Administration sync: notify all administrators of the newly published hackathon
+    try {
+      const admins = store.users.filter((u) => u.role === 'admin');
+      admins.forEach((adminUser) => {
+        store.addNotification({
+          userId: adminUser.id,
+          type: 'announcement',
+          category: 'announcements',
+          title: 'New Hackathon Published',
+          message: `Organizer published new competition: "${created.title}".`,
+          link: '/dashboard/admin',
+          dedupeKey: `hack_published:${created.id}:${adminUser.id}`,
+        });
+      });
+    } catch {
+      // Non-critical notification dispatch failure
+    }
+
     return res.status(201).json({
       status: 201,
       message: 'Hackathon created successfully (FR-6).',
@@ -226,6 +244,25 @@ router.post('/:id/publish', requireAuth, requireRole('organizer'), (req, res) =>
 
   try {
     const updated = store.updateHackathon(req.params.id, { status: 'published' });
+
+    // Notify administrators that competition was published
+    try {
+      const admins = store.users.filter((u) => u.role === 'admin');
+      admins.forEach((adminUser) => {
+        store.addNotification({
+          userId: adminUser.id,
+          type: 'announcement',
+          category: 'announcements',
+          title: 'Hackathon Published',
+          message: `Competition "${updated.title}" has been published and opened for registrations.`,
+          link: '/dashboard/admin',
+          dedupeKey: `hack_published:${updated.id}:${adminUser.id}`,
+        });
+      });
+    } catch {
+      // Non-critical notification dispatch failure
+    }
+
     return res.json({
       status: 200,
       message: 'Hackathon published successfully. Student registration is now active (FR-10).',
@@ -411,6 +448,23 @@ router.post('/:id/register', requireAuth, (req, res) => {
       userEmail: req.user.email,
       status: 'Registration Verified',
     });
+
+    // Notify the managing organizer in real-time
+    try {
+      if (hackathon.createdBy) {
+        store.addNotification({
+          userId: hackathon.createdBy,
+          type: 'announcement',
+          category: 'announcements',
+          title: 'New Participant Registered',
+          message: `${req.user.fullName || req.user.email} registered for "${hackathon.title}".`,
+          link: '/dashboard/organizer',
+          dedupeKey: `reg_notif:${hackathon.id}:${req.user.id}`,
+        });
+      }
+    } catch {
+      // Non-critical notification dispatch failure
+    }
 
     return res.status(201).json({
       status: 201,

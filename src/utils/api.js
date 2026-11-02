@@ -400,6 +400,11 @@ class ApiClient {
       return { online: false };
     }
   }
+
+  // ── Public Statistics ────────────────────────────────────────────────
+  async getPublicStats() {
+    return this.request('/stats');
+  }
 }
 
 // Singleton API client instance
