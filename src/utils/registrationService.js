@@ -34,8 +34,6 @@ export function normalizeHackathonId(id) {
   if (!id) return '';
   const clean = String(id).trim().toLowerCase();
   const map = {
-    'devpulse-2026': 'hack-001',
-    'devpulse': 'hack-001',
     'pccoe-innovatex-2026': 'hack-002',
     'innovatex-2026': 'hack-002',
     'innovatex': 'hack-002',

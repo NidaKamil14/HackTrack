@@ -74,7 +74,7 @@ export function getUserTeamForHackathon(userId, hackathonId) {
   }
 
   // Pre-seeded demo user fallback for Alex Chen on devpulse-2026 only
-  if (cleanUser === 'alex@university.edu' && (hackathonId === 'devpulse-2026' || targetNorm === 'hack-001')) {
+  if (cleanUser === 'alex@university.edu' && hackathonId === 'devpulse-2026') {
     return { ...all['HT-DEV-42'], code: 'HT-DEV-42' };
   }
 

@@ -47,8 +47,6 @@ export function getHackathonById(id) {
   if (exact) return exact;
 
   const aliases = {
-    'devpulse-2026': 'hack-001',
-    'devpulse': 'hack-001',
     'pccoe-innovatex-2026': 'hack-002',
     'she-solves-2026': 'hack-shesolves-001',
     'shesolves': 'hack-shesolves-001',
@@ -374,19 +372,37 @@ export function redeemAccessCode(rawCode, user) {
   };
 }
 
+/** Assignments actually saved for this user (no demo fallback). */
+export function getStoredAssignmentIds(user) {
+  const ids = new Set();
+  for (const key of [user?.id, user?.email].filter(Boolean)) {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(`${ASSIGNMENTS_STORAGE_KEY}_${key}`) || 'null');
+      if (Array.isArray(parsed)) parsed.forEach((id) => ids.add(id));
+    } catch {
+      // ignore unreadable entries
+    }
+  }
+  return [...ids];
+}
+
 export function getUserAssignedHackathonIds(user) {
   const userIdentifier = user?.id || user?.email;
   if (!userIdentifier) return ["devpulse-2026"];
 
-  try {
-    const raw = localStorage.getItem(`${ASSIGNMENTS_STORAGE_KEY}_${userIdentifier}`);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+  // Assignments may be saved under the user's id (code redemption) or email
+  // (organizer's direct assignment); read both so neither is missed.
+  const merged = new Set();
+  for (const key of [user?.id, user?.email].filter(Boolean)) {
+    try {
+      const raw = localStorage.getItem(`${ASSIGNMENTS_STORAGE_KEY}_${key}`);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed)) parsed.forEach((id) => merged.add(id));
+    } catch {
+      // ignore unreadable entries
     }
-  } catch {
-    // fallback
   }
+  if (merged.size > 0) return [...merged];
 
   // Default pre-assigned hackathons for demo roles
   if (user?.role === 'judge' || user?.role === 'screening') {

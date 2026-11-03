@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowRight, ClipboardCheck, Compass, Crown, Gavel, Lightbulb, Settings2, ShieldCheck } from 'lucide-react';
 import { Alert, Button, Field, Input, Logo, cn } from '../components/ui';
@@ -84,6 +84,22 @@ export default function Login({ navigate: propNavigate }) {
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotFeedback, setForgotFeedback] = useState(null);
+
+  // Accounts of the shared demonstration scenario, listed by the server
+  // (development/demo servers only; never includes passwords).
+  const [scenarioAccounts, setScenarioAccounts] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    api.request('/auth/demo-users')
+      .then((res) => { if (!cancelled) setScenarioAccounts((res?.users || []).filter((u) => u.demoScenario)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const selectScenarioAccount = (account) => {
+    setEmail(account.email);
+    // Every seeded demo account shares the documented demo password.
+    setPassword(DEMO_USERS[0]?.password || '');
+  };
 
   const handlePersonaSelect = (roleKey) => {
     setSelectedRolePreview(roleKey);
@@ -349,6 +365,35 @@ export default function Login({ navigate: propNavigate }) {
               <ArrowRight aria-hidden="true" />
             </Button>
           </div>
+
+          {scenarioAccounts.length > 0 && (
+            <div className="mt-5 space-y-3 border-t border-line pt-5">
+              <div>
+                <h3 className="text-sm font-semibold text-fg">Shared demo: HackTrack Innovation Challenge</h3>
+                <p className="mt-0.5 text-xs text-fg-subtle">
+                  One event and one team (Team Apex Innovators) seen from every role. Pick an account to fill in its email, then sign in.
+                </p>
+              </div>
+              <ul className="grid gap-1.5 sm:grid-cols-2">
+                {scenarioAccounts.map((a) => (
+                  <li key={a.email}>
+                    <button
+                      type="button"
+                      onClick={() => selectScenarioAccount(a)}
+                      aria-pressed={email === a.email}
+                      className={cn(
+                        "w-full rounded-lg border px-3 py-2 text-left transition-colors",
+                        email === a.email ? "border-accent/50 bg-accent/10" : "border-line hover:border-line-strong hover:bg-raised"
+                      )}
+                    >
+                      <span className="block truncate text-sm font-medium text-fg">{a.fullName}</span>
+                      <span className="block truncate text-xs text-fg-subtle">{a.roleCategory || a.role}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </section>
       </div>
     </div>

@@ -38,6 +38,7 @@ import { useAuth } from '../../context/AuthContext';
 import {
   getStoredHackathons,
   getUserAssignedHackathonIds,
+  getStoredAssignmentIds,
   redeemAccessCode
 } from '../../utils/hackathonService';
 import { getShortlistedSubmissions } from '../../utils/submissionService';
@@ -314,12 +315,65 @@ export default function JudgeDashboard() {
     }
   };
 
-  // Combine static shortlisted teams with dynamically shortlisted submissions from submissionService
-  const dynamicShortlisted = getShortlistedSubmissions();
-  const existingEvaluations = getEvaluations();
+  // Teams the screening committee shortlisted, in hackathons this judge is
+  // assigned to. Re-read on every data sync so new shortlists appear live.
+  const dynamicShortlisted = useMemo(() => {
+    if (refreshKey) { /* trigger */ }
+    return getShortlistedSubmissions();
+  }, [refreshKey]);
+  const existingEvaluations = useMemo(() => {
+    if (refreshKey) { /* trigger */ }
+    return getEvaluations();
+  }, [refreshKey]);
+
+  // Server assignments: shortlisted submissions assigned to this judge, scored
+  // against the event's real rubric (criteria ids, max scores).
+  const [serverAssigned, setServerAssigned] = useState([]);
+  const [serverBoundIds, setServerBoundIds] = useState([]);
+  useEffect(() => {
+    if (!api.getToken()) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [res, mine] = await Promise.all([api.getAssignedSubmissions(), api.getMyAssignedHackathons().catch(() => null)]);
+        if (!cancelled) setServerBoundIds((mine?.hackathons || []).map((h) => h.id));
+        const subs = res?.assignedSubmissions || [];
+        const hackIds = [...new Set(subs.map((s) => s.hackathonId))];
+        const hacks = Object.fromEntries(
+          await Promise.all(hackIds.map(async (id) => [id, (await api.getHackathon(id).catch(() => null))?.hackathon || null]))
+        );
+        const mapped = subs.map((s) => {
+          const h = hacks[s.hackathonId];
+          const mine = s.myEvaluations || [];
+          return {
+            id: s.id,
+            isServer: true,
+            submissionId: s.id,
+            teamCode: s.teamId,
+            name: s.teamName,
+            hackathon: h?.title || s.hackathonId,
+            hackathonId: s.hackathonId,
+            track: s.track || "General Track",
+            projectTitle: s.projectTitle,
+            repo: s.repoUrl || "#",
+            demo: s.demoUrl || "#",
+            status: s.isEvaluatedByMe ? "Evaluated" : "Pending Evaluation",
+            screeningScore: "Shortlisted by the screening committee",
+            criteria: h?.criteria || [],
+            scores: Object.fromEntries(mine.map((e) => [e.criterionId, Number(e.score)])),
+            feedback: mine[0]?.remarks || "",
+          };
+        });
+        if (!cancelled) setServerAssigned(mapped);
+      } catch {
+        /* offline: local shortlist only */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [refreshKey]);
 
   const combinedTeams = useMemo(() => {
-    const list = [...MOCK_JUDGE_DATA.shortlistedTeams];
+    const list = [];
 
     // Add any dynamic submission that passed screening and is not yet in list
     dynamicShortlisted.forEach((sub) => {
@@ -345,7 +399,9 @@ export default function JudgeDashboard() {
     });
 
     // Merge persistent saved evaluations
-    return list.map((t) => {
+    // Judges bound on the server see exactly their events (no demo fallback).
+    const localScope = serverBoundIds.length ? getStoredAssignmentIds(user) : assignedIds;
+    const local = list.filter((t) => !t.hackathonId || localScope.includes(t.hackathonId)).map((t) => {
       const matchEval = existingEvaluations.find(
         (e) =>
           (e.teamId && t.teamCode && e.teamId.toUpperCase() === t.teamCode.toUpperCase()) ||
@@ -362,9 +418,16 @@ export default function JudgeDashboard() {
       }
       return t;
     });
-  }, [dynamicShortlisted, existingEvaluations]);
+    return [...serverAssigned, ...local];
+  }, [dynamicShortlisted, existingEvaluations, assignedIds, serverAssigned, serverBoundIds, user]);
 
-  const [teamsState, setTeamsState] = useState(combinedTeams);
+  // Unsaved score/feedback edits, layered over the stored data by team id.
+  const [drafts, setDrafts] = useState({});
+  const teamsState = useMemo(
+    // Server evaluations are locked once submitted (FR-27); local entries stay editable.
+    () => combinedTeams.map((t) => (drafts[t.id] && !(t.isServer && t.status === "Evaluated") ? { ...t, ...drafts[t.id] } : t)),
+    [combinedTeams, drafts]
+  );
   const [selectedTeamId, setSelectedTeamId] = useState(teamsState[0]?.id || "");
 
   const filteredTeams = teamsState.filter((t) => {
@@ -373,6 +436,7 @@ export default function JudgeDashboard() {
   });
 
   const selectedTeam = filteredTeams.find((t) => t.id === selectedTeamId) || filteredTeams[0] || teamsState[0];
+  const evaluationLocked = Boolean(selectedTeam?.isServer && selectedTeam.status === "Evaluated");
 
   // Dynamically resolve rubrics configured for the active hackathon
   // (plain derivation: cheap lookup, recomputed every render)
@@ -380,7 +444,20 @@ export default function JudgeDashboard() {
     ? (allHackathons.find((h) => h.id === selectedHackathonFilter) || assignedHackathons[0])
     : (allHackathons.find((h) => h.id === selectedTeam?.hackathonId) || assignedHackathons[0]);
 
-  const currentRubrics = useMemo(() => {
+  const serverCriteria = selectedTeam?.isServer && selectedTeam.criteria?.length ? selectedTeam.criteria : null;
+  // Plain derivation (cheap): recomputed each render.
+  const currentRubrics = (() => {
+    // Server events: the configured rubric itself (criterion ids and max scores).
+    if (serverCriteria) {
+      return serverCriteria.map((c) => ({
+        key: c.id,
+        legacyKey: c.id,
+        name: c.name,
+        weight: `${c.maxScore} pts`,
+        max: Number(c.maxScore) || 25,
+        desc: c.description || '',
+      }));
+    }
     if (activeHackathon?.rubrics && activeHackathon.rubrics.length > 0) {
       return activeHackathon.rubrics.map((r, i) => {
         const weightNum = parseInt(r.weight || '25', 10) || 25;
@@ -400,39 +477,51 @@ export default function JudgeDashboard() {
       legacyKey: r.key,
       max: r.max || 25
     }));
-  }, [activeHackathon]);
+  })();
 
   const handleScoreChange = (rubricKey, val, maxVal = 35) => {
     const num = Math.max(0, Math.min(maxVal, Number(val) || 0));
-    setTeamsState((prev) =>
-      prev.map((t) => {
-        if (t.id === selectedTeam?.id) {
-          return {
-            ...t,
-            scores: {
-              ...t.scores,
-              [rubricKey]: num
-            }
-          };
-        }
-        return t;
-      })
-    );
+    if (!selectedTeam) return;
+    setDrafts((d) => ({
+      ...d,
+      [selectedTeam.id]: { ...d[selectedTeam.id], scores: { ...selectedTeam.scores, [rubricKey]: num } },
+    }));
   };
 
   const handleFeedbackChange = (text) => {
-    setTeamsState((prev) =>
-      prev.map((t) => (t.id === selectedTeam?.id ? { ...t, feedback: text } : t))
-    );
+    if (!selectedTeam) return;
+    setDrafts((d) => ({ ...d, [selectedTeam.id]: { ...d[selectedTeam.id], feedback: text } }));
   };
 
   const computeTotal = (scores) => {
     return Object.values(scores || {}).reduce((acc, curr) => acc + (Number(curr) || 0), 0);
   };
 
-  const handleSaveEvaluation = (e) => {
+  const handleSaveEvaluation = async (e) => {
     e.preventDefault();
     if (!selectedTeam) return;
+
+    if (selectedTeam.isServer) {
+      try {
+        await api.submitEvaluation({
+          hackathonId: selectedTeam.hackathonId,
+          submissionId: selectedTeam.submissionId,
+          scores: selectedTeam.criteria.map((c) => ({ criterionId: c.id, score: Number(selectedTeam.scores?.[c.id]) || 0 })),
+          remarks: selectedTeam.feedback || "",
+        });
+        setDrafts((d) => {
+          const next = { ...d };
+          delete next[selectedTeam.id];
+          return next;
+        });
+        setSaveNotice(`Evaluation submitted and locked for ${selectedTeam.name} (${computeTotal(selectedTeam.scores)} / ${selectedTeam.criteria.reduce((s, c) => s + (Number(c.maxScore) || 0), 0)}). Scores stay private until the event's organizer publishes results.`);
+        setRefreshKey((k) => k + 1);
+      } catch (err) {
+        setSaveNotice(`The evaluation was not saved: ${err.message}`);
+      }
+      setTimeout(() => setSaveNotice(null), 6000);
+      return;
+    }
 
     const res = saveEvaluation({
       teamId: selectedTeam.teamCode || selectedTeam.id,
@@ -454,9 +543,12 @@ export default function JudgeDashboard() {
         type: "success",
         link: "/dashboard/judge"
       });
-      setTeamsState((prev) =>
-        prev.map((t) => (t.id === selectedTeam.id ? { ...t, status: "Evaluated" } : t))
-      );
+      // The saved evaluation now comes from storage; drop the draft.
+      setDrafts((d) => {
+        const next = { ...d };
+        delete next[selectedTeam.id];
+        return next;
+      });
       setSaveNotice(`Certified score (${computeTotal(selectedTeam.scores)} / 100) saved and securely recorded for ${selectedTeam.name}.`);
       setTimeout(() => setSaveNotice(null), 4500);
     }
@@ -641,7 +733,7 @@ export default function JudgeDashboard() {
                     </Alert>
                   ) : (
                     <Alert tone="warning" title="Confidential">
-                      Scores stay private until an admin releases results. Evaluator: {user?.fullName || "ACM Judge"}.
+                      Scores stay private until the event's organizer publishes results. Evaluator: {user?.fullName || "ACM Judge"}.
                     </Alert>
                   )}
 
@@ -695,8 +787,9 @@ export default function JudgeDashboard() {
                                     max={r.max}
                                     value={currentVal}
                                     onChange={(e) => handleScoreChange(r.key, e.target.value, r.max)}
+                                    disabled={evaluationLocked}
                                     aria-label={`${r.name} slider`}
-                                    className="h-2 min-w-0 flex-1 cursor-pointer accent-accent"
+                                    className="h-2 min-w-0 flex-1 cursor-pointer accent-accent disabled:cursor-not-allowed disabled:opacity-60"
                                   />
                                   <div className="flex shrink-0 items-center gap-1.5">
                                     <Input
@@ -705,7 +798,9 @@ export default function JudgeDashboard() {
                                       max={r.max}
                                       value={currentVal}
                                       onChange={(e) => handleScoreChange(r.key, e.target.value, r.max)}
-                                      className="w-16 text-center font-mono tabular-nums"
+                                      readOnly={evaluationLocked}
+                                      aria-label={`${r.name} score`}
+                                      className="w-16 text-center font-mono tabular-nums read-only:opacity-70"
                                     />
                                     <span className="w-8 text-xs tabular-nums text-fg-subtle">/ {r.max}</span>
                                   </div>
@@ -727,6 +822,7 @@ export default function JudgeDashboard() {
                         <Textarea
                           rows={3}
                           value={selectedTeam.feedback || ""}
+                          readOnly={evaluationLocked}
                           onChange={(e) => handleFeedbackChange(e.target.value)}
                           placeholder="Add specific comments on architecture, implementation, and strengths..."
                         />
@@ -743,10 +839,16 @@ export default function JudgeDashboard() {
                       Total <span className="font-semibold text-fg">{computeTotal(selectedTeam.scores)}</span> / 100
                     </span>
                   </span>
-                  <Button type="submit" form="judge-evaluation-form">
-                    <Gavel aria-hidden="true" />
-                    Commit & certify score
-                  </Button>
+                  {evaluationLocked ? (
+                    <p className="text-xs text-fg-muted">
+                      Submitted and locked (FR-27). The team sees it once the organizer publishes results.
+                    </p>
+                  ) : (
+                    <Button type="submit" form="judge-evaluation-form">
+                      <Gavel aria-hidden="true" />
+                      Commit & certify score
+                    </Button>
+                  )}
                 </CardFooter>
               </Card>
             ) : (

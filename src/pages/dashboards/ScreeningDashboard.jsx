@@ -41,6 +41,7 @@ import { getFinalizedSubmissions, updateScreeningDecision } from '../../utils/su
 import {
   getStoredHackathons,
   getUserAssignedHackathonIds,
+  getStoredAssignmentIds,
   redeemAccessCode
 } from '../../utils/hackathonService.js';
 import { addNotification } from '../../utils/notificationService.js';
@@ -286,6 +287,65 @@ export default function ScreeningDashboard() {
   const [submissions, setSubmissions] = useState(loadSubmissions);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // Server queue: submissions of the hackathons this reviewer joined with a
+  // screening code (the backend is the source of truth for these).
+  const [serverQueue, setServerQueue] = useState({ items: [], boundIds: [] });
+  useEffect(() => {
+    if (!api.getToken()) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const mine = await api.getMyAssignedHackathons();
+        const bound = (mine?.hackathons || []).map((h) => h.id);
+        const lists = await Promise.all(bound.map((id) => api.getSubmissions(id).catch(() => ({ submissions: [] }))));
+        const STATUS = { pending: "Pending Review", shortlisted: "Shortlisted", rejected: "Rejected" };
+        const items = lists.flatMap((l) => l.submissions || []).map((s) => ({
+          id: s.id,
+          serverTeamId: s.teamId,
+          teamName: s.teamName,
+          hackathonTitle: s.hackathonTitle || s.hackathonId,
+          hackathonId: s.hackathonId,
+          track: s.track || "General Track",
+          lead: (s.members || []).find((m) => m.role === "leader")?.name || "Team Lead",
+          members: s.members || [],
+          projectTitle: s.projectTitle || "Untitled Project",
+          projectDescription: s.abstract || "",
+          repoUrl: s.repoUrl || "#",
+          demoUrl: s.demoUrl || "#",
+          submissionFiles: [s.presentationUrl, s.fileUrl].filter(Boolean),
+          submissionDate: s.submittedAt || s.updatedAt
+            ? new Date(s.submittedAt || s.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+            : (s.isLocked ? "Finalized" : "Draft"),
+          status: STATUS[s.screeningStatus] || "Pending Review",
+          screeningRemarks: s.screeningFeedback || "",
+          rejectionReason: "",
+          checks: { gitFreshness: false, endpointsLive: false, envConfigured: false, licenseMIT: false },
+          flags: [],
+          isServer: true,
+        }));
+        if (!cancelled) {
+          setServerQueue((prev) => ({
+            boundIds: bound,
+            // keep checklist ticks the reviewer made in this session
+            items: items.map((it) => ({ ...it, checks: prev.items.find((p) => p.id === it.id)?.checks || it.checks })),
+          }));
+        }
+      } catch {
+        /* offline: local queue only */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [refreshKey]);
+  const queue = useMemo(() => {
+    // A local copy of a submission that also exists on the server is the same entry.
+    const serverKeys = new Set(serverQueue.items.map((s) => `${s.hackathonId}|${String(s.teamName).toLowerCase()}`));
+    const serverIds = new Set(serverQueue.items.map((s) => s.id));
+    return [
+      ...serverQueue.items,
+      ...submissions.filter((s) => !serverIds.has(s.id) && !serverKeys.has(`${s.hackathonId}|${String(s.teamName).toLowerCase()}`)),
+    ];
+  }, [serverQueue, submissions]);
+
   useEffect(() => {
     return subscribeToDataSync(() => {
       setRefreshKey((k) => k + 1);
@@ -354,8 +414,9 @@ export default function ScreeningDashboard() {
   // Which queue row is open in the review panel (presentation only)
   const [selectedId, setSelectedId] = useState(null);
 
-  // Active remarks editing
+  // Active remarks editing (remarks are shared with the team; internal notes are not)
   const [remarksState, setRemarksState] = useState({});
+  const [internalNotes, setInternalNotes] = useState({});
 
   // Reject Modal State
   const [rejectModalTarget, setRejectModalTarget] = useState(null);
@@ -366,11 +427,36 @@ export default function ScreeningDashboard() {
     setRemarksState((prev) => ({ ...prev, [id]: text }));
   };
 
-  const handleDecision = (id, newStatus, remarks = "", rejectionReason = "") => {
-    const target = submissions.find((s) => s.id === id);
+  const handleDecision = async (id, newStatus, remarks = "", rejectionReason = "") => {
+    const target = queue.find((s) => s.id === id);
     if (!target) return;
 
     const finalRemarks = remarks !== "" ? remarks : (remarksState[id] !== undefined ? remarksState[id] : target.screeningRemarks);
+
+    if (target.serverTeamId) {
+      // Saved on the server: the team, its members, the organizer and judges see the same decision.
+      const status = newStatus === "Shortlisted" ? "shortlisted" : newStatus === "Rejected" ? "rejected" : "pending";
+      const feedback = [newStatus === "Rejected" ? rejectionReason : "", finalRemarks].filter(Boolean).join(" — ");
+      try {
+        await api.updateTeamScreening(target.serverTeamId, status, { feedback, internalNote: internalNotes[id] || "" });
+        setServerQueue((prev) => ({
+          ...prev,
+          items: prev.items.map((s) => (s.id === id ? { ...s, status: newStatus === "Under Review" ? "Pending Review" : newStatus, screeningRemarks: feedback } : s)),
+        }));
+        setFeedbackNotice({
+          type: newStatus === "Shortlisted" ? "success" : newStatus === "Rejected" ? "error" : "info",
+          text:
+            newStatus === "Shortlisted"
+              ? `"${target.teamName}" shortlisted. The team has been notified and the event's judges were assigned automatically.`
+              : `Decision saved for "${target.teamName}": ${newStatus}. The team has been notified.`,
+        });
+        setRefreshKey((k) => k + 1);
+      } catch (err) {
+        setFeedbackNotice({ type: "error", text: `The decision was not saved: ${err.message}` });
+      }
+      setTimeout(() => setFeedbackNotice(null), 5000);
+      return;
+    }
 
     const res = updateScreeningDecision({
       submissionId: id,
@@ -413,10 +499,15 @@ export default function ScreeningDashboard() {
   };
 
   const toggleCheck = (id, checkKey) => {
-    const target = submissions.find((s) => s.id === id);
+    const target = queue.find((s) => s.id === id);
     if (!target) return;
 
     const nextChecks = { ...target.checks, [checkKey]: !target.checks[checkKey] };
+    if (target.serverTeamId) {
+      // Checklist is the reviewer's working aid; the decision is what gets saved.
+      setServerQueue((prev) => ({ ...prev, items: prev.items.map((s) => (s.id === id ? { ...s, checks: nextChecks } : s)) }));
+      return;
+    }
 
     updateScreeningDecision({
       submissionId: id,
@@ -450,12 +541,18 @@ export default function ScreeningDashboard() {
   };
 
   // Metrics
-  const total = submissions.length;
-  const shortlistedCount = submissions.filter((s) => s.status === "Shortlisted").length;
-  const rejectedCount = submissions.filter((s) => s.status === "Rejected").length;
-  const pendingCount = submissions.filter((s) => s.status === "Pending Review" || s.status === "Under Review").length;
+  // Reviewers only see the queue of hackathons they're assigned to.
+  // Reviewers bound on the server see exactly their events (no demo fallback).
+  const scopeIds = new Set(
+    serverQueue.boundIds.length ? [...getStoredAssignmentIds(user), ...serverQueue.boundIds] : assignedIds
+  );
+  const assignedSubmissions = queue.filter((sub) => sub.isServer || !sub.hackathonId || scopeIds.has(sub.hackathonId));
+  const total = assignedSubmissions.length;
+  const shortlistedCount = assignedSubmissions.filter((s) => s.status === "Shortlisted").length;
+  const rejectedCount = assignedSubmissions.filter((s) => s.status === "Rejected").length;
+  const pendingCount = assignedSubmissions.filter((s) => s.status === "Pending Review" || s.status === "Under Review").length;
 
-  const filtered = submissions.filter((sub) => {
+  const filtered = assignedSubmissions.filter((sub) => {
     const matchHack = filterHackathon === "all" || sub.hackathonId === filterHackathon;
     const matchStat = filterStatus === "all" || sub.status === filterStatus;
     return matchHack && matchStat;
@@ -758,6 +855,16 @@ export default function ScreeningDashboard() {
                         placeholder="e.g. Clean commit tree verified; endpoints respond under 200ms latency ceiling."
                       />
                     </Field>
+                    {selected.isServer && (
+                      <Field label="Internal note (committee, organizers and admins only)" hint="Never shown to the team.">
+                        <Input
+                          type="text"
+                          value={internalNotes[selected.id] || ""}
+                          onChange={(e) => setInternalNotes((prev) => ({ ...prev, [selected.id]: e.target.value }))}
+                          placeholder="e.g. Verified commit history against the kickoff time."
+                        />
+                      </Field>
+                    )}
                   </section>
                 </CardContent>
 

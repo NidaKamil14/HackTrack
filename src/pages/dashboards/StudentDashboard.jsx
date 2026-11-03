@@ -20,6 +20,7 @@ import {
   Input,
   PageHeader,
   Select,
+  Skeleton,
   TabPanel,
   Tabs,
   Textarea,
@@ -34,6 +35,8 @@ import { getStoredHackathons } from '../../utils/hackathonService';
 import { getUserRegistrations, registerForHackathon, isUserRegistered, normalizeHackathonId } from '../../utils/registrationService';
 import { triggerDataSync } from '../../utils/syncService';
 import api from '../../utils/api';
+import { mapServerSubmission } from '../../utils/serverSubmissions';
+import { mergeHackathons } from '../../utils/serverHackathons';
 import {
   getUserTeamForHackathon,
   createTeam,
@@ -41,7 +44,8 @@ import {
   joinTeamWithCode,
   lockTeamRoster,
   unlockTeamRoster,
-  removeTeamMember
+  removeTeamMember,
+  respondToTeamJoinRequest
 } from '../../utils/teamService';
 import {
   getSubmissionByTeamAndHackathon,
@@ -279,11 +283,38 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
   }, [user, userEmail, refreshKey, serverNotifications]);
   const unreadNotifsCount = notifications.filter((n) => !n.read).length;
 
-  // Certificates
+  // Certificates: issued by the server when results are published (signed in),
+  // merged with any locally stored demo certificates.
+  const [serverCertificates, setServerCertificates] = useState([]);
+  useEffect(() => {
+    if (!api.getToken()) return undefined;
+    let cancelled = false;
+    const AWARD = { winner: 'Winner (1st Place)', runner_up: 'Runner-up', merit: 'Certificate of Merit', participation: 'Certificate of Participation' };
+    api.getMyCertificates()
+      .then((res) => {
+        if (cancelled) return;
+        setServerCertificates((res?.certificates || []).map((c) => ({
+          certificateId: c.certificateCode,
+          verificationCode: c.certificateCode,
+          recipientName: c.participantName,
+          hackathonId: c.hackathonId,
+          hackathonTitle: c.hackathonTitle,
+          teamName: c.teamName || '',
+          track: c.track || '—',
+          awardTitle: AWARD[c.certificateType] || 'Certificate',
+          issueDate: c.issuedAt ? new Date(c.issuedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : '',
+          isServer: true,
+        })));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [refreshKey]);
   const certificates = useMemo(() => {
     if (refreshKey) { /* trigger re-eval */ }
-    return getUserCertificates(userEmail);
-  }, [userEmail, refreshKey]);
+    const local = getUserCertificates(userEmail);
+    const seen = new Set(serverCertificates.map((c) => c.certificateId));
+    return [...serverCertificates, ...local.filter((c) => !seen.has(c.certificateId))];
+  }, [userEmail, refreshKey, serverCertificates]);
 
   // Server hackathons state
   const [serverHackathons, setServerHackathons] = useState([]);
@@ -304,34 +335,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
   const allHackathons = useMemo(() => {
     if (refreshKey) { /* trigger re-eval */ }
     const local = getStoredHackathons();
-    if (!serverHackathons.length) return local;
-
-    const combined = [...local];
-    serverHackathons.forEach((sh) => {
-      const idx = combined.findIndex((h) => h.id === sh.id || h.title?.toLowerCase() === sh.title?.toLowerCase());
-      const normalized = {
-        id: sh.id,
-        title: sh.title,
-        headline: sh.tagLine || `${sh.title} Innovation Sprint`,
-        deadline: sh.submissionDeadline ? new Date(sh.submissionDeadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : "TBD",
-        dates: `${sh.startDate ? new Date(sh.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''} - ${sh.endDate ? new Date(sh.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}`,
-        stage: sh.isRegistrationClosed ? "Registration Closed" : "Registration Open",
-        status: sh.status,
-        isRegistrationClosed: sh.isRegistrationClosed,
-        registrationDeadline: sh.registrationDeadline,
-        submissionDeadline: sh.submissionDeadline,
-        track: sh.track || "General Track",
-        category: sh.category || "Full-Stack",
-        teamSize: `${sh.minTeamSize || 1} - ${sh.maxTeamSize || 4} Members`,
-        summary: sh.description || sh.summary || `Official ${sh.title} competition.`,
-      };
-      if (idx >= 0) {
-        combined[idx] = { ...combined[idx], ...normalized, id: sh.id };
-      } else {
-        combined.push(normalized);
-      }
-    });
-    return combined;
+    return mergeHackathons(local, serverHackathons);
   }, [refreshKey, serverHackathons]);
 
   // Available open hackathons for team creation & discovery
@@ -345,10 +349,31 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
   }, [allHackathons]);
 
   // Registrations
+  // Registrations saved on the server (e.g. made on another device) plus local ones.
+  const [serverRegistrations, setServerRegistrations] = useState([]);
+  useEffect(() => {
+    if (!api.getToken()) return undefined;
+    let cancelled = false;
+    api.getMyRegistrations()
+      .then((res) => { if (!cancelled) setServerRegistrations(res?.registrations || []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [refreshKey, userEmail]);
   const registrations = useMemo(() => {
     if (refreshKey) { /* trigger re-eval */ }
-    return getUserRegistrations(userEmail);
-  }, [userEmail, refreshKey]);
+    const local = getUserRegistrations(userEmail);
+    const fromServer = serverRegistrations
+      .filter((r) => !local.some((l) => l.hackathonId === r.hackathonId))
+      .map((r) => ({
+        id: r.id,
+        userId: userEmail,
+        hackathonId: r.hackathonId,
+        hackathonTitle: r.hackathonTitle,
+        status: r.status,
+        registrationDate: r.registeredAt ? new Date(r.registeredAt).toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" }) : "",
+      }));
+    return [...fromServer, ...local];
+  }, [userEmail, refreshKey, serverRegistrations]);
 
   const [selectedHackathonId, setSelectedHackathonId] = useState(null);
 
@@ -385,7 +410,13 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
 
   // Combine user registration records with hackathons metadata
   const registeredHackathons = useMemo(() => {
-    return registrations.map((reg) => {
+    // Events where the user is on a server team count too (e.g. a leader whose
+    // team exists without a separate registration record), so their team,
+    // submission and published results are always reachable.
+    const teamOnly = apiTeamsData.teams
+      .filter((t) => !registrations.some((r) => r.hackathonId === t.hackathonId))
+      .map((t) => ({ id: `team-${t.id}`, userId: userEmail, hackathonId: t.hackathonId, hackathonTitle: t.hackathonTitle, status: "Team member", registrationDate: "" }));
+    return [...registrations, ...teamOnly].map((reg) => {
       const meta = allHackathons.find((h) =>
         matchHackathon(h.id, reg.hackathonId, h.title, reg.hackathonTitle)
       ) || {
@@ -403,7 +434,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
         team
       };
     });
-  }, [registrations, allHackathons, userEmail]);
+  }, [registrations, allHackathons, userEmail, apiTeamsData]);
 
   const activeSprint = useMemo(() => {
     if (selectedHackathonId) {
@@ -503,9 +534,49 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     return localTeam;
   }, [backendTeam, localTeam, activeSprint, user, userEmail]);
 
-  // Team-based submission resolution
+  // Team-based submission resolution. For a team that exists on the server, the
+  // server's record is the only source of truth: every accepted member reads the
+  // same submission and screening decision, and a local copy in this browser can
+  // never stand in for (or overwrite) a newer server-side decision.
+  const [serverSubmission, setServerSubmission] = useState({ teamId: null, state: "idle", submission: null, checkedAt: null, error: null });
+  useEffect(() => {
+    if (!api.getToken() || !backendTeam?.id) return undefined;
+    let cancelled = false;
+    const teamId = backendTeam.id;
+    // Background refreshes keep the last confirmed value on screen until the
+    // new answer arrives (the first load is derived as "loading" below).
+    api.getSubmissionByTeam(teamId)
+      .then((res) => {
+        if (cancelled) return;
+        setServerSubmission({ teamId, state: res?.submission ? "ready" : "none", submission: mapServerSubmission(res?.submission), checkedAt: Date.now(), error: null });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (err.status === 404) {
+          // The team hasn't submitted yet.
+          setServerSubmission({ teamId, state: "none", submission: null, checkedAt: Date.now(), error: null });
+          return;
+        }
+        // Network/auth problem: keep the last confirmed server value, flag it.
+        setServerSubmission((prev) => ({
+          teamId,
+          state: "error",
+          submission: prev.teamId === teamId ? prev.submission : null,
+          checkedAt: prev.teamId === teamId ? prev.checkedAt : null,
+          error: err.status === 401 ? "Your session has expired — sign in again to see the latest status." : err.message || "Couldn't reach the HackTrack server.",
+        }));
+      });
+    return () => { cancelled = true; };
+  }, [backendTeam?.id, refreshKey]);
+  const serverSync = backendTeam
+    ? serverSubmission.teamId === backendTeam.id
+      ? serverSubmission
+      : { state: api.getToken() ? "loading" : "error", submission: null, checkedAt: null, error: "Sign in to the HackTrack server to see your team’s status." }
+    : null;
   const teamSubmission = (currentTeam && activeSprint)
-    ? getSubmissionByTeamAndHackathon(currentTeam.code, activeSprint.id)
+    ? backendTeam
+      ? serverSync?.submission || null
+      : getSubmissionByTeamAndHackathon(currentTeam.code, activeSprint.id)
     : null;
 
   const isLeader = isLeaderRole && Boolean(
@@ -519,13 +590,39 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
   const isFinalized = teamSubmission?.status === "finalized";
 
   // Evaluation & Results resolution
-  const teamEvaluation = (currentTeam && activeSprint)
-    ? getTeamEvaluation(currentTeam.code, activeSprint.id)
-    : null;
-  const resultsReleased = activeSprint ? isResultsPublished(activeSprint.id) : false;
+  const resultsReleased = activeSprint
+    ? Boolean(activeSprint.resultsPublished || backendTeam?.resultsPublished || isResultsPublished(activeSprint.id))
+    : false;
+  const [serverResults, setServerResults] = useState({ teamId: null, results: null });
+  useEffect(() => {
+    if (!api.getToken() || !backendTeam?.id || !backendTeam.resultsPublished) return undefined;
+    let cancelled = false;
+    api.getTeamResults(backendTeam.id)
+      .then((res) => { if (!cancelled) setServerResults({ teamId: backendTeam.id, results: res?.results || null }); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [backendTeam?.id, backendTeam?.resultsPublished, refreshKey]);
+  const publishedServerResult = backendTeam && serverResults.teamId === backendTeam.id ? serverResults.results : null;
+  const teamEvaluation = publishedServerResult
+    ? {
+        totalScore: publishedServerResult.totalScore,
+        maxTotal: publishedServerResult.maxTotal,
+        rank: publishedServerResult.rank,
+        teamsRanked: publishedServerResult.teamsRanked,
+        criteria: publishedServerResult.criteria,
+        feedback: publishedServerResult.feedback.join(" "),
+        judgeName: `${publishedServerResult.judgeCount} judge${publishedServerResult.judgeCount === 1 ? "" : "s"} · rank ${publishedServerResult.rank} of ${publishedServerResult.teamsRanked}`,
+      }
+    : (currentTeam && activeSprint)
+      ? getTeamEvaluation(currentTeam.code, activeSprint.id)
+      : null;
+  // Judging progress (judge counts only — never scores) before publication.
+  const judgingProgress = backendTeam?.judgingProgress || teamSubmission?.judgingProgress || null;
 
   // Form state tracking
-  const currentSubmissionKey = `${activeSprint?.id || ''}_${currentTeam?.code || ''}_${refreshKey}`;
+  // Edits are keyed to the event + team only: background syncs (refreshKey)
+  // must never wipe what the leader is typing.
+  const currentSubmissionKey = `${activeSprint?.id || ''}_${currentTeam?.code || ''}`;
   const [formOverride, setFormOverride] = useState({
     key: "",
     projectTitle: "",
@@ -1090,8 +1187,24 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
 
   const copyButtonLabel = copied ? "Copied" : "Copy code";
 
-  // Presentation only: position of the active hackathon in the lifecycle.
-  const activeStageIndex = activeSprint?.stage ? STAGE_ORDER.indexOf(activeSprint.stage) : -1;
+  // Lifecycle position shown to this participant: the further of the event's own
+  // stage and how far *their team* has actually progressed (from the same
+  // records as the tabs below: team, submission, screening decision, results).
+  const teamStage = !activeSprint
+    ? null
+    : resultsReleased
+      ? "Leaderboard Published"
+      : teamSubmission?.screeningStatus === "Shortlisted"
+        ? "Rubric Judging"
+        : teamSubmission
+          ? "Screening Gate"
+          : currentTeam
+            ? "Team Formation"
+            : null;
+  const eventStageIndex = activeSprint?.stage ? STAGE_ORDER.indexOf(activeSprint.stage) : -1;
+  const teamStageIndex = teamStage ? STAGE_ORDER.indexOf(teamStage) : -1;
+  const displayStage = teamStageIndex > eventStageIndex ? teamStage : activeSprint?.stage;
+  const activeStageIndex = Math.max(eventStageIndex, teamStageIndex);
 
   return (
     <DashboardLayout
@@ -1154,8 +1267,8 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                       {activeSprint.title}
                     </h2>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-fg-subtle">
-                      {activeSprint.stage && (
-                        <Badge tone={stageTone(activeSprint.stage)} dot>{activeSprint.stage}</Badge>
+                      {displayStage && (
+                        <Badge tone={stageTone(displayStage)} dot>{displayStage}</Badge>
                       )}
                       {activeSprint.track && <span>{activeSprint.track}</span>}
                       <span className="flex items-center gap-1.5">
@@ -1186,14 +1299,14 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                   <div className="flex items-center justify-between gap-3 text-xs text-fg-subtle">
                     <span>
                       Competition progress
-                      <span className="text-fg-muted"> · {STAGE_PHASE_LABELS[stagePhase(activeSprint.stage)]}</span>
+                      <span className="text-fg-muted"> · {STAGE_PHASE_LABELS[stagePhase(displayStage)]}</span>
                     </span>
-                    <span className="tabular-nums">{stageProgress(activeSprint.stage)}%</span>
+                    <span className="tabular-nums">{stageProgress(displayStage)}%</span>
                   </div>
                   <ProgressBar
-                    value={stageProgress(activeSprint.stage)}
+                    value={stageProgress(displayStage)}
                     max={100}
-                    label={`Competition stage: ${activeSprint.stage}`}
+                    label={`Competition stage: ${displayStage}`}
                   />
                   <ol className="hidden grid-cols-7 gap-2 text-xs lg:grid" aria-hidden="true">
                     {STAGE_ORDER.map((stage, i) => (
@@ -2007,8 +2120,22 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                 </Badge>
               </CardHeader>
               <CardContent className="space-y-5">
-                {teamSubmission ? (
+                {serverSync?.state === "error" && (
+                  <Alert tone="warning" title="Couldn’t refresh the screening status">
+                    {serverSync.error}
+                    {serverSync.checkedAt && ` Showing the status confirmed at ${new Date(serverSync.checkedAt).toLocaleTimeString()}.`}
+                  </Alert>
+                )}
+                {serverSync?.state === "loading" ? (
+                  <div className="space-y-2" aria-busy="true" aria-label="Loading the latest screening status">
+                    <Skeleton className="h-6 w-40" />
+                    <Skeleton className="h-16 w-full rounded-lg" />
+                  </div>
+                ) : teamSubmission ? (
                   <>
+                    {/* The reviewer's checklist is only stored for local entries; server
+                        decisions carry the status and the remarks shared with the team. */}
+                    {!teamSubmission.isServer && (
                     <div className="space-y-2">
                       <h3 className="text-sm font-semibold text-fg">Compliance criteria</h3>
                       <ul className="divide-y divide-line rounded-lg border border-line">
@@ -2026,6 +2153,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                         })}
                       </ul>
                     </div>
+                    )}
 
                     {teamSubmission.screeningRemarks && (
                       <div className="relative space-y-1 overflow-hidden rounded-lg bg-raised/50 p-3 pl-4">
@@ -2077,7 +2205,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                   </div>
                 </div>
                 <Badge tone={resultsReleased ? "success" : "neutral"} dot>
-                  {resultsReleased ? "Officially released" : "Under evaluation"}
+                  {resultsReleased ? "Officially released" : judgingProgress?.status === "complete" ? "Awaiting publication" : "Under evaluation"}
                 </Badge>
               </CardHeader>
               <CardContent className="space-y-5">
@@ -2089,7 +2217,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                           <p className="eyebrow">Certified total score</p>
                           <p className="text-4xl font-semibold tabular-nums tracking-tight text-fg sm:text-5xl">
                             {teamEvaluation.totalScore}
-                            <span className="ml-1 text-base font-normal text-fg-subtle">/ 100</span>
+                            <span className="ml-1 text-base font-normal text-fg-subtle">/ {teamEvaluation.maxTotal || 100}</span>
                           </p>
                         </div>
                         <Badge tone="success">
@@ -2107,8 +2235,11 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                     <div className="space-y-3">
                       <h3 className="text-sm font-semibold text-fg">Criteria breakdown</h3>
                       <ul className="space-y-3">
-                        {RUBRIC_CRITERIA.map((c) => {
-                          const score = teamEvaluation.scores?.[c.key] || 0;
+                        {(teamEvaluation.criteria
+                          ? teamEvaluation.criteria.map((c) => ({ key: c.id, label: c.name, max: c.maxScore, score: c.averageScore }))
+                          : RUBRIC_CRITERIA
+                        ).map((c) => {
+                          const score = c.score ?? teamEvaluation.scores?.[c.key] ?? 0;
                           const pct = Math.min(100, Math.round((score / c.max) * 100));
                           return (
                             <li key={c.key} className="space-y-1.5">
@@ -2154,8 +2285,16 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                   <EmptyState
                     illustration="review"
                     icon={Trophy}
-                    title="Judging and scoring in progress"
-                    description="Evaluations are scored privately by assigned judges. Results and certificates will unlock here when officially certified by the Platform Administrator."
+                    title={
+                      judgingProgress?.status === "complete"
+                        ? "Judging complete — awaiting publication"
+                        : "Judging and scoring in progress"
+                    }
+                    description={
+                      judgingProgress && judgingProgress.judgesAssigned > 0
+                        ? `${judgingProgress.judgesCompleted} of ${judgingProgress.judgesAssigned} assigned judges have submitted their evaluation. Scores stay private until the organizer publishes results.`
+                        : "Evaluations are scored privately by assigned judges. Results and certificates will unlock here when the organizer publishes them."
+                    }
                   />
                 )}
               </CardContent>

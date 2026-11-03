@@ -16,7 +16,10 @@ import { getSubmissions } from '../../utils/submissionService';
 import { addNotification } from '../../utils/notificationService';
 import { getRegistrations } from '../../utils/registrationService';
 import { subscribeToDataSync } from '../../utils/syncService';
+import { setResultsPublished } from '../../utils/evaluationService';
 import api from '../../utils/api';
+import PlatformReach from '../../components/analytics/PlatformReach';
+import { mergeHackathons } from '../../utils/serverHackathons';
 import {
   ArrowDown,
   ArrowRight,
@@ -61,11 +64,60 @@ export default function OrganizerDashboard() {
     });
   }, []);
 
+  // Server records for this organizer's events: the same teams, submissions
+  // and progress every other panel reads.
+  const [serverData, setServerData] = useState({ hackathons: [], teams: [], submissions: [], progress: {}, committee: {} });
+  useEffect(() => {
+    if (!api.getToken()) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.getHackathons();
+        const hackathons = res?.hackathons || [];
+        const perEvent = await Promise.all(
+          hackathons.map(async (h) => {
+            const [teams, subs, progress, codes] = await Promise.all([
+              api.getTeams(h.id).catch(() => ({ teams: [] })),
+              api.getSubmissions(h.id).catch(() => ({ submissions: [] })),
+              api.getHackathonProgress(h.id).catch(() => null),
+              api.request(`/hackathons/${encodeURIComponent(h.id)}/codes`).catch(() => null),
+            ]);
+            return { id: h.id, teams: teams.teams || [], subs: subs.submissions || [], progress: progress?.progress || null, codes };
+          })
+        );
+        if (cancelled) return;
+        setServerData({
+          hackathons,
+          teams: perEvent.flatMap((e) => e.teams),
+          submissions: perEvent.flatMap((e) => e.subs),
+          progress: Object.fromEntries(perEvent.map((e) => [e.id, e.progress])),
+          committee: Object.fromEntries(perEvent.map((e) => [e.id, e.codes])),
+        });
+      } catch {
+        /* offline: local data only */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [refreshKey]);
+
+  // Lifecycle stage of a server event, derived from its real progress.
+  const stageFromProgress = (p) => {
+    if (!p) return null;
+    if (p.resultsPublished) return "Leaderboard Published";
+    if (p.screening.shortlisted > 0) return "Rubric Judging";
+    if (p.submissions > 0) return "Screening Gate";
+    if (p.teams > 0) return "Team Formation";
+    return "Registration Open";
+  };
+
   // Fetch hackathons
   const allHackathons = useMemo(() => {
     if (refreshKey) { /* trigger */ }
-    return getStoredHackathons();
-  }, [refreshKey]);
+    return mergeHackathons(getStoredHackathons(), serverData.hackathons).map((h) => {
+      const p = h.isServer ? serverData.progress[h.id] : null;
+      return p ? { ...h, stage: stageFromProgress(p), resultsPublished: p.resultsPublished } : h;
+    });
+  }, [refreshKey, serverData]);
 
   const userEmail = (user?.email || "organizer@hacktrack.io").toLowerCase().trim();
   const userId = user?.id;
@@ -96,15 +148,31 @@ export default function OrganizerDashboard() {
 
   // Data isolation: filter participant teams strictly to the Organizer's own hackathons
   const teamsList = useMemo(() => {
-    return Object.entries(teams)
+    const fromServer = serverData.teams.map((t) => ({
+      id: t.id,
+      code: t.teamCode || t.code || t.id,
+      name: t.teamName || t.name,
+      hackathonId: t.hackathonId,
+      hackathon: t.hackathonTitle,
+      capacity: `${t.memberCount} member${t.memberCount === 1 ? "" : "s"}`,
+      leadEmail: t.leaderEmail,
+      members: (t.members || []).filter((m) => m.status === "accepted").map((m) => ({ name: m.name, email: m.email, role: m.role })),
+      screeningStatus: t.screeningStatus,
+      isServer: true,
+    }));
+    const serverCodes = new Set(fromServer.map((t) => t.code));
+    const local = Object.entries(teams)
       .map(([code, t]) => ({ ...t, code }))
-      .filter((t) => myHackathonIds.has(t.hackathonId));
-  }, [teams, myHackathonIds]);
+      .filter((t) => myHackathonIds.has(t.hackathonId) && !serverCodes.has(t.code));
+    return [...fromServer, ...local];
+  }, [teams, myHackathonIds, serverData]);
 
   // Data isolation: filter submissions strictly to the Organizer's own hackathons
   const mySubmissions = useMemo(() => {
-    return submissions.filter((s) => myHackathonIds.has(s.hackathonId));
-  }, [submissions, myHackathonIds]);
+    const serverEvents = new Set(serverData.hackathons.map((h) => h.id));
+    // For server events the server copy is the record; local mirrors would double-count.
+    return [...serverData.submissions, ...submissions.filter((s) => myHackathonIds.has(s.hackathonId) && !serverEvents.has(s.hackathonId))];
+  }, [submissions, myHackathonIds, serverData]);
 
   // Modal State: Create New Hackathon
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -277,28 +345,22 @@ export default function OrganizerDashboard() {
     // Save to localStorage
     updateHackathon(rubricTarget.id, { rubrics: cleanRubrics });
 
-    // Also try saving to backend API
-    try {
-      const token = localStorage.getItem("hacktrack_token");
-      if (token) {
-        await fetch(`http://localhost:5050/api/v1/hackathons/${rubricTarget.id}/criteria`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            criteria: cleanRubrics.map((r) => ({
-              name: r.name,
-              maxScore: parseFloat(r.weight) || 25,
-              weightage: (parseFloat(r.weight) || 25) / 100,
-              description: r.desc,
-            })),
-          }),
-        });
+    // Save to the backend (source of truth for judging) when signed in to the server.
+    // A criterion worth "30%" is scored out of 30 points, so totals add up to 100.
+    if (api.getToken()) {
+      try {
+        await api.updateCriteria(
+          rubricTarget.id,
+          cleanRubrics.map((r) => ({
+            name: r.name,
+            maxScore: parseFloat(r.weight) || 25,
+            weightage: 1,
+            description: r.desc,
+          }))
+        );
+      } catch (err) {
+        console.warn("Rubric saved locally; server update failed:", err.message);
       }
-    } catch {
-      // Fallback handled by localStorage
     }
 
     setRubricTarget(null);
@@ -420,16 +482,31 @@ export default function OrganizerDashboard() {
   };
 
   const handlePublishResults = async (hackathonId, title) => {
-    try {
-      await api.publishResults(hackathonId);
-      setNotice(`✓ Official results published and certificates issued to participants for "${title}"!`);
-      setRefreshKey((k) => k + 1);
-      setTimeout(() => setNotice(null), 4500);
-    } catch (err) {
-      console.error('Failed to publish results:', err);
-      setNotice(`❌ Error publishing results: ${err.message}`);
-      setTimeout(() => setNotice(null), 4500);
+    // Server first: it ranks teams, issues certificates and notifies participants.
+    if (api.getToken()) {
+      try {
+        await api.publishResults(hackathonId);
+        setResultsPublished(hackathonId, true);
+        updateHackathon(hackathonId, { resultsPublished: true });
+        setNotice(`✓ Official results published and certificates issued to participants for "${title}"!`);
+        setRefreshKey((k) => k + 1);
+        setTimeout(() => setNotice(null), 4500);
+        return;
+      } catch (err) {
+        if (err.status !== 404) {
+          console.error('Failed to publish results:', err);
+          setNotice(`❌ Error publishing results: ${err.message}`);
+          setTimeout(() => setNotice(null), 4500);
+          return;
+        }
+        // 404: this event only exists in this browser's offline data.
+      }
     }
+    setResultsPublished(hackathonId, true);
+    updateHackathon(hackathonId, { resultsPublished: true });
+    setNotice(`Results for "${title}" are marked as published in this browser's offline demo data. Certificates and participant emails are only issued by the HackTrack server.`);
+    setRefreshKey((k) => k + 1);
+    setTimeout(() => setNotice(null), 6000);
   };
 
   const handleSaveConfig = (e) => {
@@ -479,39 +556,35 @@ export default function OrganizerDashboard() {
         }
       });
 
-    // Send targeted notification to participants of these hackathons
-    targetEmails.forEach((email) => {
-      addNotification({
-        userEmail: email,
-        title: `Announcement: ${user?.fullName || "Organizer"}`,
-        message: announcementText.trim(),
-        type: "info",
-        link: "/dashboard/student"
-      });
-    });
-
-    // If backend token exists, also dispatch to backend endpoint for persistence
-    try {
-      const token = localStorage.getItem("hacktrack_token");
-      if (token && targetIds.length > 0) {
+    // Signed in to the server: the backend delivers the announcement (in-app
+    // and email) to each event's participants. Offline: local notifications.
+    let deliveredByServer = false;
+    if (api.getToken() && targetIds.length > 0) {
+      try {
         for (const hId of targetIds) {
-          await fetch("http://localhost:5050/api/v1/admin/announcements", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`
-            },
-            body: JSON.stringify({
-              hackathonId: hId,
-              title: `Announcement: ${user?.fullName || "Organizer"}`,
-              content: announcementText.trim(),
-              targetRole: "all"
-            })
+          await api.createAnnouncement({
+            hackathonId: hId,
+            title: `Announcement: ${user?.fullName || "Organizer"}`,
+            content: announcementText.trim(),
+            targetRole: "all",
           });
         }
+        deliveredByServer = true;
+      } catch (err) {
+        console.warn("Server announcement failed; delivering locally:", err.message);
       }
-    } catch {
-      // Local notifications already persisted
+    }
+
+    if (!deliveredByServer) {
+      targetEmails.forEach((email) => {
+        addNotification({
+          userEmail: email,
+          title: `Announcement: ${user?.fullName || "Organizer"}`,
+          message: announcementText.trim(),
+          type: "info",
+          link: "/dashboard/student"
+        });
+      });
     }
 
     setNotice(`Announcement broadcast to participants of your managed competition(s).`);
@@ -707,6 +780,10 @@ export default function OrganizerDashboard() {
                             </div>
                           </dl>
 
+                          {h.isServer && serverData.progress[h.id] && (
+                            <EventProgress progress={serverData.progress[h.id]} committee={serverData.committee[h.id]} teams={sprintTeams} />
+                          )}
+
                           <div className="mt-auto space-y-1.5">
                             <div className="flex items-center justify-between gap-2 text-xs">
                               <span className="text-fg-subtle">Lifecycle</span>
@@ -773,10 +850,12 @@ export default function OrganizerDashboard() {
                               Publish results
                             </Button>
                           )}
-                          <Button variant="secondary" size="sm" onClick={() => handleAdvance(h.id)}>
-                            Advance stage
-                            <ArrowRight aria-hidden="true" />
-                          </Button>
+                          {!h.isServer && (
+                            <Button variant="secondary" size="sm" onClick={() => handleAdvance(h.id)}>
+                              Advance stage
+                              <ArrowRight aria-hidden="true" />
+                            </Button>
+                          )}
                         </div>
                       </Card>
                     </li>
@@ -785,6 +864,10 @@ export default function OrganizerDashboard() {
               </ul>
             )}
           </section>
+
+          {/* Platform reach & traffic analytics (server data) */}
+          <div className="hairline-gradient" aria-hidden="true" />
+          <PlatformReach />
 
           {/* Announcements + teams */}
           <div className="hairline-gradient" aria-hidden="true" />
@@ -1530,5 +1613,55 @@ function ModuleCheckbox({ label, checked, onChange }) {
       />
       <span>{label}</span>
     </label>
+  );
+}
+
+/** Live lifecycle counts for a server event (registrations → results). */
+function EventProgress({ progress: p, committee, teams }) {
+  const judges = committee?.assignedJudges || [];
+  const screeners = committee?.assignedScreeners || [];
+  const rows = [
+    ["Registrations", p.registrations],
+    ["Participants in teams", p.participants],
+    ["Submissions locked", `${p.lockedSubmissions} / ${p.submissions}`],
+    ["Shortlisted", `${p.screening.shortlisted} (${p.screening.pending} pending, ${p.screening.rejected} rejected)`],
+    ["Judging complete", `${p.judging.complete} of ${p.screening.shortlisted} shortlisted`],
+    ["Results", p.resultsPublished ? `Published · ${p.certificates} certificates` : "Not published"],
+  ];
+  return (
+    <div className="space-y-3 rounded-lg border border-line bg-raised/40 p-3 text-xs">
+      <dl className="grid grid-cols-1 gap-1.5">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex items-center justify-between gap-3">
+            <dt className="text-fg-subtle">{k}</dt>
+            <dd className="text-right font-medium tabular-nums text-fg">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      {teams.length > 0 && (
+        <div className="border-t border-line pt-2">
+          <p className="mb-1 text-fg-subtle">Teams</p>
+          <ul className="space-y-1">
+            {teams.map((t) => (
+              <li key={t.code} className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium text-fg">{t.name}</span>
+                {t.screeningStatus && (
+                  <Badge tone={t.screeningStatus === "shortlisted" ? "success" : t.screeningStatus === "rejected" ? "danger" : "neutral"}>
+                    {t.screeningStatus === "shortlisted" ? "Shortlisted" : t.screeningStatus === "rejected" ? "Rejected" : "Screening pending"}
+                  </Badge>
+                )}
+                {t.members?.length > 0 && <span className="w-full text-fg-subtle">{t.members.map((m) => m.name).join(", ")}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {(judges.length > 0 || screeners.length > 0) && (
+        <div className="border-t border-line pt-2 text-fg-subtle">
+          <p>Screening: <span className="text-fg-muted">{screeners.map((u) => u.fullName).join(", ") || "none yet"}</span></p>
+          <p>Judges: <span className="text-fg-muted">{judges.map((u) => u.fullName).join(", ") || "none yet"}</span></p>
+        </div>
+      )}
+    </div>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   AlertCircle,
@@ -23,6 +23,8 @@ import {
   Users,
   UsersRound,
   UserX,
+  BarChart3,
+  Clapperboard,
 } from 'lucide-react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
 import EventCover from '../../components/art/EventCover';
@@ -33,6 +35,7 @@ import {
   getHackathonCommittee
 } from '../../utils/hackathonService';
 import api from '../../utils/api';
+import { mergeHackathons } from '../../utils/serverHackathons';
 import { getAllTeams } from '../../utils/teamService';
 import { getSubmissions } from '../../utils/submissionService';
 import {
@@ -41,13 +44,19 @@ import {
 } from '../../utils/evaluationService';
 import { addNotification } from '../../utils/notificationService';
 import { subscribeToDataSync } from '../../utils/syncService';
+import PlatformReach from '../../components/analytics/PlatformReach';
+import DemoScenarioPanel from '../../components/demo/DemoScenarioPanel';
+import { getRegistrations } from '../../utils/registrationService';
 
 const TAB_ITEMS = [
   { value: 'hackathons', label: 'Hackathons', icon: <CalendarRange aria-hidden="true" /> },
   { value: 'users', label: 'Users & roles', icon: <UserCog aria-hidden="true" /> },
   { value: 'results', label: 'Results & certificates', icon: <Award aria-hidden="true" /> },
+  { value: 'traffic', label: 'Platform traffic', icon: <BarChart3 aria-hidden="true" /> },
+  { value: 'demo', label: 'Demo scenario', icon: <Clapperboard aria-hidden="true" /> },
 ];
 const TAB_VALUES = TAB_ITEMS.map((t) => t.value);
+const SCREENING_LABEL = { pending: 'Pending Review', shortlisted: 'Shortlisted', rejected: 'Rejected' };
 const DEFAULT_TAB = 'hackathons';
 
 // Badge tone for a submission's screening decision (Shortlisted / Rejected / pending).
@@ -172,45 +181,18 @@ export default function AdminDashboard() {
   const hackathons = useMemo(() => {
     if (refreshKey) { /* trigger */ }
     const local = getStoredHackathons();
-    if (!serverHackathons.length) return local;
-
-    const combined = [...local];
-    serverHackathons.forEach((sh) => {
-      const idx = combined.findIndex((h) => h.id === sh.id || h.title?.toLowerCase() === sh.title?.toLowerCase());
-      const normalized = {
-        id: sh.id,
-        title: sh.title,
-        headline: sh.tagLine || `${sh.title} Innovation Sprint`,
-        deadline: sh.submissionDeadline ? new Date(sh.submissionDeadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : "TBD",
-        dates: `${sh.startDate ? new Date(sh.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''} - ${sh.endDate ? new Date(sh.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}`,
-        stage: sh.isRegistrationClosed ? "Registration Closed" : "Registration Open",
-        status: sh.status,
-        isRegistrationClosed: sh.isRegistrationClosed,
-        registrationDeadline: sh.registrationDeadline,
-        submissionDeadline: sh.submissionDeadline,
-        track: sh.track || "General Track",
-        category: sh.category || "Full-Stack",
-        teamSize: `${sh.minTeamSize || 1} - ${sh.maxTeamSize || 4} Members`,
-        summary: sh.description || sh.summary || `Official ${sh.title} competition.`,
-      };
-      if (idx >= 0) {
-        combined[idx] = { ...combined[idx], ...normalized, id: sh.id };
-      } else {
-        combined.push(normalized);
-      }
-    });
-    return combined;
+    return mergeHackathons(local, serverHackathons);
   }, [refreshKey, serverHackathons]);
 
   // Live registrations fetched directly from MySQL database
-  const [registrationsList, setRegistrationsList] = useState([]);
+  const [serverRegistrations, setServerRegistrations] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
     api.getAdminRegistrations()
       .then((data) => {
         if (!cancelled && Array.isArray(data?.registrations)) {
-          setRegistrationsList(data.registrations);
+          setServerRegistrations(data.registrations);
         }
       })
       .catch((err) => {
@@ -218,6 +200,18 @@ export default function AdminDashboard() {
       });
     return () => { cancelled = true; };
   }, [refreshKey]);
+
+  // Server registrations plus any made in this browser's offline demo data
+  // (same participant + event counted once).
+  const registrationsList = useMemo(() => {
+    if (refreshKey) { /* trigger */ }
+    const key = (hId, email) => `${hId}|${String(email || '').toLowerCase()}`;
+    const seen = new Set(serverRegistrations.map((r) => key(r.hackathonId, r.userEmail || r.email)));
+    const local = getRegistrations()
+      .filter((r) => !seen.has(key(r.hackathonId, r.userId)))
+      .map((r) => ({ id: r.id, hackathonId: r.hackathonId, userEmail: r.userId, fullName: r.fullName || r.userId, status: r.status, registeredAt: r.registrationDate, isLocal: true }));
+    return [...serverRegistrations, ...local];
+  }, [serverRegistrations, refreshKey]);
 
   // Live teams fetched directly from MySQL database backend
   const [serverTeams, setServerTeams] = useState([]);
@@ -227,7 +221,7 @@ export default function AdminDashboard() {
     api.getTeams('all')
       .then((data) => {
         if (!cancelled && Array.isArray(data?.teams)) {
-          setServerTeams(data.teams);
+          setServerTeams(data.teams.map((t) => ({ ...t, screeningStatus: SCREENING_LABEL[t.screeningStatus] || t.screeningStatus })));
         }
       })
       .catch((err) => {
@@ -244,7 +238,8 @@ export default function AdminDashboard() {
     api.getSubmissions('all')
       .then((data) => {
         if (!cancelled && Array.isArray(data?.submissions)) {
-          setServerSubmissions(data.submissions);
+          // Server statuses are lowercase; show them with the labels used everywhere else.
+          setServerSubmissions(data.submissions.map((s) => ({ ...s, screeningStatus: SCREENING_LABEL[s.screeningStatus] || s.screeningStatus })));
         }
       })
       .catch((err) => {
@@ -284,11 +279,15 @@ export default function AdminDashboard() {
   const [addUserSubmitting, setAddUserSubmitting] = useState(false);
   const [addUserError, setAddUserError] = useState(null);
 
-  // Fetch actual user records directly from MySQL via backend API
+  // Fetch actual user records directly from MySQL via backend API.
+  // Background refreshes (sync poll) update silently; only a filter change shows the loader.
+  const lastUserQuery = useRef(null);
   useEffect(() => {
     let isMounted = true;
     async function fetchUsers() {
-      setLoadingUsers(true);
+      const queryKey = `${userRoleFilter}|${userStatusFilter}|${userSearch}`;
+      if (lastUserQuery.current !== queryKey) setLoadingUsers(true);
+      lastUserQuery.current = queryKey;
       setUsersError(null);
       try {
         const data = await api.getUsers({
@@ -353,6 +352,20 @@ export default function AdminDashboard() {
 
   // Hackathon-Scoped Inspection State
   const [selectedHackathonId, setSelectedHackathonId] = useState("all");
+
+  // Committee (judges/screening) of the inspected hackathon, from the server.
+  const [serverCommittee, setServerCommittee] = useState({ hackathonId: null, judges: [], screeners: [], codes: [] });
+  useEffect(() => {
+    if (!api.getToken() || !selectedHackathonId || selectedHackathonId === 'all') return undefined;
+    let cancelled = false;
+    api.request(`/hackathons/${encodeURIComponent(selectedHackathonId)}/committee`)
+      .then((res) => {
+        if (!cancelled) setServerCommittee({ hackathonId: selectedHackathonId, judges: res?.judges || [], screeners: res?.screeners || [], codes: [] });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedHackathonId, refreshKey]);
+
   const [hackathonViewTab, setHackathonViewTab] = useState("teams"); // 'teams' | 'screening' | 'judges' | 'submissions'
 
   const handleSelectHackathon = (id) => {
@@ -490,7 +503,6 @@ export default function AdminDashboard() {
     const hTitle = String(hackathon.title || '').toLowerCase().trim();
     if (target === hId || target === hTitle) return true;
     if (hId === 'hack-shesolves-001' && (target === 'she-solves-2026' || target.includes('shesolve') || target.includes('she solves'))) return true;
-    if (hId === 'hack-001' && (target === 'devpulse-2026' || target.includes('devpulse'))) return true;
     if (hId === 'hack-002' && (target === 'pccoe-innovatex-2026' || target.includes('innovatex'))) return true;
     if (target.includes(hTitle) || (hTitle.length > 5 && target.includes(hTitle.slice(0, 8)))) return true;
     return false;
@@ -502,7 +514,19 @@ export default function AdminDashboard() {
     : null;
   let scoped = null;
   if (activeH) {
-    const committee = getHackathonCommittee(activeH.id);
+    const localCommittee = getHackathonCommittee(activeH.id);
+    // Server events: reviewers who redeemed the event's codes on the server.
+    const sc = serverCommittee.hackathonId === activeH.id ? serverCommittee : null;
+    const asMember = (u) => ({ userId: u.id, email: u.email, fullName: u.fullName, redeemedAt: u.redeemedAt || null });
+    const mergeBy = (a, b) => [...a, ...b.filter((x) => !a.some((y) => y.email === x.email))];
+    const committee = sc
+      ? {
+          ...localCommittee,
+          codes: [...(localCommittee.codes || []), ...(sc.codes || [])],
+          judges: mergeBy(sc.judges.map(asMember), localCommittee.judges),
+          screeners: mergeBy(sc.screeners.map(asMember), localCommittee.screeners),
+        }
+      : localCommittee;
     const judgeCodeRecord = (committee.codes || []).find((c) => c.role === "judge");
     const screenCodeRecord = (committee.codes || []).find((c) => c.role === "screening");
 
@@ -714,7 +738,7 @@ export default function AdminDashboard() {
                         <tbody>
                           {scoped.hackTeams.map((t, idx) => {
                             const acceptedMembers = Array.isArray(t.members)
-                              ? t.members.filter((m) => m.status === 'accepted')
+                              ? t.members.filter((m) => m.status === 'accepted' || m.status === 'Active')
                               : [];
                             const pendingMembers = Array.isArray(t.members)
                               ? t.members.filter((m) => m.status === 'pending')
@@ -1345,6 +1369,14 @@ export default function AdminDashboard() {
             </TabPanel>
 
             {/* RESULTS & CERTIFICATES */}
+            <TabPanel value="demo" activeValue={activeTab} idPrefix="admin" className="space-y-4 focus:outline-none">
+              <DemoScenarioPanel />
+            </TabPanel>
+
+            <TabPanel value="traffic" activeValue={activeTab} idPrefix="admin" className="space-y-4 focus:outline-none">
+              <PlatformReach />
+            </TabPanel>
+
             <TabPanel value="results" activeValue={activeTab} idPrefix="admin" className="space-y-8 focus:outline-none">
               <div className="space-y-4">
                 <IconSectionHeader
