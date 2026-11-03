@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ExternalLink, FileText, Inbox, Layers, Lightbulb, MessageSquare, MousePointerClick, PenLine, Send, Trophy, Users } from 'lucide-react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
 import {
@@ -22,6 +22,7 @@ import { getAllTeams } from '../../utils/teamService';
 import { getSubmissions } from '../../utils/submissionService';
 import { getStoredHackathons } from '../../utils/hackathonService';
 import { addNotification } from '../../utils/notificationService';
+import { subscribeToDataSync } from '../../utils/syncService';
 
 const STORAGE_MENTOR_KEY = "hacktrack_mentor_notes";
 
@@ -108,9 +109,28 @@ function LinkButton({ href, children }) {
 
 export default function MentorDashboard() {
   const { user } = useAuth();
-  const hackathons = getStoredHackathons();
-  const allTeams = getAllTeams();
-  const submissions = getSubmissions();
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    return subscribeToDataSync(() => {
+      setRefreshKey((k) => k + 1);
+    });
+  }, []);
+
+  const hackathons = useMemo(() => {
+    if (refreshKey) { /* trigger */ }
+    return getStoredHackathons();
+  }, [refreshKey]);
+
+  const allTeams = useMemo(() => {
+    if (refreshKey) { /* trigger */ }
+    return getAllTeams();
+  }, [refreshKey]);
+
+  const submissions = useMemo(() => {
+    if (refreshKey) { /* trigger */ }
+    return getSubmissions();
+  }, [refreshKey]);
 
   const [notesMap, setNotesMap] = useState(getMentorNotes);
   const [activeTeamCode, setActiveTeamCode] = useState(Object.keys(allTeams)[0] || "");

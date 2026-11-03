@@ -42,7 +42,7 @@ async function registerStudent() {
   const email = `analytics_${Date.now()}${Math.floor(Math.random() * 1e6)}@pccoe.edu.in`;
   const res = await api('/api/v1/auth/register', {
     method: 'POST',
-    body: { email, password: 'password123', fullName: 'Analytics Student', role: 'student', university: 'PCCOE' },
+    body: { email, password: 'password123', fullName: 'Analytics Student', role: 'student', university: 'PCCOE', memberId: 'STU-ANALYTICS' },
   });
   assert.equal(res.status, 201);
   return res.body.token;

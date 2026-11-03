@@ -35,6 +35,7 @@ test('HackTrack Authentication & RBAC (FR-1 to FR-5)', async (t) => {
         fullName: 'Test PCCOE Student',
         role: 'student',
         university: 'PCCOE Pune',
+        memberId: 'STU-PCCOE-88219',
       }),
     });
 
@@ -55,6 +56,8 @@ test('HackTrack Authentication & RBAC (FR-1 to FR-5)', async (t) => {
         password: 'securePassword123',
         fullName: 'Another Student',
         role: 'student',
+        university: 'PCCOE Pune',
+        memberId: 'STU-PCCOE-88220',
       }),
     });
 

@@ -7,6 +7,7 @@ import EmailPreferencesDialog from '../notifications/EmailPreferencesDialog';
 import NotificationCenterDialog from '../notifications/NotificationCenterDialog';
 import { getUnreadNotificationCount } from '../../utils/notificationService';
 import api from '../../utils/api';
+import { subscribeToDataSync } from '../../utils/syncService';
 import { AppBackdrop, Badge, Button, Logo, PageHeaderVariantContext } from '../ui';
 
 export default function DashboardLayout({
@@ -46,7 +47,13 @@ export default function DashboardLayout({
       if (user) setUnreadCount(getUnreadNotificationCount(user));
     };
     window.addEventListener('hacktrack_notifications_updated', handleUpdate);
-    return () => window.removeEventListener('hacktrack_notifications_updated', handleUpdate);
+    const unsubscribe = subscribeToDataSync(() => {
+      if (user) setUnreadCount(getUnreadNotificationCount(user));
+    });
+    return () => {
+      window.removeEventListener('hacktrack_notifications_updated', handleUpdate);
+      unsubscribe();
+    };
   }, [user]);
 
   // Unread notifications stored on the server (other users' actions, emails).

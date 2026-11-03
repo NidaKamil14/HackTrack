@@ -82,10 +82,10 @@ class ApiClient {
 
   // ── Auth (FR-1 to FR-5) ──────────────────────────────────────────────
 
-  async register({ email, password, fullName, role, university, memberId }) {
+  async register(userData) {
     const data = await this.request('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, fullName, role, university, memberId }),
+      body: JSON.stringify(userData),
     });
     if (data.token) this.setToken(data.token);
     return data;
@@ -448,6 +448,11 @@ class ApiClient {
     } catch {
       return { online: false };
     }
+  }
+
+  // ── Public Statistics ────────────────────────────────────────────────
+  async getPublicStats() {
+    return this.request('/stats');
   }
 }
 

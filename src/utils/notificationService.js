@@ -183,6 +183,27 @@ export function syncRoleNotifications(user) {
           link: "/dashboard/organizer",
         });
       }
+
+      // Check registrations for organizer's competitions
+      if (Array.isArray(regs) && Array.isArray(hackathons)) {
+        const myHacks = hackathons.filter((h) => {
+          const hEmail = (h.organizerEmail || "").toLowerCase().trim();
+          return hEmail === cleanEmail || cleanEmail === "organizer@hacktrack.io";
+        });
+        const myHackIds = new Set(myHacks.map((h) => h.id));
+        regs
+          .filter((r) => myHackIds.has(r.hackathonId))
+          .forEach((r) => {
+            pushIfAbsent({
+              id: `org-reg-${r.hackathonId}-${r.userId}`,
+              userEmail: cleanEmail,
+              title: "Participant Registered",
+              message: `Participant ${r.userId} registered for competition "${r.hackathonId}".`,
+              type: "info",
+              link: "/dashboard/organizer",
+            });
+          });
+      }
     }
 
     // 6. Screening Committee Notifications
@@ -222,6 +243,21 @@ export function syncRoleNotifications(user) {
         type: "info",
         link: "/dashboard/admin",
       });
+
+      // Synchronize notifications for competitions published by organizers
+      if (Array.isArray(hackathons)) {
+        hackathons.forEach((h) => {
+          if (!h || !h.id) return;
+          pushIfAbsent({
+            id: `admin-new-hack-${h.id}`,
+            userEmail: cleanEmail,
+            title: "New Hackathon Published",
+            message: `Competition "${h.title}" has been published by ${h.organizerName || h.organizers?.[0] || 'Organizer'}.`,
+            type: "info",
+            link: "/dashboard/admin",
+          });
+        });
+      }
     }
 
     if (updated) {

@@ -1,28 +1,19 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Link, useOutletContext } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import {
-  ArrowRight, Check, ClipboardCheck, Compass, Crown, Gavel, KeyRound,
-  Rocket, Settings2, ShieldCheck, Trophy, UserPlus, Users,
+  ArrowRight, Check, ClipboardCheck, Compass, Crown, Gavel,
+  Settings2, ShieldCheck,
 } from 'lucide-react';
 import HackathonCard from '../components/HackathonCard';
 import EventCover from '../components/art/EventCover';
 import FeatureArt from '../components/art/FeatureArt';
 import HeroArtwork from '../components/art/HeroArtwork';
 import ParticleField from '../components/art/ParticleField';
-import { Button, Input, cn } from '../components/ui';
+import PlatformStats from '../components/PlatformStats';
+import { Button, cn } from '../components/ui';
 import { getStoredHackathons } from '../utils/hackathonService';
 import { fetchPublicHackathons, mergeHackathons } from '../utils/serverHackathons';
 import { SYSTEM_ROLES } from '../data/roles';
-
-// The competition lifecycle HackTrack enforces, and who acts at each stage.
-const LIFECYCLE = [
-  { icon: UserPlus, stage: 'Registration', actor: 'Students', detail: 'Sign up for an event and its track' },
-  { icon: Users, stage: 'Team formation', actor: 'Team leaders', detail: 'Create a team and share its invite code' },
-  { icon: Rocket, stage: 'Submission', actor: 'Team leaders', detail: 'Repository, demo and docs, locked at the deadline' },
-  { icon: ShieldCheck, stage: 'Screening', actor: 'Committee', detail: 'Eligibility and working-demo checks' },
-  { icon: Gavel, stage: 'Judging', actor: 'Judges', detail: 'Weighted rubric scores and feedback' },
-  { icon: Trophy, stage: 'Results', actor: 'Organizers', detail: 'Leaderboard published, certificates issued' },
-];
 
 const STEPS = [
   { art: 'covers', title: 'Discover & register', body: 'Review tracks, rules and deadlines, then register for the event you want to compete in.' },
@@ -40,15 +31,8 @@ const ROLE_ICONS = {
   admins: ShieldCheck,
 };
 
-export default function Home({
-  onOpenTeamModal: propOpenTeamModal,
-  setTeamCodeInput: propSetTeamCodeInput
-}) {
-  const outletContext = useOutletContext() || {};
-  const onOpenTeamModal = propOpenTeamModal || outletContext.onOpenTeamModal || (() => {});
-  const setTeamCodeInput = propSetTeamCodeInput || outletContext.setTeamCodeInput || (() => {});
-
-  const [heroInput, setHeroInput] = useState("");
+export default function Home() {
+  // Featured events: the server's public catalogue merged with local demo data.
   const [serverHackathons, setServerHackathons] = useState([]);
   useEffect(() => {
     let cancelled = false;
@@ -59,17 +43,6 @@ export default function Home({
     () => mergeHackathons(getStoredHackathons(), serverHackathons).filter((h) => h.status !== 'draft').slice(0, 3),
     [serverHackathons]
   );
-
-  const handleHeroSubmit = (e) => {
-    e.preventDefault();
-    if (heroInput.trim()) {
-      setTeamCodeInput(heroInput.trim().toUpperCase());
-      onOpenTeamModal(heroInput.trim().toUpperCase());
-    } else {
-      setTeamCodeInput("HT-DEV-42");
-      onOpenTeamModal("HT-DEV-42");
-    }
-  };
 
   return (
     <div>
@@ -116,62 +89,12 @@ export default function Home({
                 Create an account
               </Button>
             </div>
-
-            <form onSubmit={handleHeroSubmit} className="mt-10 max-w-md">
-              <label htmlFor="hero-team-code" className="text-sm font-medium text-fg">
-                Already have a team code?
-              </label>
-              <div className="mt-2 flex gap-2">
-                <div className="relative flex-1">
-                  <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-subtle" aria-hidden="true" />
-                  <Input
-                    id="hero-team-code"
-                    placeholder="HT-DEV-42"
-                    value={heroInput}
-                    onChange={(e) => setHeroInput(e.target.value.toUpperCase())}
-                    autoComplete="off"
-                    spellCheck={false}
-                    className="pl-9 font-mono uppercase tracking-wider"
-                    aria-describedby="hero-team-code-hint"
-                  />
-                </div>
-                <Button type="submit" variant="secondary">Join team</Button>
-              </div>
-              <p id="hero-team-code-hint" className="mt-2 text-xs text-fg-subtle">
-                Demo codes: <span className="font-mono text-fg-muted">HT-DEV-42</span> or <span className="font-mono text-fg-muted">HT-AI-99</span>
-              </p>
-            </form>
           </div>
 
-          {/* Illustration + lifecycle diagram */}
+          {/* Illustration + Live database statistics */}
           <div className="relative">
             <HeroArtwork className="pointer-events-none absolute left-1/2 top-1/2 -z-10 w-[150%] max-w-none -translate-x-1/2 -translate-y-[52%] lg:w-[158%] lg:-translate-x-[45%]" />
-          <div className="surface-card relative rounded-2xl border border-line-strong p-2 !shadow-lg">
-            <span className="hairline-gradient pointer-events-none absolute inset-x-10 -top-px h-px" aria-hidden="true" />
-            <div className="flex items-center justify-between px-3 py-2.5">
-              <p className="text-sm font-medium text-fg">Competition lifecycle</p>
-              <p className="text-xs text-fg-subtle">Enforced by HackTrack</p>
-            </div>
-            <ol className="relative rounded-xl border border-line bg-sunken/80">
-              {/* Connector running through the step icons */}
-              <span className="pointer-events-none absolute bottom-6 left-8 top-6 w-px bg-gradient-to-b from-accent/70 via-accent-2/40 to-accent/10" aria-hidden="true" />
-              {LIFECYCLE.map(({ icon: Icon, stage, actor, detail }, index) => (
-                <li key={stage} className="relative flex items-center gap-3 border-b border-line/70 px-4 py-3 transition-colors last:border-0 hover:bg-raised/40">
-                  <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-hi text-accent-text ring-1 ring-inset ring-accent/30">
-                    <Icon className="h-4 w-4" aria-hidden="true" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="flex items-baseline gap-2 text-sm font-medium text-fg">
-                      <span className="font-mono text-xs text-fg-subtle">{String(index + 1).padStart(2, '0')}</span>
-                      {stage}
-                    </p>
-                    <p className="text-xs text-fg-subtle sm:truncate">{detail}</p>
-                  </div>
-                  <span className="hidden shrink-0 rounded-md bg-raised px-2 py-0.5 text-xs text-fg-muted sm:inline">{actor}</span>
-                </li>
-              ))}
-            </ol>
-          </div>
+            <PlatformStats />
           </div>
         </div>
       </section>

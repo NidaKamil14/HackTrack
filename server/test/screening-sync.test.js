@@ -120,7 +120,7 @@ test('3/4/8. The status is the same on every new session and repeated fetch', as
 
 test('5. A member accepted after the decision sees the current status', async () => {
   const email = `late_${Date.now()}@pccoe.edu.in`;
-  const reg = await api('/api/v1/auth/register', { method: 'POST', body: { email, password: 'password123', fullName: 'Late Joiner', role: 'student' } });
+  const reg = await api('/api/v1/auth/register', { method: 'POST', body: { email, password: 'password123', fullName: 'Late Joiner', role: 'student', university: 'PCCOE', memberId: 'STU-LATE' } });
   const token = reg.body.token;
   assert.equal((await api(`/api/v1/hackathons/${DEMO_IDS.hackathon}/register`, { method: 'POST', token })).status, 201);
   const team = store.findTeamById(DEMO_IDS.team);

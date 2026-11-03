@@ -27,17 +27,40 @@ function getRoleDashboardPath(role) {
   }
 }
 
-// Roles anyone may choose when signing up. Judges, screening, mentors and
-// admins are created by an admin (POST /admin/users) and bound to events via
-// access codes; a public sign-up can never grant them.
-const SELF_SERVICE_ROLES = ['student', 'leader', 'organizer'];
-const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 const isStr = (v, max = 500) => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
 
-// FR-1: Register with unique email address
-router.post('/register', registerLimiter, (req, res) => {
-  const { email, password, fullName, role, university, memberId } = req.body || {};
+// Platform invite keys for roles that aren't tied to one event (organizer,
+// mentor). Configure ORGANIZER_INVITE_CODES / MENTOR_INVITE_CODES (comma
+// separated). Outside production the documented demo keys also work; in
+// production only configured keys are accepted.
+const DEV_ORGANIZER_KEYS = ['ORG-INVITE-2026', 'ORGANIZER-AUTH-2026', 'ORG-2026-DEV', 'DEVPULSE-ORG-2026', 'PCCOE-ORG-2026'];
+const DEV_MENTOR_KEYS = ['MENTOR-INVITE-2026'];
+function inviteKeys(envName, devDefaults) {
+  const configured = String(process.env[envName] || '')
+    .split(',')
+    .map((k) => k.trim().toUpperCase())
+    .filter(Boolean);
+  return new Set(process.env.NODE_ENV === 'production' ? configured : [...configured, ...devDefaults]);
+}
 
+// FR-1: Register with unique email address and role-specific validation
+router.post('/register', registerLimiter, (req, res) => {
+  const {
+    email,
+    password,
+    fullName,
+    role = 'student',
+    university,
+    memberId,
+    department,
+    yearOfStudy,
+    designation,
+    phone,
+    accessCode,
+    inviteCode,
+  } = req.body || {};
+
+  // 1. Mandatory core credentials (strings only, bounded length)
   if (!isStr(email, 320) || !isStr(password, 200) || !isStr(fullName, 120)) {
     return res.status(400).json({
       status: 400,
@@ -46,8 +69,14 @@ router.post('/register', registerLimiter, (req, res) => {
     });
   }
 
-  if (!EMAIL_RE.test(email.trim())) {
-    return res.status(400).json({ status: 400, error: 'Bad Request', message: 'Please provide a valid email address.' });
+  const cleanEmail = String(email).trim().toLowerCase();
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(cleanEmail)) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: 'Please provide a valid email address.',
+    });
   }
 
   if (password.length < 6) {
@@ -58,24 +87,172 @@ router.post('/register', registerLimiter, (req, res) => {
     });
   }
 
-  const requestedRole = role === undefined || role === null || role === '' ? 'student' : role;
-  if (!SELF_SERVICE_ROLES.includes(requestedRole)) {
+  const cleanRole = String(role || 'student').trim().toLowerCase();
+  const validRoles = ['student', 'leader', 'judge', 'admin', 'screening', 'mentor', 'organizer'];
+  if (!validRoles.includes(cleanRole)) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: `Invalid role: ${cleanRole}. Valid roles are: ${validRoles.join(', ')}`,
+    });
+  }
+
+  // 2. Prevent unauthorized administrative registration
+  if (cleanRole === 'admin') {
     return res.status(403).json({
       status: 403,
       error: 'Forbidden',
-      message: `Accounts can be created as ${SELF_SERVICE_ROLES.join(', ')}. Judges, screening members, mentors and admins are added by a platform admin.`,
+      message: 'Public registration for Platform Administrator accounts is not permitted. Admin accounts must be provisioned through the administrative workspace (FR-42).',
+    });
+  }
+
+  const codeToVerify = String(accessCode || inviteCode || '').trim();
+  let matchedCodeRecord = null;
+
+  // 3. Role-specific validation rules
+  if (['student', 'leader'].includes(cleanRole)) {
+    if (!university || !String(university).trim()) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'College or university name is required for student registration.',
+      });
+    }
+    if (!memberId || !String(memberId).trim()) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'Student / Member ID is required for student and team leader accounts.',
+      });
+    }
+  } else if (cleanRole === 'screening') {
+    if (!university || !String(university).trim()) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'Institution or organization is required for Screening Committee registration.',
+      });
+    }
+    if (!department || !String(department).trim()) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'Committee or department affiliation is required for Screening Committee registration.',
+      });
+    }
+    if (!codeToVerify) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'A valid Screening Committee Access Code or Invitation Key is required.',
+      });
+    }
+    // Only a real code issued by an event organizer counts; it also binds the
+    // reviewer to that event. (A prefix check would let any made-up value in.)
+    matchedCodeRecord = store.hackathonCodes.find(
+      (c) => c.code.toUpperCase() === codeToVerify.toUpperCase() && c.role === 'screening'
+    );
+    if (!matchedCodeRecord) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'Invalid or unavailable Screening Committee Access Code.',
+      });
+    }
+  } else if (cleanRole === 'judge') {
+    if (!university || !String(university).trim()) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'Organization or affiliation is required for Judge registration.',
+      });
+    }
+    if (!designation || !String(designation).trim()) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'Professional designation or area of expertise is required for Judge registration.',
+      });
+    }
+    if (!codeToVerify) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'A valid Judge Access Code or Invitation Code is required to register as a Judge.',
+      });
+    }
+    matchedCodeRecord = store.hackathonCodes.find(
+      (c) => c.code.toUpperCase() === codeToVerify.toUpperCase() && c.role === 'judge'
+    );
+    if (!matchedCodeRecord) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'Invalid or unavailable Judge Access Code. Please enter an active access code generated by an event organizer.',
+      });
+    }
+  } else if (cleanRole === 'organizer') {
+    if (!university || !String(university).trim()) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'Host organization or institution is required for Organizer registration.',
+      });
+    }
+    if (!department || !String(department).trim()) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'Department or organizing committee is required for Organizer registration.',
+      });
+    }
+    if (!codeToVerify) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'A valid Organizer Authorization Code or Invitation Key is required.',
+      });
+    }
+    if (!inviteKeys('ORGANIZER_INVITE_CODES', DEV_ORGANIZER_KEYS).has(codeToVerify.toUpperCase())) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'Invalid or unauthorized Organizer Authorization Code.',
+      });
+    }
+  }
+
+  if (cleanRole === 'mentor' && !inviteKeys('MENTOR_INVITE_CODES', DEV_MENTOR_KEYS).has(codeToVerify.toUpperCase())) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: 'A valid Mentor Invitation Code is required to register as a mentor.',
     });
   }
 
   try {
+    const roleCategory = cleanRole === 'judge'
+      ? (designation ? String(designation).trim() : undefined)
+      : (['screening', 'organizer'].includes(cleanRole) && department ? String(department).trim() : undefined);
+
     const user = store.createUser({
-      email,
+      email: cleanEmail,
       password,
-      fullName,
-      role: requestedRole,
-      university: typeof university === 'string' ? university.slice(0, 200) : undefined,
-      memberId: typeof memberId === 'string' ? memberId.slice(0, 50) : undefined,
+      fullName: fullName.trim(),
+      role: cleanRole,
+      university: university ? String(university).trim() : 'University / Organization',
+      memberId: ['student', 'leader'].includes(cleanRole) && memberId ? String(memberId).trim() : null,
+      roleCategory,
     });
+
+    // Auto-redeem hackathon access code if linked to a competition
+    if (matchedCodeRecord) {
+      try {
+        store.redeemHackathonCode(matchedCodeRecord.code, user.id);
+      } catch (err) {
+        console.warn(`[Register] Code auto-redemption notice: ${err.message}`);
+      }
+    }
 
     const token = signToken(user);
     const redirectPath = getRoleDashboardPath(user.role);

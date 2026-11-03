@@ -14,8 +14,8 @@ import {
 import { getAllTeams } from '../../utils/teamService';
 import { getSubmissions } from '../../utils/submissionService';
 import { addNotification } from '../../utils/notificationService';
-import { getRegistrations } from '../../utils/registrationService';
-import { subscribeToDataSync } from '../../utils/syncService';
+import { getRegistrations, normalizeHackathonId } from '../../utils/registrationService';
+import { subscribeToDataSync, triggerDataSync } from '../../utils/syncService';
 import { setResultsPublished } from '../../utils/evaluationService';
 import api from '../../utils/api';
 import PlatformReach from '../../components/analytics/PlatformReach';
@@ -26,6 +26,7 @@ import {
   ArrowUp,
   Award,
   CalendarClock,
+  CalendarDays,
   CalendarRange,
   Check,
   Copy,
@@ -43,9 +44,11 @@ import {
   Trophy,
   Users,
   UserPlus,
+  UserRoundCheck,
+  UsersRound,
   X,
 } from 'lucide-react';
-import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, EmptyState, Field, Input, PageHeader, Select, StatCard, Textarea, cn, stageTone, stageProgress, stagePhase, STAGE_ORDER, toneStyles } from '../../components/ui';
+import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, EmptyState, Field, Input, PageHeader, Select, Skeleton, StatCard, Textarea, cn, stageTone, stageProgress, stagePhase, STAGE_ORDER, toneStyles } from '../../components/ui';
 
 const phaseAccent = {
   active: "before:bg-gradient-to-b before:from-accent before:to-accent-2",
@@ -66,7 +69,7 @@ export default function OrganizerDashboard() {
 
   // Server records for this organizer's events: the same teams, submissions
   // and progress every other panel reads.
-  const [serverData, setServerData] = useState({ hackathons: [], teams: [], submissions: [], progress: {}, committee: {} });
+  const [serverData, setServerData] = useState({ hackathons: [], submissions: [], progress: {}, committee: {} });
   useEffect(() => {
     if (!api.getToken()) return undefined;
     let cancelled = false;
@@ -76,19 +79,18 @@ export default function OrganizerDashboard() {
         const hackathons = res?.hackathons || [];
         const perEvent = await Promise.all(
           hackathons.map(async (h) => {
-            const [teams, subs, progress, codes] = await Promise.all([
-              api.getTeams(h.id).catch(() => ({ teams: [] })),
+            // Teams come from serverTeams (fetched below for every displayed event).
+            const [subs, progress, codes] = await Promise.all([
               api.getSubmissions(h.id).catch(() => ({ submissions: [] })),
               api.getHackathonProgress(h.id).catch(() => null),
               api.request(`/hackathons/${encodeURIComponent(h.id)}/codes`).catch(() => null),
             ]);
-            return { id: h.id, teams: teams.teams || [], subs: subs.submissions || [], progress: progress?.progress || null, codes };
+            return { id: h.id, subs: subs.submissions || [], progress: progress?.progress || null, codes };
           })
         );
         if (cancelled) return;
         setServerData({
           hackathons,
-          teams: perEvent.flatMap((e) => e.teams),
           submissions: perEvent.flatMap((e) => e.subs),
           progress: Object.fromEntries(perEvent.map((e) => [e.id, e.progress])),
           committee: Object.fromEntries(perEvent.map((e) => [e.id, e.codes])),
@@ -134,7 +136,18 @@ export default function OrganizerDashboard() {
     });
   }, [allHackathons, userEmail, userId]);
 
-  const myHackathonIds = useMemo(() => new Set(displayedHackathons.map((h) => h.id)), [displayedHackathons]);
+  // Gather all ID representations (canonical IDs, slugs and aliases) for organizer's events
+  const myHackathonIds = useMemo(() => {
+    const ids = new Set();
+    displayedHackathons.forEach((h) => {
+      if (h.id) {
+        ids.add(h.id);
+        const norm = normalizeHackathonId(h.id);
+        if (norm) ids.add(norm);
+      }
+    });
+    return ids;
+  }, [displayedHackathons]);
 
   const teams = useMemo(() => {
     if (refreshKey) { /* trigger */ }
@@ -146,12 +159,75 @@ export default function OrganizerDashboard() {
     return getSubmissions();
   }, [refreshKey]);
 
-  // Data isolation: filter participant teams strictly to the Organizer's own hackathons
+  // Live teams and registrations fetched from MySQL backend
+  const [serverTeams, setServerTeams] = useState([]);
+  const [serverRegs, setServerRegs] = useState([]);
+  const [rosterTab, setRosterTab] = useState("teams"); // "teams" | "participants"
+
+  // Fetch backend teams for organizer's managed hackathons
+  useEffect(() => {
+    if (!api.getToken() || displayedHackathons.length === 0) return;
+    let cancelled = false;
+
+    const fetchTeams = async () => {
+      try {
+        const results = await Promise.allSettled(
+          displayedHackathons.map((h) => api.getTeams(h.id))
+        );
+        if (cancelled) return;
+        const allFetched = [];
+        results.forEach((res) => {
+          if (res.status === 'fulfilled' && Array.isArray(res.value?.teams)) {
+            allFetched.push(...res.value.teams);
+          }
+        });
+        setServerTeams(allFetched);
+      } catch {
+        // Fallback silently
+      }
+    };
+
+    fetchTeams();
+    return () => { cancelled = true; };
+  }, [refreshKey, displayedHackathons]);
+
+  // Fetch backend registrations for organizer's managed hackathons
+  useEffect(() => {
+    if (!api.getToken() || displayedHackathons.length === 0) return;
+    let cancelled = false;
+
+    const fetchRegistrations = async () => {
+      try {
+        const results = await Promise.allSettled(
+          displayedHackathons.map((h) => api.getHackathonRegistrations(h.id))
+        );
+        if (cancelled) return;
+        const allFetched = [];
+        results.forEach((res) => {
+          if (res.status === 'fulfilled' && Array.isArray(res.value?.registrations)) {
+            allFetched.push(...res.value.registrations);
+          }
+        });
+        setServerRegs(allFetched);
+      } catch {
+        // Fallback silently
+      }
+    };
+
+    fetchRegistrations();
+    return () => { cancelled = true; };
+  }, [refreshKey, displayedHackathons]);
+
+  // Data isolation: filter participant teams strictly to the Organizer's own hackathons, merging MySQL backend & local store
   const teamsList = useMemo(() => {
-    const fromServer = serverData.teams.map((t) => ({
+    // Server teams (one source: serverTeams) normalized to the fields this
+    // view and the participants list use; local teams only fill gaps.
+    const fromServer = serverTeams.map((t) => ({
       id: t.id,
       code: t.teamCode || t.code || t.id,
+      teamCode: t.teamCode || t.code,
       name: t.teamName || t.name,
+      teamName: t.teamName || t.name,
       hackathonId: t.hackathonId,
       hackathon: t.hackathonTitle,
       capacity: `${t.memberCount} member${t.memberCount === 1 ? "" : "s"}`,
@@ -160,12 +236,61 @@ export default function OrganizerDashboard() {
       screeningStatus: t.screeningStatus,
       isServer: true,
     }));
-    const serverCodes = new Set(fromServer.map((t) => t.code));
-    const local = Object.entries(teams)
-      .map(([code, t]) => ({ ...t, code }))
-      .filter((t) => myHackathonIds.has(t.hackathonId) && !serverCodes.has(t.code));
-    return [...fromServer, ...local];
-  }, [teams, myHackathonIds, serverData]);
+    const serverCodes = new Set(fromServer.map((t) => String(t.code).toUpperCase().trim()));
+    const localEntries = Object.entries(teams).map(([code, t]) => ({ ...t, code }));
+    const filteredLocal = localEntries.filter((t) => {
+      if (!t) return false;
+      if (serverCodes.has(String(t.code || t.teamCode || '').toUpperCase().trim())) return false;
+      if (myHackathonIds.has(t.hackathonId)) return true;
+      const norm = normalizeHackathonId(t.hackathonId);
+      return norm && myHackathonIds.has(norm);
+    });
+    return [...fromServer, ...filteredLocal];
+  }, [teams, serverTeams, myHackathonIds]);
+
+  // Unified participant registrations for organizer's managed hackathons
+  const participantsList = useMemo(() => {
+    if (refreshKey) { /* trigger */ }
+    const localAllRegs = getRegistrations();
+    const filteredLocalRegs = localAllRegs.filter((r) => {
+      if (!r) return false;
+      if (myHackathonIds.has(r.hackathonId)) return true;
+      const norm = normalizeHackathonId(r.hackathonId);
+      return norm && myHackathonIds.has(norm);
+    });
+
+    const combined = [...serverRegs];
+    filteredLocalRegs.forEach((lr) => {
+      const email = String(lr.userId || lr.userEmail || '').toLowerCase().trim();
+      const exists = combined.some((sr) =>
+        (sr.id === lr.id) ||
+        (String(sr.userId || sr.userEmail || sr.email || '').toLowerCase().trim() === email &&
+         normalizeHackathonId(sr.hackathonId) === normalizeHackathonId(lr.hackathonId))
+      );
+      if (!exists) {
+        const userTeam = teamsList.find((t) => {
+          if (t.leadEmail && t.leadEmail.toLowerCase().trim() === email) return true;
+          return Array.isArray(t.members) && t.members.some((m) =>
+            (typeof m === 'string' && m.toLowerCase().trim() === email) ||
+            (typeof m === 'object' && m.email && m.email.toLowerCase().trim() === email)
+          );
+        });
+        combined.push({
+          id: lr.id,
+          userId: lr.userId,
+          fullName: lr.fullName || lr.name || (email.split('@')[0]),
+          email,
+          userEmail: email,
+          hackathonId: lr.hackathonId,
+          registeredAt: lr.registrationDate,
+          status: lr.status || 'Verified',
+          teamName: userTeam?.name || userTeam?.teamName,
+          teamCode: userTeam?.code || userTeam?.teamCode,
+        });
+      }
+    });
+    return combined;
+  }, [serverRegs, teamsList, myHackathonIds, refreshKey]);
 
   // Data isolation: filter submissions strictly to the Organizer's own hackathons
   const mySubmissions = useMemo(() => {
@@ -445,6 +570,18 @@ export default function OrganizerDashboard() {
         type: "success",
         link: `/hackathons/${res.hackathon?.id || ''}`
       });
+
+      // Synchronize to platform administration with real-time notification
+      addNotification({
+        userEmail: "admin@hacktrack.io",
+        title: "New Hackathon Published",
+        message: `Organizer "${organizerName || user?.fullName || 'Organizer'}" published a new hackathon: "${res.hackathon?.title}".`,
+        type: "info",
+        link: "/dashboard/admin"
+      });
+
+      triggerDataSync("hackathon_created", { hackathon: res.hackathon });
+
       setShowCreateModal(false);
       setNewHackathon({
         title: "",
@@ -643,14 +780,21 @@ export default function OrganizerDashboard() {
           eyebrow={user?.university || "DevPulse Operations Committee"}
           title="Organizer workspace"
           description="Create hackathons, manage stages and rubrics, follow team formation, and broadcast updates to participants."
-          meta={<span>Signed in as {user?.fullName || "Organizer"}</span>}
-          actions={
-            <Button size="lg" onClick={() => setShowCreateModal(true)}>
-              <Plus aria-hidden="true" />
-              Create hackathon
-            </Button>
+          meta={
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4 pt-2">
+              <span className="text-sm text-fg-subtle">Signed in as {user?.fullName || "Organizer"}</span>
+              <Button size="md" onClick={() => setShowCreateModal(true)}>
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                Create hackathon
+              </Button>
+            </div>
           }
-        />
+          className="flex-col lg:flex-row lg:items-center lg:justify-between gap-8 [&>div:first-of-type]:min-w-0 [&>div:first-of-type]:flex-1"
+        >
+          <div className="w-full lg:w-[420px] xl:w-[460px] shrink-0">
+            <OrganizerCommunityStats />
+          </div>
+        </PageHeader>
 
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <StatCard
@@ -915,33 +1059,81 @@ export default function OrganizerDashboard() {
               <CardHeader className="flex-row items-start gap-3">
                 <IconTile icon={Users} tone="cyan" />
                 <div className="min-w-0 flex-1 space-y-0.5">
-                  <CardTitle as="h2">Participant teams</CardTitle>
-                  <CardDescription>Teams registered for your managed competitions.</CardDescription>
+                  <CardTitle as="h2">Teams & Participants</CardTitle>
+                  <CardDescription>Rosters and participant registrations across your managed competitions.</CardDescription>
                 </div>
-                <Badge className="shrink-0 tabular-nums">{teamsList.length} registered</Badge>
+                <div className="flex items-center gap-1 rounded-lg bg-surface p-0.5 border border-line shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setRosterTab("teams")}
+                    className={cn(
+                      "rounded-md px-2 py-0.5 text-xs font-medium transition-colors",
+                      rosterTab === "teams" ? "bg-accent/15 text-accent-text" : "text-fg-muted hover:text-fg"
+                    )}
+                  >
+                    Teams ({teamsList.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRosterTab("participants")}
+                    className={cn(
+                      "rounded-md px-2 py-0.5 text-xs font-medium transition-colors",
+                      rosterTab === "participants" ? "bg-accent/15 text-accent-text" : "text-fg-muted hover:text-fg"
+                    )}
+                  >
+                    Participants ({participantsList.length})
+                  </button>
+                </div>
               </CardHeader>
               <CardContent>
-                {teamsList.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-line p-4 text-center text-sm text-fg-muted">No teams have registered yet.</p>
+                {rosterTab === "teams" ? (
+                  teamsList.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-line p-4 text-center text-sm text-fg-muted">No teams have registered yet.</p>
+                  ) : (
+                    <ul className="max-h-72 divide-y divide-line overflow-y-auto rounded-lg bg-raised/50 px-3 py-2.5">
+                      {teamsList.map((t) => (
+                        <li key={t.code || t.id} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-fg">{t.name || t.teamName}</p>
+                            <p className="text-xs text-fg-subtle">
+                              <span className="font-mono text-accent-text">{t.code || t.teamCode}</span>
+                              {t.capacity ? <> · {t.capacity}</> : (t.memberCount ? <> · {t.memberCount} members</> : null)}
+                            </p>
+                          </div>
+                          {(t.hackathon || t.hackathonTitle) && (
+                            <span className="max-w-[40%] truncate text-xs text-fg-subtle" title={t.hackathon || t.hackathonTitle}>
+                              {t.hackathon || t.hackathonTitle}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )
                 ) : (
-                  <ul className="max-h-72 divide-y divide-line overflow-y-auto rounded-lg bg-raised/50 px-3 py-2.5">
-                    {teamsList.map((t) => (
-                      <li key={t.code} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-fg">{t.name}</p>
-                          <p className="text-xs text-fg-subtle">
-                            <span className="font-mono text-accent-text">{t.code}</span>
-                            {t.capacity ? <> · {t.capacity}</> : null}
-                          </p>
-                        </div>
-                        {t.hackathon && (
-                          <span className="max-w-[40%] truncate text-xs text-fg-subtle" title={t.hackathon}>
-                            {t.hackathon}
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+                  participantsList.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-line p-4 text-center text-sm text-fg-muted">No individual participants have registered yet.</p>
+                  ) : (
+                    <ul className="max-h-72 divide-y divide-line overflow-y-auto rounded-lg bg-raised/50 px-3 py-2.5">
+                      {participantsList.map((p) => (
+                        <li key={p.id || p.userId || p.email} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-fg">{p.fullName || p.name || p.email || p.userId}</p>
+                            <p className="text-xs text-fg-subtle truncate">
+                              <span className="font-mono text-xs">{p.email || p.userEmail || p.userId}</span>
+                              {p.teamName ? (
+                                <> · <span className="font-medium text-fg">{p.teamName}</span> ({p.teamCode})</>
+                              ) : (
+                                <> · <span className="italic">Individual</span></>
+                              )}
+                            </p>
+                          </div>
+                          <Badge tone="success" className="shrink-0 text-[11px]">
+                            {p.status || "Registered"}
+                          </Badge>
+                        </li>
+                      ))}
+                    </ul>
+                  )
                 )}
               </CardContent>
             </Card>
@@ -1662,6 +1854,187 @@ function EventProgress({ progress: p, committee, teams }) {
           <p>Judges: <span className="text-fg-muted">{judges.map((u) => u.fullName).join(", ") || "none yet"}</span></p>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Compact "HackTrack Community" statistics rendered inside the organizer welcome banner.
+ * Displays four platform-wide metrics in a 2x2 grid matching the homepage Platform Statistics design:
+ * 1. Hackathons Hosted (violet accent)
+ * 2. Teams Participated (teal accent)
+ * 3. Participants (blue accent)
+ * 4. Upcoming Events (amber accent)
+ */
+function OrganizerCommunityStats() {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    let inFlight = false;
+    let timerId = null;
+
+    const fetchCommunityStats = async () => {
+      if (inFlight) return;
+      inFlight = true;
+
+      try {
+        const response = await api.getPublicStats();
+        if (!isMounted) return;
+
+        if (response && response.stats) {
+          setStats(response.stats);
+        }
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn('[OrganizerDashboard] Community statistics fetch notice:', err?.message || err);
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+        inFlight = false;
+      }
+    };
+
+    fetchCommunityStats();
+
+    // 10-second polling to match platform statistics
+    timerId = setInterval(fetchCommunityStats, 10000);
+
+    // Refresh when visitor returns to active tab
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchCommunityStats();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Instant cross-dashboard synchronization
+    const unsubscribe = subscribeToDataSync(() => {
+      fetchCommunityStats();
+    });
+
+    return () => {
+      isMounted = false;
+      if (timerId) clearInterval(timerId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      unsubscribe();
+    };
+  }, []);
+
+  return (
+    <div className="surface-card relative rounded-2xl border border-line-strong p-4 sm:p-5 !shadow-lg w-full" aria-label="HackTrack Community Platform Statistics">
+      <span className="hairline-gradient pointer-events-none absolute inset-x-8 -top-px h-px" aria-hidden="true" />
+
+      {/* Header bar */}
+      <div className="border-b border-line/70 pb-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold tracking-tight text-fg">HackTrack Community</h2>
+          <span className="text-[11px] font-medium text-accent">Platform Reach</span>
+        </div>
+        <p className="text-xs text-fg-subtle">Verified platform-wide competition metrics</p>
+      </div>
+
+      {/* 2 x 2 Statistics Grid */}
+      <div className="mt-3.5 grid grid-cols-2 gap-3 sm:gap-3.5">
+        {/* 1. Hackathons hosted */}
+        <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5 transition-colors hover:border-violet-200 dark:border-slate-800 dark:bg-surface dark:hover:border-violet-800/60">
+          <div className="mb-2 flex items-center justify-between gap-1.5">
+            <span className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-300 truncate">
+              Hackathons hosted
+            </span>
+            <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg border border-violet-200 bg-violet-50 text-violet-600 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-400">
+              <Trophy className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </div>
+          </div>
+
+          <div className="text-2xl sm:text-3xl font-bold leading-tight tracking-tight text-violet-600 dark:text-violet-400 tabular-nums">
+            {loading && !stats ? (
+              <Skeleton className="h-8 w-16" />
+            ) : (
+              stats?.hackathonsHosted ?? "—"
+            )}
+          </div>
+
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            Active &amp; completed events
+          </p>
+        </div>
+
+        {/* 2. Teams participated */}
+        <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5 transition-colors hover:border-teal-200 dark:border-slate-800 dark:bg-surface dark:hover:border-teal-800/60">
+          <div className="mb-2 flex items-center justify-between gap-1.5">
+            <span className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-300 truncate">
+              Teams participated
+            </span>
+            <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg border border-teal-200 bg-teal-50 text-teal-600 dark:border-teal-900/50 dark:bg-teal-950/40 dark:text-teal-400">
+              <UsersRound className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </div>
+          </div>
+
+          <div className="text-2xl sm:text-3xl font-bold leading-tight tracking-tight text-teal-600 dark:text-teal-400 tabular-nums">
+            {loading && !stats ? (
+              <Skeleton className="h-8 w-16" />
+            ) : (
+              stats?.teamsParticipated ?? "—"
+            )}
+          </div>
+
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            Formed competitor squads
+          </p>
+        </div>
+
+        {/* 3. Participants */}
+        <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5 transition-colors hover:border-blue-200 dark:border-slate-800 dark:bg-surface dark:hover:border-blue-800/60">
+          <div className="mb-2 flex items-center justify-between gap-1.5">
+            <span className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-300 truncate">
+              Participants
+            </span>
+            <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-400">
+              <UserRoundCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </div>
+          </div>
+
+          <div className="text-2xl sm:text-3xl font-bold leading-tight tracking-tight text-blue-600 dark:text-blue-400 tabular-nums">
+            {loading && !stats ? (
+              <Skeleton className="h-8 w-16" />
+            ) : (
+              stats?.participants ?? "—"
+            )}
+          </div>
+
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            Registered competitors
+          </p>
+        </div>
+
+        {/* 4. Upcoming events */}
+        <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5 transition-colors hover:border-amber-200 dark:border-slate-800 dark:bg-surface dark:hover:border-amber-800/60">
+          <div className="mb-2 flex items-center justify-between gap-1.5">
+            <span className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-300 truncate">
+              Upcoming events
+            </span>
+            <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 text-amber-600 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-400">
+              <CalendarDays className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </div>
+          </div>
+
+          <div className="text-2xl sm:text-3xl font-bold leading-tight tracking-tight text-amber-600 dark:text-amber-400 tabular-nums">
+            {loading && !stats ? (
+              <Skeleton className="h-8 w-16" />
+            ) : (
+              stats?.upcomingEvents ?? "—"
+            )}
+          </div>
+
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            Open upcoming competitions
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

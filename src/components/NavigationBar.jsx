@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowRight, KeyRound, Menu, X } from 'lucide-react';
+import { ArrowRight, Menu, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getRoleDashboardPath } from '../utils/auth';
 import ThemeToggle from './ThemeToggle';
@@ -9,7 +9,7 @@ import { Button, Logo, cn } from './ui';
 const navItemClass =
   'inline-flex h-8 items-center whitespace-nowrap rounded-md px-3 text-sm font-medium text-fg-muted transition-colors hover:bg-raised hover:text-fg touch:h-10';
 
-export default function NavigationBar({ onOpenTeamModal }) {
+export default function NavigationBar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
@@ -63,10 +63,6 @@ export default function NavigationBar({ onOpenTeamModal }) {
         </div>
 
         <div className="hidden items-center gap-2 lg:flex">
-          <Button variant="ghost" size="sm" onClick={onOpenTeamModal}>
-            <KeyRound aria-hidden="true" />
-            Team code
-          </Button>
           <ThemeToggle />
           <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
 
@@ -94,9 +90,6 @@ export default function NavigationBar({ onOpenTeamModal }) {
 
         {/* Mobile controls */}
         <div className="flex items-center gap-1 lg:hidden">
-          <Button variant="ghost" size="icon-sm" onClick={onOpenTeamModal} aria-label="Enter team code">
-            <KeyRound aria-hidden="true" />
-          </Button>
           <ThemeToggle />
           <Button
             variant="ghost"

@@ -131,14 +131,41 @@ export function registerUser(userData) {
   // Map role
   const normalizedRole = userData.role || "student";
 
+  // Prevent unauthorized public admin registration
+  if (normalizedRole === "admin") {
+    return {
+      success: false,
+      error: "Public registration for Platform Administrator accounts is not permitted. Admin accounts must be provisioned through the administrative workspace."
+    };
+  }
+
+  // Role-specific validation
+  if (["student", "leader"].includes(normalizedRole)) {
+    if (!userData.memberId || !String(userData.memberId).trim()) {
+      return { success: false, error: "Student / Member ID is required for student and team leader accounts." };
+    }
+  } else if (normalizedRole === "screening") {
+    if (!userData.accessCode || !String(userData.accessCode).trim()) {
+      return { success: false, error: "A valid Screening Committee Access Code or Invitation Key is required." };
+    }
+  } else if (normalizedRole === "judge") {
+    if (!userData.accessCode || !String(userData.accessCode).trim()) {
+      return { success: false, error: "A valid Judge Access Code or Invitation Key is required to register as a Judge." };
+    }
+  } else if (normalizedRole === "organizer") {
+    if (!userData.accessCode || !String(userData.accessCode).trim()) {
+      return { success: false, error: "A valid Organizer Authorization Code or Invitation Key is required." };
+    }
+  }
+
   const newUser = {
     fullName: userData.fullName.trim(),
     email: cleanEmail,
     password: userData.password,
     role: normalizedRole,
-    roleCategory: getRoleTitle(normalizedRole),
+    roleCategory: userData.designation || userData.department || getRoleTitle(normalizedRole),
     university: userData.university || "University / Organization",
-    memberId: userData.memberId || `ID-${Math.floor(10000 + Math.random() * 90000)}`
+    memberId: ["student", "leader"].includes(normalizedRole) && userData.memberId ? String(userData.memberId).trim() : null
   };
 
   const updatedUsers = [...users, newUser];

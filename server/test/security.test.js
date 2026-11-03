@@ -31,9 +31,16 @@ const api = async (path, { method = 'GET', token, body } = {}) => {
 
 const unique = () => `${Date.now()}${Math.floor(Math.random() * 1e6)}`;
 const login = async (email) => (await api('/api/v1/auth/login', { method: 'POST', body: { email, password: 'password123' } })).body.token;
+// Role-specific profile fields required at sign-up (students/leaders: college
+// + member id; organizers: organization, department and an invite key).
+const PROFILE = {
+  student: { university: 'PCCOE', memberId: 'STU-SEC' },
+  leader: { university: 'PCCOE', memberId: 'LEAD-SEC' },
+  organizer: { university: 'PCCOE', department: 'Events Cell', accessCode: 'ORG-INVITE-2026' },
+};
 async function signup(role = 'student') {
   const email = `sec_${role}_${unique()}@pccoe.edu.in`;
-  const res = await api('/api/v1/auth/register', { method: 'POST', body: { email, password: 'password123', fullName: `Sec ${role}`, role } });
+  const res = await api('/api/v1/auth/register', { method: 'POST', body: { email, password: 'password123', fullName: `Sec ${role}`, role, ...PROFILE[role] } });
   assert.equal(res.status, 201, JSON.stringify(res.body));
   return { token: res.body.token, id: res.body.user.id, email };
 }
@@ -70,10 +77,29 @@ const noCredentials = (obj) => {
 };
 
 test('Self-registration cannot grant privileged roles', async () => {
-  for (const role of ['admin', 'judge', 'screening', 'mentor', 'superuser']) {
-    const res = await api('/api/v1/auth/register', { method: 'POST', body: { email: `x_${role}_${unique()}@pccoe.edu.in`, password: 'password123', fullName: 'X', role } });
-    assert.equal(res.status, 403, role);
+  const attempt = (role, extra = {}) =>
+    api('/api/v1/auth/register', {
+      method: 'POST',
+      body: { email: `x_${role}_${unique()}@pccoe.edu.in`, password: 'password123', fullName: 'X', role, university: 'Org', department: 'Dept', designation: 'Prof', ...extra },
+    });
+  // No code, or an unknown role.
+  for (const role of ['admin', 'judge', 'screening', 'mentor', 'organizer', 'superuser']) {
+    const res = await attempt(role);
+    assert.ok([400, 403].includes(res.status), `${role}: ${res.status}`);
   }
+  // Admin is never self-service, even with a code.
+  assert.equal((await attempt('admin', { accessCode: 'ORG-INVITE-2026' })).status, 403);
+  // Made-up codes that only *look* right are rejected (the old prefix check let these in).
+  assert.equal((await attempt('judge', { accessCode: 'JUDGE-ANYTHING-123' })).status, 400);
+  assert.equal((await attempt('screening', { accessCode: 'SCREEN-whatever' })).status, 400);
+  assert.equal((await attempt('organizer', { accessCode: 'ORG-made-up' })).status, 400);
+  assert.equal((await attempt('mentor', { accessCode: 'MENTOR-nope' })).status, 400);
+  // A real organizer-issued judge code works and binds the judge to that event.
+  const real = store.getCodesForHackathon('hack-001').find((c) => c.role === 'judge');
+  const ok = await attempt('judge', { accessCode: real.code });
+  assert.equal(ok.status, 201, JSON.stringify(ok.body));
+  assert.equal(ok.body.user.role, 'judge');
+  assert.ok(store.findUserById(ok.body.user.id).assignedHackathonIds.includes('hack-001'));
   for (const role of ['student', 'leader', 'organizer']) {
     await signup(role);
   }
