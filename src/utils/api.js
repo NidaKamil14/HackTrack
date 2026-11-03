@@ -179,6 +179,10 @@ class ApiClient {
     });
   }
 
+  async getMyRegistrations() {
+    return this.request('/hackathons/my-registrations');
+  }
+
   async getHackathonRegistrations(hackathonId) {
     return this.request(`/hackathons/${hackathonId}/registrations`);
   }

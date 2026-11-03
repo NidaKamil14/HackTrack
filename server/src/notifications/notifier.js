@@ -299,7 +299,10 @@ export const notifyAnnouncement = (announcement) => guard('announcement', () => 
       .filter((m) => m.hackathonId === hackathon.id && m.status === 'accepted')
       .map((m) => m.userId);
     const reviewerIds = store.getHackathonAssignedUsers(hackathon.id, null).map((u) => u.id);
-    audience = [...memberIds, ...reviewerIds].map((id) => store.findUserById(id)).filter(Boolean);
+    const regUserIds = (store.registrations || [])
+      .filter((r) => r.hackathonId === hackathon.id)
+      .map((r) => r.userId);
+    audience = [...new Set([...memberIds, ...reviewerIds, ...regUserIds])].map((id) => store.findUserById(id)).filter(Boolean);
   } else {
     audience = store.users;
   }

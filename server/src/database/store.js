@@ -1648,6 +1648,33 @@ class HackTrackStore {
     );
   }
 
+  getUserRegistrations(userIdOrEmail) {
+    if (!userIdOrEmail) return [];
+    const cleanUser = String(userIdOrEmail).trim().toLowerCase();
+    const user = this.findUserById(userIdOrEmail) || this.findUserByEmail(userIdOrEmail);
+    const targetUserId = user ? user.id : cleanUser;
+    const targetUserEmail = user ? user.email.toLowerCase() : cleanUser;
+
+    return this.registrations
+      .filter(
+        (r) =>
+          r.userId === targetUserId ||
+          (r.userEmail && r.userEmail.toLowerCase() === targetUserEmail)
+      )
+      .map((r) => {
+        const hackathon = this.getHackathonById(r.hackathonId);
+        return {
+          id: r.id,
+          hackathonId: r.hackathonId,
+          hackathonTitle: hackathon ? hackathon.title : r.hackathonTitle || r.hackathonId,
+          userId: r.userId,
+          userEmail: r.userEmail,
+          status: r.status,
+          registeredAt: r.registeredAt,
+        };
+      });
+  }
+
   getRegistrationsForHackathon(hackathonId) {
     const hackathon = this.getHackathonById(hackathonId);
     if (!hackathon) return [];

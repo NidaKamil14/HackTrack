@@ -58,6 +58,16 @@ router.get('/', optionalAuth, (req, res) => {
   });
 });
 
+// GET /api/v1/hackathons/my-registrations: Get registered competitions for current authenticated user
+router.get('/my-registrations', requireAuth, (req, res) => {
+  const registrations = store.getUserRegistrations(req.user.id);
+  return res.json({
+    status: 200,
+    count: registrations.length,
+    registrations,
+  });
+});
+
 // GET /api/v1/hackathons/:id: Get hackathon details & evaluation criteria
 router.get('/:id', (req, res) => {
   const hackathon = store.getHackathonById(req.params.id);

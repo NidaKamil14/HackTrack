@@ -152,6 +152,10 @@ export function registerUser(userData) {
     if (!userData.accessCode || !String(userData.accessCode).trim()) {
       return { success: false, error: "A valid Judge Access Code or Invitation Key is required to register as a Judge." };
     }
+  } else if (normalizedRole === "mentor") {
+    if (!userData.accessCode || !String(userData.accessCode).trim()) {
+      return { success: false, error: "A valid Mentor Authorization Code or Invitation Key is required to register as a Mentor." };
+    }
   } else if (normalizedRole === "organizer") {
     if (!userData.accessCode || !String(userData.accessCode).trim()) {
       return { success: false, error: "A valid Organizer Authorization Code or Invitation Key is required." };

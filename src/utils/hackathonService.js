@@ -376,7 +376,7 @@ export function redeemAccessCode(rawCode, user) {
 
 export function getUserAssignedHackathonIds(user) {
   const userIdentifier = user?.id || user?.email;
-  if (!userIdentifier) return ["devpulse-2026"];
+  if (!userIdentifier) return [];
 
   try {
     const raw = localStorage.getItem(`${ASSIGNMENTS_STORAGE_KEY}_${userIdentifier}`);
@@ -388,12 +388,13 @@ export function getUserAssignedHackathonIds(user) {
     // fallback
   }
 
-  // Default pre-assigned hackathons for demo roles
-  if (user?.role === 'judge' || user?.role === 'screening') {
+  // Pre-assigned hackathons only for specific core demo seed accounts
+  const cleanEmail = (typeof user === 'string' ? user : user?.email || '').toLowerCase().trim();
+  if (['judge@hacktrack.io', 'screening@hacktrack.io', 'mentor@hacktrack.io'].includes(cleanEmail)) {
     return ["devpulse-2026"];
   }
 
-  return ["devpulse-2026"];
+  return [];
 }
 
 export function saveUserHackathonAssignment(userIdentifier, hackathonId) {
