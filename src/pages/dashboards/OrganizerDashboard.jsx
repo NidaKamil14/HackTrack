@@ -23,6 +23,7 @@ import {
   ArrowUp,
   Award,
   CalendarClock,
+  CalendarDays,
   CalendarRange,
   Check,
   Copy,
@@ -712,21 +713,19 @@ export default function OrganizerDashboard() {
           eyebrow={user?.university || "DevPulse Operations Committee"}
           title="Organizer workspace"
           description="Create hackathons, manage stages and rubrics, follow team formation, and broadcast updates to participants."
-          meta={<span>Signed in as {user?.fullName || "Organizer"}</span>}
-          className="sm:flex-col sm:items-stretch gap-6"
-        >
-          <div className="border-t border-line/60 pt-5 space-y-4">
-            <div className="flex flex-col gap-0.5">
-              <h2 className="text-base font-semibold tracking-tight text-fg">HackTrack Community</h2>
-              <p className="text-xs sm:text-sm text-fg-muted">Platform-wide statistics and reach across all competitions.</p>
-            </div>
-            <OrganizerCommunityStats />
-            <div className="flex justify-end pt-1">
+          meta={
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4 pt-2">
+              <span className="text-sm text-fg-subtle">Signed in as {user?.fullName || "Organizer"}</span>
               <Button size="md" onClick={() => setShowCreateModal(true)}>
-                <Plus aria-hidden="true" />
+                <Plus className="h-4 w-4" aria-hidden="true" />
                 Create hackathon
               </Button>
             </div>
+          }
+          className="flex-col lg:flex-row lg:items-center lg:justify-between gap-8 [&>div:first-of-type]:min-w-0 [&>div:first-of-type]:flex-1"
+        >
+          <div className="w-full lg:w-[420px] xl:w-[460px] shrink-0">
+            <OrganizerCommunityStats />
           </div>
         </PageHeader>
 
@@ -1734,10 +1733,11 @@ function ModuleCheckbox({ label, checked, onChange }) {
 
 /**
  * Compact "HackTrack Community" statistics rendered inside the organizer welcome banner.
- * Displays:
- * 1. Participants (blue accent)
- * 2. Hackathons Hosted (violet accent)
- * 3. Teams Formed (teal accent)
+ * Displays four platform-wide metrics in a 2x2 grid matching the homepage Platform Statistics design:
+ * 1. Hackathons Hosted (violet accent)
+ * 2. Teams Participated (teal accent)
+ * 3. Participants (blue accent)
+ * 4. Upcoming Events (amber accent)
  */
 function OrganizerCommunityStats() {
   const [stats, setStats] = useState(null);
@@ -1798,61 +1798,114 @@ function OrganizerCommunityStats() {
   }, []);
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4 w-full" aria-label="HackTrack Community Statistics">
-      {/* Participants */}
-      <div className="flex flex-col justify-between rounded-xl border border-line bg-surface/90 p-4 sm:p-5 shadow-xs dark:bg-surface-hi/80">
-        <div className="flex items-center justify-between gap-2 mb-2">
-          <span className="text-xs sm:text-sm font-medium text-fg-muted truncate">
-            Total Participants
-          </span>
-          <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-400">
-            <UserRoundCheck className="h-4 w-4 sm:h-5 sm:w-5" />
-          </div>
+    <div className="surface-card relative rounded-2xl border border-line-strong p-4 sm:p-5 !shadow-lg w-full" aria-label="HackTrack Community Platform Statistics">
+      <span className="hairline-gradient pointer-events-none absolute inset-x-8 -top-px h-px" aria-hidden="true" />
+
+      {/* Header bar */}
+      <div className="border-b border-line/70 pb-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold tracking-tight text-fg">HackTrack Community</h2>
+          <span className="text-[11px] font-medium text-accent">Platform Reach</span>
         </div>
-        <div className="text-2xl sm:text-3xl font-bold leading-none tracking-tight text-blue-600 dark:text-blue-400 tabular-nums">
-          {loading && !stats ? (
-            <Skeleton className="h-8 w-16" />
-          ) : (
-            stats?.participants ?? "—"
-          )}
-        </div>
+        <p className="text-xs text-fg-subtle">Verified platform-wide competition metrics</p>
       </div>
 
-      {/* Hackathons Hosted */}
-      <div className="flex flex-col justify-between rounded-xl border border-line bg-surface/90 p-4 sm:p-5 shadow-xs dark:bg-surface-hi/80">
-        <div className="flex items-center justify-between gap-2 mb-2">
-          <span className="text-xs sm:text-sm font-medium text-fg-muted truncate">
-            Hackathons Hosted
-          </span>
-          <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg border border-violet-200 bg-violet-50 text-violet-600 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-400">
-            <Trophy className="h-4 w-4 sm:h-5 sm:w-5" />
+      {/* 2 x 2 Statistics Grid */}
+      <div className="mt-3.5 grid grid-cols-2 gap-3 sm:gap-3.5">
+        {/* 1. Hackathons hosted */}
+        <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5 transition-colors hover:border-violet-200 dark:border-slate-800 dark:bg-surface dark:hover:border-violet-800/60">
+          <div className="mb-2 flex items-center justify-between gap-1.5">
+            <span className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-300 truncate">
+              Hackathons hosted
+            </span>
+            <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg border border-violet-200 bg-violet-50 text-violet-600 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-400">
+              <Trophy className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </div>
           </div>
-        </div>
-        <div className="text-2xl sm:text-3xl font-bold leading-none tracking-tight text-violet-600 dark:text-violet-400 tabular-nums">
-          {loading && !stats ? (
-            <Skeleton className="h-8 w-16" />
-          ) : (
-            stats?.hackathonsHosted ?? "—"
-          )}
-        </div>
-      </div>
 
-      {/* Teams Formed */}
-      <div className="flex flex-col justify-between rounded-xl border border-line bg-surface/90 p-4 sm:p-5 shadow-xs dark:bg-surface-hi/80">
-        <div className="flex items-center justify-between gap-2 mb-2">
-          <span className="text-xs sm:text-sm font-medium text-fg-muted truncate">
-            Teams Formed
-          </span>
-          <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg border border-teal-200 bg-teal-50 text-teal-600 dark:border-teal-900/50 dark:bg-teal-950/40 dark:text-teal-400">
-            <UsersRound className="h-4 w-4 sm:h-5 sm:w-5" />
+          <div className="text-2xl sm:text-3xl font-bold leading-tight tracking-tight text-violet-600 dark:text-violet-400 tabular-nums">
+            {loading && !stats ? (
+              <Skeleton className="h-8 w-16" />
+            ) : (
+              stats?.hackathonsHosted ?? "—"
+            )}
           </div>
+
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            Active &amp; completed events
+          </p>
         </div>
-        <div className="text-2xl sm:text-3xl font-bold leading-none tracking-tight text-teal-600 dark:text-teal-400 tabular-nums">
-          {loading && !stats ? (
-            <Skeleton className="h-8 w-16" />
-          ) : (
-            stats?.teamsParticipated ?? "—"
-          )}
+
+        {/* 2. Teams participated */}
+        <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5 transition-colors hover:border-teal-200 dark:border-slate-800 dark:bg-surface dark:hover:border-teal-800/60">
+          <div className="mb-2 flex items-center justify-between gap-1.5">
+            <span className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-300 truncate">
+              Teams participated
+            </span>
+            <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg border border-teal-200 bg-teal-50 text-teal-600 dark:border-teal-900/50 dark:bg-teal-950/40 dark:text-teal-400">
+              <UsersRound className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </div>
+          </div>
+
+          <div className="text-2xl sm:text-3xl font-bold leading-tight tracking-tight text-teal-600 dark:text-teal-400 tabular-nums">
+            {loading && !stats ? (
+              <Skeleton className="h-8 w-16" />
+            ) : (
+              stats?.teamsParticipated ?? "—"
+            )}
+          </div>
+
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            Formed competitor squads
+          </p>
+        </div>
+
+        {/* 3. Participants */}
+        <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5 transition-colors hover:border-blue-200 dark:border-slate-800 dark:bg-surface dark:hover:border-blue-800/60">
+          <div className="mb-2 flex items-center justify-between gap-1.5">
+            <span className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-300 truncate">
+              Participants
+            </span>
+            <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-400">
+              <UserRoundCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </div>
+          </div>
+
+          <div className="text-2xl sm:text-3xl font-bold leading-tight tracking-tight text-blue-600 dark:text-blue-400 tabular-nums">
+            {loading && !stats ? (
+              <Skeleton className="h-8 w-16" />
+            ) : (
+              stats?.participants ?? "—"
+            )}
+          </div>
+
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            Registered competitors
+          </p>
+        </div>
+
+        {/* 4. Upcoming events */}
+        <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5 transition-colors hover:border-amber-200 dark:border-slate-800 dark:bg-surface dark:hover:border-amber-800/60">
+          <div className="mb-2 flex items-center justify-between gap-1.5">
+            <span className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-300 truncate">
+              Upcoming events
+            </span>
+            <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 text-amber-600 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-400">
+              <CalendarDays className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </div>
+          </div>
+
+          <div className="text-2xl sm:text-3xl font-bold leading-tight tracking-tight text-amber-600 dark:text-amber-400 tabular-nums">
+            {loading && !stats ? (
+              <Skeleton className="h-8 w-16" />
+            ) : (
+              stats?.upcomingEvents ?? "—"
+            )}
+          </div>
+
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            Open upcoming competitions
+          </p>
         </div>
       </div>
     </div>

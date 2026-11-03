@@ -1,6 +1,7 @@
 /* oxlint-disable react/only-export-components */
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import api from '../utils/api';
+import { triggerDataSync } from '../utils/syncService';
 import {
   getCurrentUser,
   authenticateUser,
@@ -69,6 +70,7 @@ export function AuthProvider({ children }) {
         const safeUser = data.user;
         localStorage.setItem('hacktrack_current_user', JSON.stringify(safeUser));
         setUser(safeUser);
+        triggerDataSync('user_registered', { user: safeUser });
         return { success: true, user: safeUser, redirectPath: data.redirectPath };
       } catch (err) {
         if (err.isNetworkError) {
