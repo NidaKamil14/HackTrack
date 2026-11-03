@@ -1,7 +1,8 @@
 import jwt from 'jsonwebtoken';
 import store from '../database/store.js';
+import { getJwtSecret } from '../config/secrets.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'hacktrack_jwt_super_secret_signing_key_2026';
+const JWT_SECRET = getJwtSecret();
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
 
 export function signToken(user) {

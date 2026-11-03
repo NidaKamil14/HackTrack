@@ -1,3 +1,4 @@
+import { getJwtSecret } from '../config/secrets.js';
 import crypto from 'crypto';
 
 /*
@@ -39,7 +40,7 @@ export function emailConfig() {
 // Key for signing unsubscribe links. Derived from JWT_SECRET so no new secret
 // is required; a dedicated EMAIL_LINK_SECRET can override it.
 export function linkSigningKey() {
-  const secret = process.env.EMAIL_LINK_SECRET || process.env.JWT_SECRET || 'hacktrack-dev-link-secret';
+  const secret = process.env.EMAIL_LINK_SECRET || getJwtSecret();
   return crypto.createHash('sha256').update(`hacktrack-email-links:${secret}`).digest();
 }
 

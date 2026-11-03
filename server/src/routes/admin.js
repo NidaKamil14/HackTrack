@@ -1,7 +1,7 @@
 import express from 'express';
 import store from '../database/store.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { notifyAnnouncement } from '../notifications/notifier.js';
+import { notifyAnnouncement, notifyRoleChanged } from '../notifications/notifier.js';
 
 const router = express.Router();
 
@@ -98,8 +98,10 @@ router.put('/users/:id/role', requireAuth, requireRole('admin'), async (req, res
   }
 
   try {
+    const before = store.findUserById(req.params.id)?.role;
     const updated = await store.updateUserRole(req.params.id, role);
-    const { passwordHash: _hash, ...safeUser } = updated;
+    const { passwordHash: _hash, password: _pw, ...safeUser } = updated;
+    if (before && before !== role) notifyRoleChanged(updated, before, req.user.id);
     return res.json({
       status: 200,
       message: 'User role updated successfully (FR-42).',

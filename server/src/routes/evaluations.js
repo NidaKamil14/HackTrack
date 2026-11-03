@@ -1,6 +1,7 @@
 import express from 'express';
 import store from '../database/store.js';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth, requireRole, optionalAuth } from '../middleware/auth.js';
+import { isAdmin, ownsHackathon } from '../access/policies.js';
 import { notifyJudgeAssigned, notifyResultsPublished } from '../notifications/notifier.js';
 
 const router = express.Router();
@@ -22,6 +23,19 @@ router.post('/assign', requireAuth, (req, res) => {
       status: 403,
       error: 'Forbidden',
       message: 'Only organizers and administrators are authorized to assign judges.',
+    });
+  }
+
+  // Ownership is checked against the submission's own hackathon, not just the body id.
+  const targetSubmission = store.getSubmissionById(submissionId);
+  if (!targetSubmission) {
+    return res.status(404).json({ status: 404, error: 'Not Found', message: 'Submission not found.' });
+  }
+  if (req.user.role === 'organizer' && !ownsHackathon(req.user, targetSubmission.hackathonId)) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'You are not authorized to assign judges for another organizer\'s hackathon.',
     });
   }
 
@@ -104,13 +118,22 @@ router.post('/', requireAuth, requireRole('judge'), (req, res) => {
 });
 
 // GET /api/v1/evaluations/leaderboard/:hackathonId: Calculated ranking & leaderboard (FR-28, FR-29)
-router.get('/leaderboard/:hackathonId', (req, res) => {
+router.get('/leaderboard/:hackathonId', optionalAuth, (req, res) => {
   const hackathon = store.getHackathonById(req.params.hackathonId);
   if (!hackathon) {
     return res.status(404).json({
       status: 404,
       error: 'Not Found',
       message: 'Hackathon not found.',
+    });
+  }
+
+  // Until results are published (BR-9) only the event's organizers and admins see scores.
+  if (!hackathon.resultsPublished && !(isAdmin(req.user) || ownsHackathon(req.user, hackathon.id))) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'The leaderboard is available once results are published.',
     });
   }
 

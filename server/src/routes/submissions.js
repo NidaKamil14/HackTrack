@@ -1,12 +1,13 @@
 import express from 'express';
 import store from '../database/store.js';
-import { requireAuth, optionalAuth } from '../middleware/auth.js';
+import { requireAuth } from '../middleware/auth.js';
+import { canSeeSubmission, isAdmin, isBoundReviewer, ownsHackathon } from '../access/policies.js';
 import { notifySubmissionSaved } from '../notifications/notifier.js';
 
 const router = express.Router();
 
 // GET /api/v1/submissions: List submissions for a hackathon or platform-wide (Admin)
-router.get('/', optionalAuth, (req, res) => {
+router.get('/', requireAuth, (req, res) => {
   const { hackathonId } = req.query;
 
   if (!hackathonId || hackathonId === 'all') {
@@ -16,6 +17,10 @@ router.get('/', optionalAuth, (req, res) => {
         return {
           ...s,
           teamName: team?.teamName || 'Unknown Team',
+          hackathonTitle: store.getHackathonById(s.hackathonId)?.title || s.hackathonId,
+          screeningStatus: team?.screeningStatus || 'pending',
+          screeningFeedback: team?.screeningFeedback || '',
+          judgingProgress: team ? store.getJudgingProgress(team.id) : null,
         };
       });
       return res.json({
@@ -36,6 +41,10 @@ router.get('/', optionalAuth, (req, res) => {
           return {
             ...s,
             teamName: team?.teamName || 'Unknown Team',
+            hackathonTitle: store.getHackathonById(s.hackathonId)?.title || s.hackathonId,
+            screeningStatus: team?.screeningStatus || 'pending',
+            screeningFeedback: team?.screeningFeedback || '',
+            judgingProgress: team ? store.getJudgingProgress(team.id) : null,
           };
         });
       return res.json({
@@ -64,11 +73,22 @@ router.get('/', optionalAuth, (req, res) => {
     }
   }
 
-  const submissions = store.getSubmissionsByHackathon(targetHackathon ? targetHackathon.id : hackathonId).map((s) => {
+  if (!targetHackathon) {
+    return res.status(404).json({ status: 404, error: 'Not Found', message: 'Hackathon not found.' });
+  }
+  // Whole-event lists: admins, the event's organizers and bound reviewers.
+  // Participants only ever see their own team's submission.
+  const seesAll = isAdmin(req.user) || ownsHackathon(req.user, targetHackathon.id) || isBoundReviewer(req.user, targetHackathon.id);
+  const submissions = store.getSubmissionsByHackathon(targetHackathon.id).filter((s) => seesAll || canSeeSubmission(req.user, s)).map((s) => {
     const team = store.findTeamById(s.teamId);
     return {
       ...s,
       teamName: team?.teamName || 'Unknown Team',
+      hackathonTitle: targetHackathon.title,
+      screeningStatus: team?.screeningStatus || 'pending',
+      screeningFeedback: team?.screeningFeedback || '',
+      members: team ? store.getTeamMembers(team.id).filter((m) => m.status === 'accepted').map((m) => ({ name: m.name, role: m.role })) : [],
+      judgingProgress: team ? store.getJudgingProgress(team.id) : null,
     };
   });
 
@@ -80,9 +100,9 @@ router.get('/', optionalAuth, (req, res) => {
 });
 
 // GET /api/v1/submissions/:id: Get single submission by ID
-router.get('/:id', optionalAuth, (req, res) => {
+router.get('/:id', requireAuth, (req, res) => {
   const submission = store.getSubmissionById(req.params.id);
-  if (!submission) {
+  if (!submission || !canSeeSubmission(req.user, submission)) {
     return res.status(404).json({
       status: 404,
       error: 'Not Found',
@@ -108,14 +128,17 @@ router.get('/:id', optionalAuth, (req, res) => {
     submission: {
       ...submission,
       teamName: team?.teamName || 'Unknown Team',
+      screeningStatus: team?.screeningStatus || 'pending',
+      screeningFeedback: team?.screeningFeedback || '',
+      judgingProgress: team ? store.getJudgingProgress(team.id) : null,
     },
   });
 });
 
 // GET /api/v1/submissions/team/:teamId: Get submission by Team ID
-router.get('/team/:teamId', optionalAuth, (req, res) => {
+router.get('/team/:teamId', requireAuth, (req, res) => {
   const submission = store.getSubmissionByTeamId(req.params.teamId);
-  if (!submission) {
+  if (!submission || !canSeeSubmission(req.user, submission)) {
     return res.status(404).json({
       status: 404,
       error: 'Not Found',
@@ -141,6 +164,9 @@ router.get('/team/:teamId', optionalAuth, (req, res) => {
     submission: {
       ...submission,
       teamName: team?.teamName || 'Unknown Team',
+      screeningStatus: team?.screeningStatus || 'pending',
+      screeningFeedback: team?.screeningFeedback || '',
+      judgingProgress: team ? store.getJudgingProgress(team.id) : null,
     },
   });
 });

@@ -1,10 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { SearchX, Trophy } from 'lucide-react';
 import FilterBar from '../components/FilterBar';
 import HackathonCard from '../components/HackathonCard';
 import { Button, EmptyState, PageHeader } from '../components/ui';
 import { getStoredHackathons } from '../utils/hackathonService';
+import { fetchPublicHackathons, mergeHackathons } from '../utils/serverHackathons';
 
 // Deadlines are stored as display strings ("Oct 18, 2026"); compare them as dates.
 const toTime = (value) => {
@@ -28,8 +29,16 @@ export default function BrowseHackathons({
   const categories = ["All", "Full-Stack", "AI & ML", "IoT"];
   const stages = ["All", "Registration Open", "Team Formation", "Upcoming"];
 
+  const [serverHackathons, setServerHackathons] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchPublicHackathons().then((list) => { if (!cancelled) setServerHackathons(list); });
+    return () => { cancelled = true; };
+  }, []);
+
   const filteredHackathons = useMemo(() => {
-    const list = getStoredHackathons();
+    // Drafts are never part of public discovery.
+    const list = mergeHackathons(getStoredHackathons(), serverHackathons).filter((h) => h.status !== 'draft');
     return list.filter((h) => {
       const matchSearch =
         h.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -45,7 +54,7 @@ export default function BrowseHackathons({
       if (sortBy === "title") return a.title.localeCompare(b.title);
       return 0;
     });
-  }, [searchTerm, selectedCategory, selectedStage, sortBy]);
+  }, [searchTerm, selectedCategory, selectedStage, sortBy, serverHackathons]);
 
   const resetFilters = () => {
     setSearchTerm("");

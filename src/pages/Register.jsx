@@ -41,26 +41,11 @@ export default function Register({ navigate: propNavigate }) {
       title: "Hackathon Organizer",
       desc: "Create and govern hackathons, define rubrics & manage competitions",
       target: "/dashboard/organizer"
-    },
-    {
-      id: "screening",
-      title: "Screening Committee",
-      desc: "Verify repos, inspect demo URLs & enforce rules",
-      target: "/dashboard/screening"
-    },
-    {
-      id: "judge",
-      title: "Judge / Evaluator",
-      desc: "Evaluate shortlisted teams with weighted rubrics",
-      target: "/dashboard/judge"
-    },
-    {
-      id: "admin",
-      title: "Platform Admin",
-      desc: "Govern lifecycles, monitor stages & manage users",
-      target: "/dashboard/admin"
     }
   ];
+  // Judges, screening members, mentors and admins are not self-service:
+  // a platform admin creates those accounts and organizers bind them to
+  // events with access codes (the server enforces this).
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -149,6 +134,10 @@ export default function Register({ navigate: propNavigate }) {
                 );
               })}
             </div>
+            <p className="text-xs text-fg-subtle">
+              Judging, screening, mentor and admin accounts are created by a platform admin. Already invited to review an
+              event? Sign in and enter the access code from your organizer.
+            </p>
           </fieldset>
 
           <fieldset className="space-y-4">

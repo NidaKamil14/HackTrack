@@ -25,7 +25,7 @@ export default function NotificationCenterDialog({ open, onClose, user }) {
                 userEmail: user.email,
                 title: n.title,
                 message: n.message,
-                type: n.category === 'announcement' ? 'info' : n.type === 'error' ? 'warning' : 'success',
+                type: n.category === 'announcements' ? 'info' : n.type === 'error' ? 'warning' : 'success',
                 date: new Date(n.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
                 read: n.isRead,
                 link: n.link || '/dashboard/student',

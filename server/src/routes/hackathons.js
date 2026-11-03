@@ -1,6 +1,7 @@
 import express from 'express';
 import store from '../database/store.js';
 import { requireAuth, requireRole, optionalAuth } from '../middleware/auth.js';
+import { notifyRegistrationConfirmed } from '../notifications/notifier.js';
 
 const router = express.Router();
 
@@ -14,6 +15,56 @@ export function checkOrganizerAccess(user, hackathon) {
     return false;
   }
   return false;
+}
+
+export const HACKATHON_STATUSES = ['draft', 'published', 'registration_closed', 'judging', 'completed'];
+
+// Drafts are private to their organizers (and admins).
+export function canViewHackathon(user, hackathon) {
+  if (!hackathon) return false;
+  if (hackathon.status !== 'draft') return true;
+  return Boolean(user && (user.role === 'admin' || checkOrganizerAccess(user, hackathon)));
+}
+
+const isDate = (v) => typeof v === 'string' && v.length <= 40 && !Number.isNaN(Date.parse(v));
+const isText = (v, max) => typeof v === 'string' && v.length <= max;
+
+/**
+ * Validates and whitelists organizer-editable fields. Ownership, ids,
+ * results and status are never taken from this input (status changes go
+ * through /publish; results through publish-results).
+ */
+function validateHackathonInput(body, existing = null) {
+  const b = body || {};
+  const out = {};
+  const errors = [];
+  const text = { title: 200, tagLine: 300, description: 10000, evaluationWorkflow: 50 };
+  for (const [k, max] of Object.entries(text)) {
+    if (b[k] === undefined) continue;
+    if (!isText(b[k], max)) errors.push(`${k} must be text of at most ${max} characters.`);
+    else out[k] = k === 'title' ? b[k].trim() : b[k];
+  }
+  if (out.title === '') errors.push('title cannot be empty.');
+  for (const k of ['startDate', 'endDate', 'registrationDeadline', 'submissionDeadline', 'evaluationDeadline']) {
+    if (b[k] === undefined || b[k] === null || b[k] === '') continue;
+    if (!isDate(b[k])) errors.push(`${k} must be a valid date.`);
+    else out[k] = new Date(b[k]).toISOString();
+  }
+  for (const k of ['minTeamSize', 'maxTeamSize', 'screeningRoundsCount']) {
+    if (b[k] === undefined || b[k] === null || b[k] === '') continue;
+    const n = Number(b[k]);
+    if (!Number.isInteger(n) || n < 1 || n > 20) errors.push(`${k} must be a whole number between 1 and 20.`);
+    else out[k] = n;
+  }
+  for (const k of ['hasScreeningRound', 'hasMentorship']) {
+    if (b[k] !== undefined) out[k] = Boolean(b[k]);
+  }
+  const merged = { ...(existing || {}), ...out };
+  if ((merged.minTeamSize || 1) > (merged.maxTeamSize || 4)) errors.push('minTeamSize cannot exceed maxTeamSize (FR-8).');
+  if (merged.registrationDeadline && merged.submissionDeadline && new Date(merged.registrationDeadline) > new Date(merged.submissionDeadline)) {
+    errors.push('Registration deadline cannot be after submission deadline (FR-7).');
+  }
+  return { values: out, errors };
 }
 
 // Helper to determine if registration is open (FR-11)
@@ -41,9 +92,16 @@ router.get('/', optionalAuth, (req, res) => {
   const { status } = req.query;
   let all = store.getAllHackathons();
 
-  // Organizer data isolation: organizers see only hackathons they created or are assigned to manage
-  if (req.user && req.user.role === 'organizer') {
+  // ?scope=public: the public catalogue for anyone (used by discovery pages,
+  // even when an organizer or admin is signed in).
+  if (req.query.scope === 'public') {
+    all = all.filter((h) => h.status !== 'draft');
+  } else if (req.user && req.user.role === 'organizer') {
+    // Organizer data isolation: organizers see only hackathons they created or are assigned to manage
     all = all.filter((h) => checkOrganizerAccess(req.user, h));
+  } else if (!req.user || req.user.role !== 'admin') {
+    // Public discovery never lists drafts.
+    all = all.filter((h) => h.status !== 'draft');
   }
 
   if (status) {
@@ -59,9 +117,9 @@ router.get('/', optionalAuth, (req, res) => {
 });
 
 // GET /api/v1/hackathons/:id: Get hackathon details & evaluation criteria
-router.get('/:id', (req, res) => {
+router.get('/:id', optionalAuth, (req, res) => {
   const hackathon = store.getHackathonById(req.params.id);
-  if (!hackathon) {
+  if (!hackathon || !canViewHackathon(req.user, hackathon)) {
     return res.status(404).json({
       status: 404,
       error: 'Not Found',
@@ -105,13 +163,25 @@ router.post('/', requireAuth, requireRole('organizer'), (req, res) => {
     });
   }
 
-  // Deadlines chronological sanity check (FR-7)
-  if (new Date(registrationDeadline) > new Date(submissionDeadline)) {
-    return res.status(400).json({
-      status: 400,
-      error: 'Bad Request',
-      message: 'Registration deadline cannot be after submission deadline (FR-7).',
-    });
+  // Deadline order (FR-7), types and ranges
+  const { errors } = validateHackathonInput(req.body);
+  if (errors.length) {
+    return res.status(400).json({ status: 400, error: 'Bad Request', message: errors.join(' ') });
+  }
+  if (status !== undefined && !['draft', 'published'].includes(status)) {
+    return res.status(400).json({ status: 400, error: 'Bad Request', message: 'A new hackathon starts as draft or published.' });
+  }
+  if (criteria !== undefined && (!Array.isArray(criteria) || criteria.length > 20)) {
+    return res.status(400).json({ status: 400, error: 'Bad Request', message: 'criteria must be a list of at most 20 items.' });
+  }
+  // A client-chosen id may never collide with (and so take over) another event.
+  if (id !== undefined) {
+    if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9-]{2,49}$/.test(id)) {
+      return res.status(400).json({ status: 400, error: 'Bad Request', message: 'id must be 3-50 lowercase letters, digits or hyphens.' });
+    }
+    if (store.getAllHackathons().some((h) => h.id.toLowerCase() === id.toLowerCase())) {
+      return res.status(409).json({ status: 409, error: 'Conflict', message: 'A hackathon with this id already exists.' });
+    }
   }
 
   try {
@@ -164,8 +234,13 @@ router.put('/:id', requireAuth, requireRole('organizer'), (req, res) => {
     });
   }
 
+  const { values, errors } = validateHackathonInput(req.body, hackathon);
+  if (errors.length) {
+    return res.status(400).json({ status: 400, error: 'Bad Request', message: errors.join(' ') });
+  }
+
   try {
-    const updated = store.updateHackathon(req.params.id, req.body);
+    const updated = store.updateHackathon(hackathon.id, values);
     return res.json({
       status: 200,
       message: 'Hackathon configuration updated successfully.',
@@ -255,16 +330,34 @@ router.post('/:id/criteria', requireAuth, requireRole('organizer'), (req, res) =
   }
 
   const { criteria } = req.body || {};
-  if (!Array.isArray(criteria) || criteria.length === 0) {
+  if (!Array.isArray(criteria) || criteria.length === 0 || criteria.length > 20) {
     return res.status(400).json({
       status: 400,
       error: 'Bad Request',
       message: 'Criteria must be a non-empty array of evaluation criteria items (FR-9).',
     });
   }
+  const cleanCriteria = [];
+  for (const [i, c] of criteria.entries()) {
+    const maxScore = Number(c?.maxScore ?? 25);
+    const weightage = Number(c?.weightage ?? 1);
+    if (!c || typeof c.name !== 'string' || !c.name.trim() || c.name.length > 120) {
+      return res.status(400).json({ status: 400, error: 'Bad Request', message: `Criterion ${i + 1} needs a name (at most 120 characters).` });
+    }
+    if (!Number.isFinite(maxScore) || maxScore <= 0 || maxScore > 100 || !Number.isFinite(weightage) || weightage <= 0 || weightage > 10) {
+      return res.status(400).json({ status: 400, error: 'Bad Request', message: `Criterion "${c.name}" needs a maxScore of 1-100 and a weightage of 0-10.` });
+    }
+    cleanCriteria.push({
+      id: typeof c.id === 'string' && /^[A-Za-z0-9_-]{1,60}$/.test(c.id) ? c.id : `crit-${hackathon.id}-${i + 1}-${Date.now().toString(36)}`,
+      name: c.name.trim(),
+      maxScore,
+      weightage,
+      description: typeof c.description === 'string' ? c.description.slice(0, 1000) : '',
+    });
+  }
 
   try {
-    const updated = store.updateHackathon(req.params.id, { criteria });
+    const updated = store.updateHackathon(hackathon.id, { criteria: cleanCriteria });
     return res.json({
       status: 200,
       message: 'Evaluation criteria updated successfully (FR-9).',
@@ -277,6 +370,30 @@ router.post('/:id/criteria', requireAuth, requireRole('organizer'), (req, res) =
       message: err.message,
     });
   }
+});
+
+// GET /api/v1/hackathons/:id/committee: who reviews the event (admin or its
+// organizers). Access codes stay organizer-only (GET /:id/codes).
+router.get('/:id/committee', requireAuth, (req, res) => {
+  const hackathon = store.getHackathonById(req.params.id);
+  if (!hackathon || !(req.user.role === 'admin' || checkOrganizerAccess(req.user, hackathon))) {
+    return res.status(404).json({ status: 404, error: 'Not Found', message: 'Hackathon not found.' });
+  }
+  const pick = (u) => ({ id: u.id, fullName: u.fullName, email: u.email, role: u.role });
+  return res.json({
+    status: 200,
+    judges: store.getHackathonAssignedUsers(hackathon.id, 'judge').map(pick),
+    screeners: store.getHackathonAssignedUsers(hackathon.id, 'screening').map(pick),
+  });
+});
+
+// GET /api/v1/hackathons/:id/progress: lifecycle counts (organizer of the event, or admin)
+router.get('/:id/progress', requireAuth, (req, res) => {
+  const hackathon = store.getHackathonById(req.params.id);
+  if (!hackathon || !(req.user.role === 'admin' || checkOrganizerAccess(req.user, hackathon))) {
+    return res.status(404).json({ status: 404, error: 'Not Found', message: 'Hackathon not found.' });
+  }
+  return res.json({ status: 200, progress: store.getHackathonProgress(hackathon.id) });
 });
 
 // POST /api/v1/hackathons/:id/codes: Organizer generates a judge or screening access code
@@ -365,8 +482,11 @@ router.get('/:id/assigned-users', requireAuth, requireRole('organizer'), (req, r
 
 // POST /api/v1/hackathons/:id/register: Student or Team Leader registers for a published hackathon
 router.post('/:id/register', requireAuth, (req, res) => {
+  if (!['student', 'leader'].includes(req.user.role)) {
+    return res.status(403).json({ status: 403, error: 'Forbidden', message: 'Only participants (students and team leaders) can register for hackathons.' });
+  }
   const hackathon = store.getHackathonById(req.params.id);
-  if (!hackathon) {
+  if (!hackathon || !canViewHackathon(req.user, hackathon)) {
     return res.status(404).json({
       status: 404,
       error: 'Not Found',
@@ -412,6 +532,7 @@ router.post('/:id/register', requireAuth, (req, res) => {
       status: 'Registration Verified',
     });
 
+    notifyRegistrationConfirmed(registration);
     return res.status(201).json({
       status: 201,
       message: `Successfully registered for ${hackathon.title}.`,

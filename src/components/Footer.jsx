@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Logo } from './ui';
+import { openAnalyticsPreferences } from '../utils/analytics';
 
 const linkClass = 'inline-flex min-h-10 items-center rounded-sm text-sm text-fg-muted transition-colors hover:text-fg sm:min-h-0';
 
@@ -16,6 +17,7 @@ export default function Footer() {
           <Link to="/hackathons" className={linkClass}>Browse hackathons</Link>
           <Link to="/login" className={linkClass}>Log in</Link>
           <Link to="/register" className={linkClass}>Register</Link>
+          <button type="button" onClick={openAnalyticsPreferences} className={linkClass}>Analytics preferences</button>
         </nav>
       </div>
     </footer>

@@ -233,12 +233,42 @@ class ApiClient {
     });
   }
 
-  async updateTeamScreening(teamId, status) {
+  async updateTeamScreening(teamId, status, { feedback, internalNote } = {}) {
     return this.request(`/teams/${teamId}/screening`, {
       method: 'PATCH',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, feedback, internalNote }),
     });
   }
+
+  async getScreeningReviews(teamId) {
+    return this.request(`/teams/${encodeURIComponent(teamId)}/screening-reviews`);
+  }
+
+  async getTeamResults(teamId) {
+    return this.request(`/teams/${encodeURIComponent(teamId)}/results`);
+  }
+
+  async getMyRegistrations() {
+    return this.request('/auth/my-registrations');
+  }
+
+  async getMyAssignedHackathons() {
+    return this.request('/auth/my-hackathons');
+  }
+
+  async getHackathonProgress(hackathonId) {
+    return this.request(`/hackathons/${encodeURIComponent(hackathonId)}/progress`);
+  }
+
+  // Demonstration scenario (admin only)
+  async getDemo() {
+    return this.request('/demo');
+  }
+
+  async resetDemo(stage) {
+    return this.request('/demo/reset', { method: 'POST', body: JSON.stringify({ stage }) });
+  }
+
 
   // ── Submissions (FR-17 to FR-21) ─────────────────────────────────────
 
@@ -390,6 +420,25 @@ class ApiClient {
       method: 'PUT',
       body: JSON.stringify(preferences),
     });
+  }
+
+  // Platform Traffic Analytics (organizers + admins; aggregates only)
+  analyticsQuery(params = {}) {
+    const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+    const s = q.toString();
+    return s ? `?${s}` : '';
+  }
+
+  async getPlatformAnalytics(params) {
+    return this.request(`/analytics/platform${this.analyticsQuery(params)}`);
+  }
+
+  async getEventAnalytics(params) {
+    return this.request(`/analytics/events${this.analyticsQuery(params)}`);
+  }
+
+  async getEventAnalyticsDetail(hackathonId, params) {
+    return this.request(`/analytics/events/${encodeURIComponent(hackathonId)}${this.analyticsQuery(params)}`);
   }
 
   async checkHealth() {

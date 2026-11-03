@@ -3,6 +3,8 @@ import app from './src/app.js';
 import { closePool } from './src/config/db.js';
 import initDatabase from './src/database/initDb.js';
 import store from './src/database/store.js';
+import analyticsStore from './src/analytics/analyticsStore.js';
+import { ensureDemo } from './src/demo/demoScenario.js';
 
 const PORT = parseInt(process.env.PORT, 10) || 5050;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -12,8 +14,16 @@ const HOST = process.env.HOST || '0.0.0.0';
   try {
     await initDatabase();
     await store.loadFromDatabase();
+    await analyticsStore.loadFromDatabase();
   } catch (dbErr) {
     console.warn('⚠️ Non-fatal database bootstrap warning:', dbErr.message);
+  }
+  // Shared demonstration scenario (one event, one team) — created once, never reset on restart.
+  try {
+    const demo = ensureDemo();
+    if (demo) console.log(`🎬 Demo scenario ready: "${demo.ids.hackathonId}" at stage "${demo.stage}".`);
+  } catch (demoErr) {
+    console.warn('⚠️ Demo scenario setup skipped:', demoErr.message);
   }
 })();
 

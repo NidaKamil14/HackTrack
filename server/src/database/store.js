@@ -11,6 +11,13 @@ function toSqlDate(d) {
 
 const isTestMode = () => Boolean(process.env.NODE_TEST_CONTEXT || process.env.NODE_ENV === 'test');
 
+// Public shape of a user: never includes credentials or reset state.
+export function toSafeUser(user) {
+  if (!user) return user;
+  const { passwordHash: _h, password: _p, password_hash: _ph, resetToken: _rt, reset_token: _rt2, resetTokenExpiry: _re, ...safe } = user;
+  return safe;
+}
+
 function asyncDbWrite(queryFn) {
   if (isTestMode()) return Promise.resolve();
   try {
@@ -533,6 +540,8 @@ class HackTrackStore {
     this.resetTokens = new Map();
     // Email notifications: idempotency keys for notify() and the delivery outbox.
     this.notificationKeys = new Set();
+    // Screening decisions with reviewer notes (internal) and feedback (shown to the team).
+    this.screeningReviews = [];
     this.emailOutbox = [];
 
     this.init();
@@ -541,9 +550,10 @@ class HackTrackStore {
   init() {
     // Hash passwords for initial users
     const salt = bcrypt.genSaltSync(10);
-    this.users = RAW_DEMO_USERS.map((u) => ({
+    // Keep only the hash; the plaintext seed password never lives on a user object.
+    this.users = RAW_DEMO_USERS.map(({ password, ...u }) => ({
       ...u,
-      passwordHash: bcrypt.hashSync(u.password, salt),
+      passwordHash: bcrypt.hashSync(password, salt),
     }));
 
     this.hackathons = JSON.parse(JSON.stringify(INITIAL_HACKATHONS));
@@ -1130,6 +1140,45 @@ class HackTrackStore {
         console.warn('hackathon_registrations sync warning:', regErr.message);
       }
 
+      // 10. Screening reviews (decision history, team-visible feedback, internal notes)
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS screening_reviews (
+            id VARCHAR(50) NOT NULL,
+            team_id VARCHAR(50) NOT NULL,
+            hackathon_id VARCHAR(50) NOT NULL,
+            reviewer_id VARCHAR(50) NULL,
+            status VARCHAR(20) NOT NULL,
+            feedback TEXT NULL,
+            internal_note TEXT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            INDEX idx_screening_team (team_id),
+            INDEX idx_screening_hackathon (hackathon_id)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        const [dbReviews] = await pool.query('SELECT * FROM screening_reviews ORDER BY created_at ASC');
+        this.screeningReviews = dbReviews.map((r) => ({
+          id: r.id,
+          teamId: r.team_id,
+          hackathonId: r.hackathon_id,
+          reviewerId: r.reviewer_id,
+          status: r.status,
+          feedback: r.feedback || '',
+          internalNote: r.internal_note || '',
+          createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+        }));
+        for (const r of this.screeningReviews) {
+          const team = this.findTeamById(r.teamId);
+          if (team) {
+            team.screeningFeedback = r.feedback;
+            team.screenedAt = r.createdAt;
+          }
+        }
+      } catch (revErr) {
+        console.warn('screening_reviews sync warning:', revErr.message);
+      }
+
       console.log('✓ Store successfully synchronized with MySQL database.');
       return true;
     } catch (err) {
@@ -1140,19 +1189,19 @@ class HackTrackStore {
 
   // --- Users & Auth ---
   findUserByEmail(email) {
-    if (!email) return null;
+    if (!email || typeof email !== 'string') return null;
     const clean = email.trim().toLowerCase();
     return this.users.find((u) => u.email.toLowerCase() === clean) || null;
   }
 
   findUserById(id) {
-    if (!id) return null;
+    if (!id || typeof id !== 'string') return null;
     const clean = id.trim().toLowerCase();
     return this.users.find((u) => u.id === id || (u.email && u.email.toLowerCase() === clean)) || null;
   }
 
   getAllUsers(filters = {}) {
-    let list = this.users.map(({ passwordHash: _p, ...safeUser }) => safeUser);
+    let list = this.users.map(toSafeUser);
     if (filters.role && filters.role !== 'all') {
       list = list.filter((u) => u.role === filters.role);
     }
@@ -1262,7 +1311,7 @@ class HackTrackStore {
     }
   }
 
-  createUser({ email, password, fullName, role = 'student', university, memberId }) {
+  createUser({ email, password, fullName, role = 'student', university, memberId, id: fixedId }) {
     const cleanEmail = email.trim().toLowerCase();
     if (this.findUserByEmail(cleanEmail)) {
       throw new Error('An account with this email address already exists.');
@@ -1270,7 +1319,7 @@ class HackTrackStore {
 
     const salt = bcrypt.genSaltSync(10);
     const passwordHash = bcrypt.hashSync(password, salt);
-    const id = `usr-${crypto.randomBytes(4).toString('hex')}`;
+    const id = fixedId || `usr-${crypto.randomBytes(4).toString('hex')}`;
 
     const newUser = {
       id,
@@ -1310,7 +1359,7 @@ class HackTrackStore {
   }
 
   verifyPassword(user, password) {
-    if (!user || !user.passwordHash) return false;
+    if (!user || !user.passwordHash || typeof password !== 'string') return false;
     return bcrypt.compareSync(password, user.passwordHash);
   }
 
@@ -1319,6 +1368,8 @@ class HackTrackStore {
     if (!user) return null;
     const token = crypto.randomBytes(24).toString('hex');
     const expiresAt = Date.now() + 3600 * 1000; // 1 hour
+    // Only the newest link works: requesting a reset invalidates earlier ones.
+    for (const [t, rec] of this.resetTokens) if (rec.email === user.email) this.resetTokens.delete(t);
     this.resetTokens.set(token, { email: user.email, expiresAt });
 
     asyncDbWrite(() =>
@@ -1357,7 +1408,7 @@ class HackTrackStore {
 
   async updateUserRole(userId, newRole) {
     let user = this.findUserById(userId);
-    if (!user) {
+    if (!user && !isTestMode()) {
       try {
         const [rows] = await pool.query(
           'SELECT id, email, password_hash, full_name, role, role_category, university, member_id, is_active, created_at FROM users WHERE id = ? OR email = ? LIMIT 1',
@@ -1410,7 +1461,7 @@ class HackTrackStore {
    */
   async setUserActiveStatus(targetId, isActive, currentAdminId = null) {
     let user = this.findUserById(targetId);
-    if (!user) {
+    if (!user && !isTestMode()) {
       try {
         const [rows] = await pool.query(
           'SELECT id, email, password_hash, full_name, role, role_category, university, member_id, is_active, created_at FROM users WHERE id = ? OR email = ? LIMIT 1',
@@ -1519,9 +1570,6 @@ class HackTrackStore {
 
     // 2. Known standard platform aliases
     const aliases = {
-      'devpulse-2026': 'hack-001',
-      'devpulse': 'hack-001',
-      'devpulse-sprint': 'hack-001',
       'pccoe-innovatex-2026': 'hack-002',
       'innovatex-2026': 'hack-002',
       'innovatex': 'hack-002',
@@ -1531,8 +1579,6 @@ class HackTrackStore {
       'shesolves-2026': 'hack-shesolves-001',
       'shesolves2026': 'hack-shesolves-001',
       'hack-shesolves': 'hack-shesolves-001',
-      'ai-catalyst-2026': 'hack-001',
-      'smart-campus-2026': 'hack-002',
     };
     if (aliases[cleanId]) {
       const target = this.hackathons.find((h) => h.id === aliases[cleanId]);
@@ -1541,7 +1587,7 @@ class HackTrackStore {
 
     // 3. Exact title or title slug match
     const titleMatch = this.hackathons.find((h) => {
-      const hTitle = (h.title || '').toLowerCase();
+      const hTitle = String(h.title || '').toLowerCase();
       const hSlug = hTitle.replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
       return hTitle === cleanId || hSlug === cleanId;
     });
@@ -1550,7 +1596,7 @@ class HackTrackStore {
     // 4. Normalized alphanumeric match (stripping all hyphens, spaces, symbols)
     const normMatch = this.hackathons.find((h) => {
       const hNormId = h.id.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const hNormTitle = (h.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const hNormTitle = String(h.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       return hNormId === alphaNumericOnly || hNormTitle === alphaNumericOnly;
     });
     if (normMatch) return normMatch;
@@ -1559,7 +1605,7 @@ class HackTrackStore {
     if (alphaNumericOnly.length >= 4) {
       const containMatch = this.hackathons.find((h) => {
         const hNormId = h.id.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const hNormTitle = (h.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const hNormTitle = String(h.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
         return (
           hNormId.includes(alphaNumericOnly) ||
           alphaNumericOnly.includes(hNormId) ||
@@ -1785,22 +1831,54 @@ class HackTrackStore {
           newHackathon.createdBy || 'usr-admin-006',
           toSqlDate(newHackathon.createdAt) || toSqlDate(new Date()),
         ]
-      )
+      ).then(() => this.persistCriteria(newHackathon))
     );
 
     return newHackathon;
+  }
+
+  /** Saves a hackathon's rubric to MySQL (evaluations reference these rows). */
+  persistCriteria(hackathon) {
+    if (isTestMode() || !Array.isArray(hackathon?.criteria)) return Promise.resolve();
+    return (async () => {
+      const ids = hackathon.criteria.map((c) => c.id);
+      let order = 0;
+      for (const c of hackathon.criteria) {
+        await pool.query(
+          `INSERT INTO evaluation_criteria (id, hackathon_id, name, description, max_score, weightage, display_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), max_score = VALUES(max_score), weightage = VALUES(weightage), display_order = VALUES(display_order)`,
+          [c.id, hackathon.id, c.name, c.description || '', c.maxScore || 25, c.weightage || 1.0, order++]
+        );
+      }
+      if (ids.length) {
+        await pool.query('DELETE FROM evaluation_criteria WHERE hackathon_id = ? AND id NOT IN (?)', [hackathon.id, ids]).catch(() => {});
+      }
+    })().catch((err) => console.warn('MySQL criteria write error:', err.message));
   }
 
   updateHackathon(id, updates) {
     const hackathon = this.getHackathonById(id);
     if (!hackathon) throw new Error('Hackathon not found');
     Object.assign(hackathon, updates, { updatedAt: new Date().toISOString() });
+    if (updates.criteria) this.persistCriteria(hackathon);
 
     // Persist to MySQL
     asyncDbWrite(() =>
       pool.query(
-        `UPDATE hackathons SET status = ?, title = ?, tag_line = ?, description = ? WHERE id = ?`,
-        [hackathon.status, hackathon.title, hackathon.tagLine || null, hackathon.description || null, hackathon.id]
+        `UPDATE hackathons SET status = ?, title = ?, tag_line = ?, description = ?, min_team_size = ?, max_team_size = ?,
+           start_date = ?, end_date = ?, registration_deadline = ?, submission_deadline = ?, evaluation_deadline = ?,
+           has_screening_round = ?, screening_rounds_count = ?, has_mentorship = ?, evaluation_workflow = ?,
+           results_published = ?, results_published_at = ? WHERE id = ?`,
+        [
+          hackathon.status, hackathon.title, hackathon.tagLine || null, hackathon.description || null,
+          hackathon.minTeamSize || 1, hackathon.maxTeamSize || 4,
+          toSqlDate(hackathon.startDate), toSqlDate(hackathon.endDate), toSqlDate(hackathon.registrationDeadline),
+          toSqlDate(hackathon.submissionDeadline), toSqlDate(hackathon.evaluationDeadline),
+          hackathon.hasScreeningRound ? 1 : 0, hackathon.screeningRoundsCount || 1, hackathon.hasMentorship ? 1 : 0,
+          hackathon.evaluationWorkflow || 'direct_judging', hackathon.resultsPublished ? 1 : 0, toSqlDate(hackathon.resultsPublishedAt),
+          hackathon.id,
+        ]
       )
     );
     return hackathon;
@@ -1830,7 +1908,8 @@ class HackTrackStore {
       const isWinner = rankEntry && rankEntry.rank === 1;
       const isRunnerUp = rankEntry && (rankEntry.rank === 2 || rankEntry.rank === 3);
 
-      const members = this.getTeamMembers(team.id);
+      // Certificates go to accepted members only (not pending or rejected requests).
+      const members = this.getTeamMembers(team.id).filter((m) => m.status === 'accepted');
       members.forEach((m) => {
         const user = this.findUserById(m.userId);
         if (!user) return;
@@ -1901,7 +1980,7 @@ class HackTrackStore {
     return this.teams.find((t) => t.teamCode.toUpperCase() === clean) || null;
   }
 
-  createTeam({ hackathonId, leaderId, teamName, track }) {
+  createTeam({ hackathonId, leaderId, teamName, track, id: fixedId }) {
     const hackathon = this.getHackathonById(hackathonId);
     if (!hackathon) throw new Error('Hackathon not found');
 
@@ -1947,7 +2026,7 @@ class HackTrackStore {
       teamCode = `HT-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     } while (this.findTeamByCode(teamCode));
 
-    const id = `team-${crypto.randomBytes(4).toString('hex')}`;
+    const id = fixedId || `team-${crypto.randomBytes(4).toString('hex')}`;
     const newTeam = {
       id,
       hackathonId: canonicalHackathonId,
@@ -2091,6 +2170,8 @@ class HackTrackStore {
 
     const memberRecord = this.teamMembers.find((m) => m.id === requestId && m.teamId === teamId);
     if (!memberRecord) throw new Error('Join request not found.');
+    // Only pending requests can be decided; accepted members aren't "rejected" through this.
+    if (memberRecord.status !== 'pending') throw new Error('This join request has already been decided.');
 
     if (action === 'accept') {
       if (team.rosterLocked) {
@@ -2140,11 +2221,166 @@ class HackTrackStore {
     if (team.leaderId !== leaderId) {
       throw new Error('Only the Team Leader can lock or unlock the roster (BR-3).');
     }
+    if (team.rosterLocked !== Boolean(locked)) team.rosterLockChangedAt = new Date().toISOString();
     team.rosterLocked = Boolean(locked);
     asyncDbWrite(() =>
       pool.query('UPDATE teams SET roster_locked = ? WHERE id = ?', [team.rosterLocked ? 1 : 0, teamId])
     );
     return team;
+  }
+
+  /**
+   * Screening decision for a team. `feedback` is shown to the team;
+   * `internalNote` is visible only to the committee, organizers and admins.
+   * Shortlisting assigns the team's submission to every judge bound to the
+   * hackathon, so it appears in their workspace automatically.
+   */
+  recordScreeningDecision(teamId, status, { reviewerId = null, feedback = '', internalNote = '' } = {}) {
+    const team = this.updateTeamScreeningStatus(teamId, status);
+    if (!team) return null;
+    team.screeningFeedback = feedback || '';
+    team.screenedAt = new Date().toISOString();
+    const review = {
+      id: `scr-${crypto.randomBytes(4).toString('hex')}`,
+      teamId: team.id,
+      hackathonId: team.hackathonId,
+      reviewerId,
+      status,
+      feedback: feedback || '',
+      internalNote: internalNote || '',
+      createdAt: team.screenedAt,
+    };
+    this.screeningReviews.push(review);
+    asyncDbWrite(() =>
+      pool.query(
+        `INSERT INTO screening_reviews (id, team_id, hackathon_id, reviewer_id, status, feedback, internal_note, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [review.id, review.teamId, review.hackathonId, review.reviewerId, review.status, review.feedback, review.internalNote, toSqlDate(review.createdAt)]
+      )
+    );
+    if (status === 'shortlisted') {
+      const submission = this.getSubmissionByTeamId(team.id);
+      if (submission) {
+        this.users
+          .filter((u) => u.role === 'judge' && u.isActive !== false && Array.isArray(u.assignedHackathonIds) && u.assignedHackathonIds.includes(team.hackathonId))
+          .forEach((judge) => {
+            try {
+              this.assignJudgeToSubmission({ hackathonId: team.hackathonId, judgeId: judge.id, submissionId: submission.id });
+            } catch {
+              /* already assigned or not eligible */
+            }
+          });
+      }
+    }
+    return { team, review };
+  }
+
+  getScreeningReviews(teamId) {
+    return this.screeningReviews.filter((r) => r.teamId === teamId);
+  }
+
+  /** Judging progress for a team without any scores (safe before publication). */
+  getJudgingProgress(teamId) {
+    const submission = this.getSubmissionByTeamId(teamId);
+    if (!submission) return { status: 'no_submission', judgesAssigned: 0, judgesCompleted: 0 };
+    const assigned = new Set(this.judgeAssignments.filter((a) => a.submissionId === submission.id).map((a) => a.judgeId));
+    const completed = new Set(this.evaluations.filter((e) => e.submissionId === submission.id && e.isLocked).map((e) => e.judgeId));
+    const done = [...assigned].filter((j) => completed.has(j)).length;
+    let status = 'not_started';
+    if (!assigned.size) status = 'awaiting_assignment';
+    else if (done === assigned.size) status = 'complete';
+    else if (done > 0) status = 'in_progress';
+    return { status, judgesAssigned: assigned.size, judgesCompleted: done };
+  }
+
+  /** A team's own result, only once results are published (BR-9). */
+  getTeamResults(teamId) {
+    const team = this.findTeamById(teamId);
+    if (!team) return null;
+    const hackathon = this.getHackathonById(team.hackathonId);
+    if (!hackathon?.resultsPublished) return null;
+    const entry = this.calculateLeaderboard(hackathon.id).find((l) => l.teamId === team.id);
+    const submission = this.getSubmissionByTeamId(team.id);
+    const evals = submission ? this.evaluations.filter((e) => e.submissionId === submission.id) : [];
+    const criteria = (hackathon.criteria || []).map((c) => {
+      const scores = evals.filter((e) => e.criterionId === c.id).map((e) => Number(e.score));
+      return {
+        id: c.id,
+        name: c.name,
+        maxScore: Number(c.maxScore) || 0,
+        averageScore: scores.length ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : null,
+      };
+    });
+    const remarks = [...new Set(evals.map((e) => e.remarks).filter(Boolean))];
+    return {
+      teamId: team.id,
+      hackathonId: hackathon.id,
+      rank: entry?.rank ?? null,
+      teamsRanked: this.calculateLeaderboard(hackathon.id).length,
+      totalScore: entry?.totalScore ?? 0,
+      maxTotal: (hackathon.criteria || []).reduce((s, c) => s + (Number(c.maxScore) || 0) * (Number(c.weightage) || 1), 0),
+      judgeCount: entry?.judgeCount ?? 0,
+      criteria,
+      feedback: remarks,
+      publishedAt: hackathon.resultsPublishedAt,
+    };
+  }
+
+  /** Lifecycle counts for an event (organizer/admin overview). */
+  getHackathonProgress(hackathonId) {
+    const hackathon = this.getHackathonById(hackathonId);
+    if (!hackathon) return null;
+    const teams = this.getTeamsByHackathon(hackathon.id);
+    const subs = this.getSubmissionsByHackathon(hackathon.id);
+    const screening = { pending: 0, shortlisted: 0, rejected: 0 };
+    teams.forEach((t) => { if (subs.some((s) => s.teamId === t.id)) screening[t.screeningStatus || 'pending'] = (screening[t.screeningStatus || 'pending'] || 0) + 1; });
+    const judging = { awaiting_assignment: 0, not_started: 0, in_progress: 0, complete: 0 };
+    teams.filter((t) => t.screeningStatus === 'shortlisted').forEach((t) => {
+      const p = this.getJudgingProgress(t.id);
+      if (judging[p.status] !== undefined) judging[p.status] += 1;
+    });
+    return {
+      hackathonId: hackathon.id,
+      title: hackathon.title,
+      status: hackathon.status,
+      registrations: this.registrations.filter((r) => r.hackathonId === hackathon.id).length,
+      teams: teams.length,
+      participants: new Set(this.teamMembers.filter((m) => m.hackathonId === hackathon.id && m.status === 'accepted').map((m) => m.userId)).size,
+      submissions: subs.length,
+      lockedSubmissions: subs.filter((s) => s.isLocked).length,
+      screening,
+      judging,
+      resultsPublished: Boolean(hackathon.resultsPublished),
+      resultsPublishedAt: hackathon.resultsPublishedAt || null,
+      certificates: this.certificates.filter((c) => c.hackathonId === hackathon.id).length,
+    };
+  }
+
+  /** Removes every activity record of one hackathon (demo reset only). */
+  purgeHackathonActivity(hackathonId, userIds = []) {
+    const teamIds = new Set(this.teams.filter((t) => t.hackathonId === hackathonId).map((t) => t.id));
+    const subIds = new Set(this.submissions.filter((s) => s.hackathonId === hackathonId).map((s) => s.id));
+    this.teams = this.teams.filter((t) => t.hackathonId !== hackathonId);
+    this.teamMembers = this.teamMembers.filter((m) => m.hackathonId !== hackathonId && !teamIds.has(m.teamId));
+    this.submissions = this.submissions.filter((s) => s.hackathonId !== hackathonId);
+    this.judgeAssignments = this.judgeAssignments.filter((a) => !subIds.has(a.submissionId));
+    this.evaluations = this.evaluations.filter((e) => !subIds.has(e.submissionId));
+    this.certificates = this.certificates.filter((c) => c.hackathonId !== hackathonId);
+    this.registrations = this.registrations.filter((r) => r.hackathonId !== hackathonId);
+    this.screeningReviews = this.screeningReviews.filter((r) => r.hackathonId !== hackathonId);
+    const users = new Set(userIds);
+    this.notifications = this.notifications.filter((n) => !users.has(n.userId));
+    for (const key of [...this.notificationKeys]) if ([...users].some((u) => key.endsWith(`:${u}`))) this.notificationKeys.delete(key);
+    asyncDbWrite(async () => {
+      for (const table of ['evaluations', 'judge_assignments', 'certificates', 'submissions', 'team_members', 'teams', 'hackathon_registrations', 'screening_reviews']) {
+        try {
+          await pool.query(`DELETE FROM ${table} WHERE hackathon_id = ?`, [hackathonId]);
+        } catch {
+          /* table may not exist on older databases */
+        }
+      }
+      if (userIds.length) await pool.query('DELETE FROM notifications WHERE user_id IN (?)', [userIds]).catch(() => {});
+    });
   }
 
   updateTeamScreeningStatus(teamId, status) {
@@ -2188,7 +2424,7 @@ class HackTrackStore {
     return this.submissions.find((s) => s.teamId === teamId) || null;
   }
 
-  createOrUpdateSubmission({ teamId, submittedBy, projectTitle, abstract, track, repoUrl, demoUrl, presentationUrl, fileUrl }) {
+  createOrUpdateSubmission({ teamId, submittedBy, projectTitle, abstract, track, repoUrl, demoUrl, presentationUrl, fileUrl, id: fixedId }) {
     const team = this.findTeamById(teamId);
     if (!team) throw new Error('Team not found.');
 
@@ -2224,7 +2460,7 @@ class HackTrackStore {
       });
     } else {
       submission = {
-        id: `sub-${crypto.randomBytes(4).toString('hex')}`,
+        id: fixedId || `sub-${crypto.randomBytes(4).toString('hex')}`,
         hackathonId: team.hackathonId,
         teamId,
         submittedBy,
@@ -2289,13 +2525,22 @@ class HackTrackStore {
 
     const submission = this.getSubmissionById(submissionId);
     if (!submission) throw new Error('Submission not found.');
+    // The submission decides the hackathon; a mismatched body id can't move it across events.
+    const hackathon = this.getHackathonById(hackathonId);
+    if (!hackathon || hackathon.id !== submission.hackathonId) {
+      throw new Error('This submission does not belong to the specified hackathon.');
+    }
+    // BR-5: judges review an event only after binding to it with its access code.
+    if (!Array.isArray(judge.assignedHackathonIds) || !judge.assignedHackathonIds.includes(submission.hackathonId)) {
+      throw new Error('This judge has not joined this hackathon with its judge access code yet.');
+    }
 
     const existing = this.judgeAssignments.find((ja) => ja.judgeId === judgeId && ja.submissionId === submissionId);
     if (existing) return existing;
 
     const assignment = {
       id: `ja-${crypto.randomBytes(4).toString('hex')}`,
-      hackathonId,
+      hackathonId: submission.hackathonId,
       judgeId,
       submissionId,
       assignedAt: new Date().toISOString(),
@@ -2345,9 +2590,38 @@ class HackTrackStore {
       throw new Error('Judge is not assigned to this project (FR-25, BR-7).');
     }
 
-    const hackathon = this.getHackathonById(hackathonId);
+    // The hackathon (deadline, rubric) always comes from the submission itself.
+    const submission = this.getSubmissionById(submissionId);
+    if (!submission) throw new Error('Submission not found.');
+    const hackathon = this.getHackathonById(submission.hackathonId);
+    if (hackathonId && this.getHackathonById(hackathonId)?.id !== submission.hackathonId) {
+      throw new Error('This submission does not belong to the specified hackathon.');
+    }
+    hackathonId = submission.hackathonId;
     if (hackathon?.evaluationDeadline && new Date() > new Date(hackathon.evaluationDeadline)) {
       throw new Error('Evaluation deadline has passed. Scores are locked (FR-27, BR-8).');
+    }
+
+    // Validate every item before writing anything (no partial evaluations).
+    const criteria = Array.isArray(hackathon?.criteria) ? hackathon.criteria : [];
+    const seen = new Set();
+    for (const s of scores) {
+      const criterionId = s && (s.criterionId || s.criteriaId || s.rubricId || s.id);
+      if (!criterionId) throw new Error('criterionId is required for each evaluation score item.');
+      const criterion = criteria.find((c) => c.id === criterionId);
+      if (criteria.length && !criterion) throw new Error(`Unknown criterion "${criterionId}" for this hackathon.`);
+      if (seen.has(criterionId)) throw new Error(`Criterion "${criterionId}" is scored more than once.`);
+      seen.add(criterionId);
+      const max = Number(criterion?.maxScore) || 100;
+      const value = Number(s.score);
+      if (s.score === null || s.score === '' || !Number.isFinite(value) || value < 0 || value > max) {
+        throw new Error(`Score for "${criterion?.name || criterionId}" must be a number from 0 to ${max}.`);
+      }
+      const locked = this.evaluations.find((e) => e.submissionId === submissionId && e.judgeId === judgeId && e.criterionId === criterionId && e.isLocked);
+      if (locked) throw new Error('Evaluation has already been finalized and locked from further edits (FR-27).');
+    }
+    if (typeof remarks !== 'undefined' && remarks !== null && (typeof remarks !== 'string' || remarks.length > 5000)) {
+      throw new Error('remarks must be text of at most 5000 characters.');
     }
 
     // Record criteria scores
@@ -2355,9 +2629,6 @@ class HackTrackStore {
     scores.forEach((s) => {
       const criterionId = s.criterionId || s.criteriaId || s.rubricId || s.id;
       const score = s.score;
-      if (!criterionId) {
-        throw new Error('criterionId is required for each evaluation score item.');
-      }
 
       let evalRecord = this.evaluations.find(
         (e) => e.submissionId === submissionId && e.judgeId === judgeId && e.criterionId === criterionId
@@ -2420,9 +2691,23 @@ class HackTrackStore {
         };
       }
 
-      const teamEvals = this.evaluations.filter((e) => e.submissionId === submission.id);
-      const totalScore = teamEvals.reduce((sum, e) => sum + Number(e.score), 0);
+      // Weighted rubric total per judge, averaged across judges, so the number
+      // of judges never changes a team's score (FR-28).
+      const hackathon = this.getHackathonById(hackathonId);
+      const weightOf = (criterionId) => {
+        const c = (hackathon?.criteria || []).find((x) => x.id === criterionId);
+        const w = Number(c?.weightage);
+        return Number.isFinite(w) && w > 0 ? w : 1;
+      };
+      const teamEvals = this.evaluations.filter((e) => e.submissionId === submission.id && Number.isFinite(Number(e.score)));
+      const perJudge = new Map();
+      for (const e of teamEvals) {
+        perJudge.set(e.judgeId, (perJudge.get(e.judgeId) || 0) + Number(e.score) * weightOf(e.criterionId));
+      }
+      const judgeTotals = [...perJudge.values()];
+      const totalScore = judgeTotals.length ? Math.round((judgeTotals.reduce((a, b) => a + b, 0) / judgeTotals.length) * 100) / 100 : 0;
       return {
+        judgeCount: judgeTotals.length,
         teamId: team.id,
         teamName: team.teamName,
         submissionId: submission.id,
@@ -2696,7 +2981,7 @@ class HackTrackStore {
     return [...userIds]
       .map((id) => this.findUserById(id))
       .filter(Boolean)
-      .map(({ passwordHash: _p, ...safe }) => safe);
+      .map(toSafeUser);
   }
 }
 

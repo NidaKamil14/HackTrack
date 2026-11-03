@@ -296,3 +296,42 @@ CREATE TABLE IF NOT EXISTS `hackathon_registrations` (
   CONSTRAINT `fk_reg_hackathon` FOREIGN KEY (`hackathon_id`) REFERENCES `hackathons` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_reg_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------------------------
+-- 14. Analytics Events (first-party, anonymous page views)
+-- No IP addresses, user agents, user ids or full URLs are stored. visitor_hash
+-- and session_hash are HMACs of random browser identifiers (consent only).
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `analytics_events` (
+  `id` VARCHAR(40) NOT NULL,
+  `event_type` VARCHAR(32) NOT NULL,
+  `page` VARCHAR(64) NOT NULL,
+  `hackathon_id` VARCHAR(50) NULL,
+  `visitor_hash` CHAR(32) NULL,
+  `session_hash` CHAR(32) NULL,
+  `referrer_category` VARCHAR(16) NOT NULL DEFAULT 'direct',
+  `device_category` VARCHAR(16) NOT NULL DEFAULT 'desktop',
+  `occurred_at` DATETIME(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  INDEX `idx_analytics_time` (`occurred_at`),
+  INDEX `idx_analytics_hackathon_time` (`hackathon_id`, `occurred_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------------------------
+-- 15. Screening Reviews (decision history)
+-- feedback is shown to the team; internal_note only to the committee,
+-- the event's organizers and admins.
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `screening_reviews` (
+  `id` VARCHAR(50) NOT NULL,
+  `team_id` VARCHAR(50) NOT NULL,
+  `hackathon_id` VARCHAR(50) NOT NULL,
+  `reviewer_id` VARCHAR(50) NULL,
+  `status` VARCHAR(20) NOT NULL,
+  `feedback` TEXT NULL,
+  `internal_note` TEXT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  INDEX `idx_screening_team` (`team_id`),
+  INDEX `idx_screening_hackathon` (`hackathon_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -6,6 +6,7 @@ import ThemeToggle from '../ThemeToggle';
 import EmailPreferencesDialog from '../notifications/EmailPreferencesDialog';
 import NotificationCenterDialog from '../notifications/NotificationCenterDialog';
 import { getUnreadNotificationCount } from '../../utils/notificationService';
+import api from '../../utils/api';
 import { AppBackdrop, Badge, Button, Logo, PageHeaderVariantContext } from '../ui';
 
 export default function DashboardLayout({
@@ -48,6 +49,30 @@ export default function DashboardLayout({
     return () => window.removeEventListener('hacktrack_notifications_updated', handleUpdate);
   }, [user]);
 
+  // Unread notifications stored on the server (other users' actions, emails).
+  const [serverUnread, setServerUnread] = useState(0);
+  useEffect(() => {
+    if (!user || !api.getToken()) return undefined;
+    let cancelled = false;
+    const load = () =>
+      api.getNotifications()
+        .then((res) => {
+          if (!cancelled) setServerUnread((res?.notifications || []).filter((n) => !n.isRead).length);
+        })
+        .catch(() => {});
+    load();
+    window.addEventListener('hacktrack_notifications_updated', load);
+    window.addEventListener('focus', load);
+    const timer = setInterval(load, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      window.removeEventListener('hacktrack_notifications_updated', load);
+      window.removeEventListener('focus', load);
+    };
+  }, [user]);
+  const totalUnread = unreadCount + serverUnread;
+
   const handleLogout = () => {
     if (user) {
       sessionStorage.removeItem(`ht_login_toast_${user.id || user.email}`);
@@ -86,17 +111,17 @@ export default function DashboardLayout({
               <button
                 type="button"
                 onClick={() => setNotifCenterOpen(true)}
-                aria-label={`Notification center${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
+                aria-label={`Notification center${totalUnread > 0 ? `, ${totalUnread} unread` : ''}`}
                 title="Notifications"
                 className="relative flex h-10 w-10 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-raised hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent"
               >
                 <Bell className="h-5 w-5" aria-hidden="true" />
-                {unreadCount > 0 && (
+                {totalUnread > 0 && (
                   <span
                     aria-hidden="true"
                     className="absolute top-1 right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-fg shadow-sm ring-2 ring-canvas pointer-events-none"
                   >
-                    {unreadCount > 99 ? '99+' : unreadCount}
+                    {totalUnread > 99 ? '99+' : totalUnread}
                   </span>
                 )}
               </button>

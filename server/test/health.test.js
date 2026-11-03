@@ -64,20 +64,23 @@ describe('HackTrack Backend — Milestone 1 Tests', () => {
 
   it('2. Health check GET /api/v1/health returns structured status and sanitized services', async () => {
     const res = await makeRequest('/api/v1/health');
-    // Status will be 200 (if MySQL is running & authenticated) or 503 (if unauthenticated/unreachable)
-    assert.ok(res.status === 200 || res.status === 503);
+    // The API answers 200 whenever it serves requests; the database block says
+    // whether MySQL is connected or the in-memory store is in use.
+    assert.equal(res.status, 200);
     assert.ok(res.body.status === 'healthy' || res.body.status === 'degraded');
     assert.ok(res.body.services);
     assert.equal(res.body.services.api.status, 'online');
-    assert.equal(res.body.services.database.dialect, 'mysql');
+    assert.ok(['connected', 'in-memory'].includes(res.body.services.database.status));
+    assert.equal(typeof res.body.services.database.persistent, 'boolean');
   });
 
   it('3. Security verification: database password is never exposed in health check or config', async () => {
     const res = await makeRequest('/api/v1/health');
 
-    // Ensure no password field exists
-    assert.equal(res.body.services.database.config.password, undefined);
-    assert.equal('password' in res.body.services.database.config, false);
+    // No connection details at all on the public endpoint (host, user, password, versions)
+    assert.equal('config' in res.body.services.database, false);
+    assert.ok(!JSON.stringify(res.body).includes('password'));
+    assert.equal(res.body.services.api.nodeVersion, undefined);
 
     // Also test getSanitizedConfig directly
     const sanitized = getSanitizedConfig();

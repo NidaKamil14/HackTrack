@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Link, useOutletContext } from 'react-router-dom';
 import {
   ArrowRight, Check, ClipboardCheck, Compass, Crown, Gavel, KeyRound,
@@ -11,6 +11,7 @@ import HeroArtwork from '../components/art/HeroArtwork';
 import ParticleField from '../components/art/ParticleField';
 import { Button, Input, cn } from '../components/ui';
 import { getStoredHackathons } from '../utils/hackathonService';
+import { fetchPublicHackathons, mergeHackathons } from '../utils/serverHackathons';
 import { SYSTEM_ROLES } from '../data/roles';
 
 // The competition lifecycle HackTrack enforces, and who acts at each stage.
@@ -48,7 +49,16 @@ export default function Home({
   const setTeamCodeInput = propSetTeamCodeInput || outletContext.setTeamCodeInput || (() => {});
 
   const [heroInput, setHeroInput] = useState("");
-  const [featured] = useState(() => getStoredHackathons().slice(0, 3));
+  const [serverHackathons, setServerHackathons] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchPublicHackathons().then((list) => { if (!cancelled) setServerHackathons(list); });
+    return () => { cancelled = true; };
+  }, []);
+  const featured = useMemo(
+    () => mergeHackathons(getStoredHackathons(), serverHackathons).filter((h) => h.status !== 'draft').slice(0, 3),
+    [serverHackathons]
+  );
 
   const handleHeroSubmit = (e) => {
     e.preventDefault();

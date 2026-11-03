@@ -4,7 +4,9 @@
  * `renderEmail` wraps it in a responsive, table-based HTML layout with inline
  * styles (what email clients reliably support) plus a plain-text alternative.
  * All dynamic values are HTML-escaped. Templates never include passwords,
- * tokens, team invite codes or access codes.
+ * team invite codes or access codes. The one exception to "no tokens" is the
+ * password-reset email, whose single-use, 1-hour reset link is the delivery
+ * mechanism itself (it appears only in that email's button/link).
  */
 
 export function escapeHtml(value) {
@@ -38,6 +40,45 @@ export const TEMPLATES = {
       'You can now browse active hackathons, create or join competition teams, and collaborate on project submissions.',
     ],
     cta: { label: 'Go to your dashboard', path: `/dashboard/${user.role === 'leader' ? 'leader' : user.role === 'student' ? 'student' : user.role}` },
+  }),
+
+  registration_confirmed: ({ hackathon }) => ({
+    subject: `You’re registered for ${hackathon.title}`,
+    heading: 'Registration confirmed',
+    intro: `You’re registered for ${hackathon.title}.`,
+    body: ['Next, create a team as a team leader or ask a leader for their invite code to join one. Deadlines are shown on the event page.'],
+    cta: { label: 'View the hackathon', path: `/hackathons/${encodeURIComponent(hackathon.id)}` },
+  }),
+
+  roster_locked: ({ team, hackathon, locked }) => ({
+    subject: locked ? `${team.teamName}’s roster is now locked` : `${team.teamName}’s roster is open again`,
+    heading: locked ? 'Team roster locked' : 'Team roster unlocked',
+    intro: locked
+      ? `Your team leader locked the roster of ${team.teamName} for ${hackathon.title}.`
+      : `Your team leader reopened the roster of ${team.teamName} for ${hackathon.title}.`,
+    body: [locked ? 'No new members can be accepted while the roster is locked.' : 'The leader can accept new join requests again.'],
+    cta: { label: 'Open your team', path: '/dashboard/student' },
+  }),
+
+  screening_decision: ({ team, hackathon, status }) => ({
+    subject: status === 'shortlisted' ? `${team.teamName} is through to judging` : status === 'rejected' ? `Screening result for ${team.teamName}` : `${team.teamName} is back in screening`,
+    heading: status === 'shortlisted' ? 'Shortlisted for judging' : status === 'rejected' ? 'Screening result' : 'Screening reopened',
+    intro:
+      status === 'shortlisted'
+        ? `Good news — the screening committee shortlisted ${team.teamName} for ${hackathon.title}.`
+        : status === 'rejected'
+          ? `The screening committee did not shortlist ${team.teamName} for ${hackathon.title}.`
+          : `${team.teamName}’s submission for ${hackathon.title} is being screened again.`,
+    body: [status === 'shortlisted' ? 'Your project will now be scored by the judges. Results are shared when the organizers publish them.' : 'You can see the current status on your dashboard.'],
+    cta: { label: 'Open your dashboard', path: '/dashboard/student' },
+  }),
+
+  role_changed: ({ user, previousRole }) => ({
+    subject: 'Your HackTrack role was changed',
+    heading: 'Your account role changed',
+    intro: `A platform admin changed your role from ${previousRole} to ${user.role}.`,
+    body: ['Your dashboard and permissions now follow the new role. If you didn’t expect this, contact your HackTrack administrator.'],
+    cta: { label: 'Sign in', path: '/login' },
   }),
 
   password_reset: ({ user, resetUrl, token }) => ({
@@ -229,8 +270,8 @@ export function renderEmail(type, data, { frontendUrl, unsubscribeUrl, categoryL
       <tr><td style="padding:18px 28px 24px;border-top:1px solid ${C.line};">
         <p style="margin:0 0 6px;font:12px/1.6 ${FONT};color:${C.subtle};">${escapeHtml(reason)}</p>
         <p style="margin:0;font:12px/1.6 ${FONT};color:${C.subtle};">
-          <a href="${escapeHtml(unsubscribeUrl)}" style="color:${C.subtle};">Unsubscribe from ${escapeHtml(categoryLabel.toLowerCase())} emails</a>
-          &nbsp;·&nbsp;
+          ${unsubscribeUrl ? `<a href="${escapeHtml(unsubscribeUrl)}" style="color:${C.subtle};">Unsubscribe from ${escapeHtml(categoryLabel.toLowerCase())} emails</a>
+          &nbsp;·&nbsp;` : ''}
           <a href="${escapeHtml(`${frontendUrl}/login`)}" style="color:${C.subtle};">Manage email preferences</a>
         </p>
       </td></tr>

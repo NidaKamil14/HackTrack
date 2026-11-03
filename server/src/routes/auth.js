@@ -1,6 +1,7 @@
 import express from 'express';
-import store from '../database/store.js';
+import store, { toSafeUser } from '../database/store.js';
 import { signToken, requireAuth } from '../middleware/auth.js';
+import { loginLimiter, registerLimiter, forgotIpLimiter, forgotEmailLimiter, resetLimiter, redeemLimiter } from '../middleware/rateLimit.js';
 import { notifyAccessCodeRedeemed, notifyUserRegistered, notifyPasswordReset } from '../notifications/notifier.js';
 
 const router = express.Router();
@@ -26,16 +27,27 @@ function getRoleDashboardPath(role) {
   }
 }
 
+// Roles anyone may choose when signing up. Judges, screening, mentors and
+// admins are created by an admin (POST /admin/users) and bound to events via
+// access codes; a public sign-up can never grant them.
+const SELF_SERVICE_ROLES = ['student', 'leader', 'organizer'];
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
+const isStr = (v, max = 500) => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
+
 // FR-1: Register with unique email address
-router.post('/register', (req, res) => {
+router.post('/register', registerLimiter, (req, res) => {
   const { email, password, fullName, role, university, memberId } = req.body || {};
 
-  if (!email || !password || !fullName) {
+  if (!isStr(email, 320) || !isStr(password, 200) || !isStr(fullName, 120)) {
     return res.status(400).json({
       status: 400,
       error: 'Bad Request',
       message: 'Email, password, and fullName are mandatory fields.',
     });
+  }
+
+  if (!EMAIL_RE.test(email.trim())) {
+    return res.status(400).json({ status: 400, error: 'Bad Request', message: 'Please provide a valid email address.' });
   }
 
   if (password.length < 6) {
@@ -46,14 +58,23 @@ router.post('/register', (req, res) => {
     });
   }
 
+  const requestedRole = role === undefined || role === null || role === '' ? 'student' : role;
+  if (!SELF_SERVICE_ROLES.includes(requestedRole)) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: `Accounts can be created as ${SELF_SERVICE_ROLES.join(', ')}. Judges, screening members, mentors and admins are added by a platform admin.`,
+    });
+  }
+
   try {
     const user = store.createUser({
       email,
       password,
       fullName,
-      role: role || 'student',
-      university,
-      memberId,
+      role: requestedRole,
+      university: typeof university === 'string' ? university.slice(0, 200) : undefined,
+      memberId: typeof memberId === 'string' ? memberId.slice(0, 50) : undefined,
     });
 
     const token = signToken(user);
@@ -67,7 +88,7 @@ router.post('/register', (req, res) => {
       message: 'User registered successfully (FR-1).',
       token,
       redirectPath,
-      user,
+      user: toSafeUser(user),
     });
   } catch (err) {
     return res.status(409).json({
@@ -80,10 +101,10 @@ router.post('/register', (req, res) => {
 
 // FR-2: Authenticate registered user against stored credentials
 // FR-3: Redirect to role-specific dashboard
-router.post('/login', (req, res) => {
+router.post('/login', loginLimiter, (req, res) => {
   const { email, password } = req.body || {};
 
-  if (!email || !password) {
+  if (!isStr(email, 320) || !isStr(password, 200)) {
     return res.status(400).json({
       status: 400,
       error: 'Bad Request',
@@ -109,7 +130,7 @@ router.post('/login', (req, res) => {
     });
   }
 
-  const { passwordHash: _hash, ...safeUser } = user;
+  const safeUser = toSafeUser(user);
   const token = signToken(safeUser);
   const redirectPath = getRoleDashboardPath(safeUser.role);
 
@@ -124,7 +145,7 @@ router.post('/login', (req, res) => {
 
 // Get current authenticated user profile (FR-4)
 router.get('/me', requireAuth, (req, res) => {
-  const { passwordHash: _hash, ...safeUser } = req.user;
+  const safeUser = toSafeUser(req.user);
   return res.json({
     status: 200,
     user: safeUser,
@@ -133,9 +154,9 @@ router.get('/me', requireAuth, (req, res) => {
 });
 
 // FR-5: Password reset request via registered email
-router.post('/forgot-password', (req, res) => {
+router.post('/forgot-password', forgotIpLimiter, forgotEmailLimiter, (req, res) => {
   const { email } = req.body || {};
-  if (!email) {
+  if (!isStr(email, 320)) {
     return res.status(400).json({
       status: 400,
       error: 'Bad Request',
@@ -153,19 +174,18 @@ router.post('/forgot-password', (req, res) => {
     }
   }
 
-  // Even if user does not exist, return standard safe message to prevent email enumeration
+  // Same answer whether or not the account exists (no email enumeration).
+  // The token is only ever delivered by email — never in this response.
   return res.json({
     status: 200,
     message: 'If an account exists with this email address, a password reset link has been dispatched (FR-5).',
-    // In dev environment, return preview reset token for automated testing
-    resetTokenPreview: process.env.NODE_ENV !== 'production' && resetRecord ? resetRecord.token : undefined,
   });
 });
 
 // FR-5: Complete password reset with token
-router.post('/reset-password', (req, res) => {
+router.post('/reset-password', resetLimiter, (req, res) => {
   const { token, newPassword } = req.body || {};
-  if (!token || !newPassword) {
+  if (!isStr(token, 200) || !isStr(newPassword, 200)) {
     return res.status(400).json({
       status: 400,
       error: 'Bad Request',
@@ -196,9 +216,23 @@ router.post('/reset-password', (req, res) => {
   }
 });
 
-// Seed demo users list for quick testing
+// Demo account directory for local development only: names, emails and
+// roles of the seeded accounts — never passwords — and disabled in production.
 router.get('/demo-users', (req, res) => {
-  const demoUsers = store.getAllUsers().filter((u) => u.email.includes('university.edu') || u.email.includes('hacktrack.io'));
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ status: 404, error: 'Not Found', message: 'Not available.' });
+  }
+  const demoUsers = store
+    .getAllUsers()
+    .filter((u) => u.email.endsWith('@university.edu') || u.email.endsWith('@hacktrack.io') || u.email.endsWith('@demo.hacktrack.io'))
+    .map((u) => ({
+      email: u.email,
+      fullName: u.fullName,
+      role: u.role,
+      roleCategory: u.roleCategory,
+      // Accounts of the shared demonstration scenario (one event, one team).
+      demoScenario: u.email.endsWith('@demo.hacktrack.io'),
+    }));
   return res.json({
     status: 200,
     users: demoUsers,
@@ -206,9 +240,9 @@ router.get('/demo-users', (req, res) => {
 });
 
 // Redeem access code to bind judge or screening member to a hackathon
-router.post('/redeem-code', requireAuth, (req, res) => {
+router.post('/redeem-code', requireAuth, redeemLimiter, (req, res) => {
   const { code } = req.body || {};
-  if (!code) {
+  if (!isStr(code, 100)) {
     return res.status(400).json({
       status: 400,
       error: 'Bad Request',
@@ -224,7 +258,7 @@ router.post('/redeem-code', requireAuth, (req, res) => {
       status: 200,
       message: `Successfully bound to ${result.hackathonTitle} as ${result.role}.`,
       assignment: result,
-      user: req.user,
+      user: toSafeUser(req.user),
     });
   } catch (err) {
     console.warn(`[AccessCode] Failed redemption for user ${req.user.id}: ${err.message}`);
@@ -234,6 +268,17 @@ router.post('/redeem-code', requireAuth, (req, res) => {
       message: 'Invalid or unavailable access code.',
     });
   }
+});
+
+// GET /api/v1/auth/my-registrations: the signed-in user's hackathon registrations
+router.get('/my-registrations', requireAuth, (req, res) => {
+  const registrations = store.registrations
+    .filter((r) => r.userId === req.user.id)
+    .map((r) => {
+      const hackathon = store.getHackathonById(r.hackathonId);
+      return { id: r.id, hackathonId: r.hackathonId, hackathonTitle: hackathon?.title || r.hackathonId, status: r.status, registeredAt: r.registeredAt };
+    });
+  return res.json({ status: 200, registrations });
 });
 
 // Get hackathons assigned to current user

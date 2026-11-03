@@ -27,9 +27,17 @@ export const CATEGORIES = {
 };
 export const CATEGORY_KEYS = Object.keys(CATEGORIES);
 
+// Security messages the user explicitly asked for: always emailed, regardless
+// of preferences, and never carry an unsubscribe link.
+const ESSENTIAL_TYPES = new Set(['password_reset', 'role_changed']);
+
 const EVENT_CATEGORY = {
   user_registered: 'account',
   password_reset: 'account',
+  role_changed: 'account',
+  registration_confirmed: 'team',
+  roster_locked: 'team',
+  screening_decision: 'submissions',
   certificate_issued: 'results',
   team_created: 'team',
   join_request_submitted: 'team',
@@ -70,7 +78,7 @@ function unsubscribeUrl(userId, category) {
  * Core dispatcher. `recipients` are user ids; `dedupeBase` makes the call
  * idempotent per recipient. `data(user)` returns template data.
  */
-export function notify({ type, recipients, dedupeBase, data, inApp }) {
+export function notify({ type, recipients, dedupeBase, data, inApp, link }) {
   const category = EVENT_CATEGORY[type];
   const results = [];
   const unique = [...new Set(recipients.filter(Boolean))];
@@ -78,11 +86,12 @@ export function notify({ type, recipients, dedupeBase, data, inApp }) {
   for (const userId of unique) {
     try {
       const user = store.findUserById(userId);
-      if (!user) continue;
+      if (!user || user.isActive === false) continue; // deactivated accounts get nothing
+      const essential = ESSENTIAL_TYPES.has(type);
       const templateData = { recipient: user, ...data(user) };
 
       const { frontendUrl } = emailConfig();
-      const unsubUrl = unsubscribeUrl(user.id, category);
+      const unsubUrl = essential ? null : unsubscribeUrl(user.id, category);
       const email = renderEmail(type, templateData, {
         frontendUrl,
         unsubscribeUrl: unsubUrl,
@@ -95,7 +104,7 @@ export function notify({ type, recipients, dedupeBase, data, inApp }) {
         category,
         title: inApp?.title?.(templateData) || email.subject,
         message: inApp?.message?.(templateData) || '',
-        link: email.ctaUrl.replace(frontendUrl, '') || '/',
+        link: link || email.ctaUrl.replace(frontendUrl, '') || '/',
         dedupeKey: dedupeBase ? `${type}:${dedupeBase}:${user.id}` : null,
       });
       if (!notification) {
@@ -106,8 +115,10 @@ export function notify({ type, recipients, dedupeBase, data, inApp }) {
       const prefs = store.getEmailPreferences(user.id, CATEGORY_KEYS);
       let skip = null;
       if (getProvider().disabled) skip = 'Email delivery is disabled on this server';
-      else if (!prefs?.[category]) skip = `${CATEGORIES[category].label} emails are turned off`;
+      else if (!essential && !prefs?.[category]) skip = `${CATEGORIES[category].label} emails are turned off`;
       else if (!isValidEmail(user.email)) skip = 'No valid email address on file';
+      // Demonstration accounts use a fictional domain: never send real mail to it.
+      else if (user.email.toLowerCase().endsWith('@demo.hacktrack.io')) skip = 'Demonstration account: emails are not sent to demo addresses';
 
       if (skip) {
         store.updateNotificationEmailStatus(notification.id, { emailStatus: 'skipped', emailStatusReason: skip });
@@ -122,9 +133,8 @@ export function notify({ type, recipients, dedupeBase, data, inApp }) {
         html: email.html,
         text: email.text,
         headers: {
-          'List-Unsubscribe': `<${unsubUrl}>`,
-          'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-          ...(dedupeBase ? { 'X-Entity-Ref-ID': `${type}:${dedupeBase}:${user.id}` } : {}),
+          ...(unsubUrl ? { 'List-Unsubscribe': `<${unsubUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {}),
+          ...(dedupeBase ? { 'X-Entity-Ref-ID': crypto.createHash('sha256').update(`${type}:${dedupeBase}:${user.id}`).digest('hex').slice(0, 32) } : {}),
         },
       });
       results.push({ userId, status: 'queued' });
@@ -368,17 +378,79 @@ export const notifyCertificateIssued = (certificate) => guard('certificate_issue
   });
 });
 
+/** Participant registered for a hackathon → the participant. */
+export const notifyRegistrationConfirmed = (registration) => guard('registration_confirmed', () => {
+  const hackathon = store.getHackathonById(registration.hackathonId);
+  if (!hackathon) return [];
+  return notify({
+    type: 'registration_confirmed',
+    recipients: [registration.userId],
+    dedupeBase: `${hackathon.id}:${registration.userId}`,
+    data: () => ({ hackathon }),
+    inApp: { message: () => `You’re registered for ${hackathon.title}.` },
+  });
+});
+
+/** Leader locked/unlocked the roster → the other accepted members. */
+export const notifyRosterLocked = (team, actorId) => guard('roster_locked', () => {
+  const hackathon = store.getHackathonById(team.hackathonId);
+  const locked = Boolean(team.rosterLocked);
+  return notify({
+    type: 'roster_locked',
+    recipients: acceptedMemberIds(team.id).filter((id) => id !== actorId),
+    // One notice per lock state change (repeat clicks don't re-notify).
+    dedupeBase: `${team.id}:${locked ? 'locked' : 'unlocked'}:${team.rosterLockChangedAt || 'initial'}`,
+    data: () => ({ team, hackathon, locked }),
+    inApp: { message: () => (locked ? `${team.teamName}’s roster is locked.` : `${team.teamName}’s roster is open again.`) },
+  });
+});
+
+/** Screening committee decision → every accepted member of the team. */
+export const notifyScreeningDecision = (team, status) => guard('screening_decision', () => {
+  const hackathon = store.getHackathonById(team.hackathonId);
+  return notify({
+    type: 'screening_decision',
+    recipients: acceptedMemberIds(team.id).concat(team.leaderId),
+    // One notice per decision: repeating the same decision is filtered by the
+    // route (status unchanged); a later change back to a status notifies again.
+    dedupeBase: `${team.id}:${status}:${team.screenedAt || ''}`,
+    data: () => ({ team, hackathon, status }),
+    inApp: {
+      message: () =>
+        status === 'shortlisted'
+          ? `${team.teamName} was shortlisted for judging.`
+          : status === 'rejected'
+            ? `${team.teamName} was not shortlisted.`
+            : `${team.teamName} is back in screening.`,
+    },
+  });
+});
+
+/** Admin changed a user's role → that user (security notice). */
+export const notifyRoleChanged = (user, previousRole, actorId) => guard('role_changed', () =>
+  notify({
+    type: 'role_changed',
+    recipients: [user.id].filter((id) => id !== actorId),
+    dedupeBase: `${user.id}:${previousRole}->${user.role}:${Date.now()}`,
+    data: () => ({ user, previousRole }),
+    inApp: { message: () => `Your role changed from ${previousRole} to ${user.role}.` },
+  })
+);
+
 /**
  * Password reset requested → send email with reset link to user.
  */
 export const notifyPasswordReset = ({ user, token }) => guard('password_reset', () => {
   const resetUrl = `/reset-password?token=${encodeURIComponent(token)}`;
-  const key = `${user.id}:${token}`;
+  // The token only ever appears in the emailed link: dedupe keys, headers and
+  // the in-app notification use a hash / plain route instead.
+  const key = `${user.id}:${crypto.createHash('sha256').update(token).digest('hex').slice(0, 24)}`;
   return notify({
     type: 'password_reset',
     recipients: [user.id],
     dedupeBase: key,
     data: () => ({ user, token, resetUrl }),
-    inApp: { message: () => 'A password reset link was dispatched to your email address.' },
+    link: '/login',
+    inApp: { message: () => 'A password reset was requested for your account. If this wasn’t you, you can ignore the email.' },
   });
 });

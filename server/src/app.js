@@ -10,10 +10,19 @@ import evaluationRoutes from './routes/evaluations.js';
 import certificateRoutes from './routes/certificates.js';
 import adminRoutes from './routes/admin.js';
 import notificationRoutes from './routes/notifications.js';
+import analyticsRoutes from './routes/analytics.js';
+import demoRoutes from './routes/demo.js';
 import { requireAuth, requireRole } from './middleware/auth.js';
 import store from './database/store.js';
 
 const app = express();
+
+// Behind a reverse proxy, set TRUST_PROXY (e.g. "1") so req.ip is the client
+// address; analytics rate limiting depends on it.
+if (process.env.TRUST_PROXY) {
+  const hops = Number(process.env.TRUST_PROXY);
+  app.set('trust proxy', Number.isFinite(hops) ? hops : process.env.TRUST_PROXY);
+}
 
 // Determine allowed origins (frontend development URL)
 const allowedOrigins = [
@@ -81,6 +90,8 @@ app.use('/api/v1/evaluations', evaluationRoutes);
 app.use('/api/v1/certificates', certificateRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
+app.use('/api/v1/analytics', analyticsRoutes);
+app.use('/api/v1/demo', demoRoutes);
 
 // Direct aliases for users API (FR-42)
 const usersHandler = async (req, res) => {

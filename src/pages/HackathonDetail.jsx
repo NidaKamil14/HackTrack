@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate, useLocation, useOutletContext } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, CalendarDays, Check, CircleCheck, KeyRound, SearchX, ShieldCheck, Trophy, Users } from 'lucide-react';
 import { getHackathonById, getStoredHackathons } from '../utils/hackathonService';
+import { normalizeServerHackathon } from '../utils/serverHackathons';
+import api from '../utils/api';
 import EventCover from '../components/art/EventCover';
 import { useAuth } from '../context/AuthContext';
 import { isUserRegistered, registerForHackathon } from '../utils/registrationService';
@@ -53,13 +55,51 @@ export default function HackathonDetail({
 
   const currentId = propHackathonId || id;
   const found = getHackathonById(currentId);
+
+  // Events created on the server (e.g. by an organizer elsewhere) aren't in
+  // this browser's local data: load them from the public API.
+  const [serverLookup, setServerLookup] = useState({ id: null, hackathon: null });
+  useEffect(() => {
+    if (found || !currentId) return undefined;
+    let cancelled = false;
+    api.getHackathon(currentId)
+      .then((res) => {
+        if (cancelled || !res?.hackathon) return;
+        const sh = res.hackathon;
+        setServerLookup({
+          id: currentId,
+          hackathon: {
+            ...normalizeServerHackathon(sh),
+            overview: sh.description || '',
+            submissionReqs: [],
+            eligibility: [],
+            rules: [],
+            screeningReqs: [],
+            rubrics: (sh.criteria || []).map((c) => ({ name: c.name, weight: `${c.maxScore}`, desc: c.description || '' })),
+          },
+        });
+      })
+      .catch(() => { if (!cancelled) setServerLookup({ id: currentId, hackathon: null }); });
+    return () => { cancelled = true; };
+  }, [found, currentId]);
+  const serverResolved = serverLookup.id === currentId;
+
   // Only fall back to the first event when no id was requested at all.
-  const hackathon = found || (currentId ? null : getStoredHackathons()[0]);
+  const hackathon = found || (serverResolved ? serverLookup.hackathon : null) || (currentId ? null : getStoredHackathons()[0]);
+  const lookingUp = !found && Boolean(currentId) && !serverResolved;
   const [activeTab, setActiveTab] = useState("overview");
 
   // Registration state
   const [registeredOverride, setRegisteredOverride] = useState(null);
   const [regFeedback, setRegFeedback] = useState(null);
+
+  if (!hackathon && lookingUp) {
+    return (
+      <div className="container-page py-16" aria-busy="true">
+        <p className="text-sm text-fg-muted">Loading hackathon…</p>
+      </div>
+    );
+  }
 
   if (!hackathon) {
     return (

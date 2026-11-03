@@ -38,21 +38,25 @@ export function subscribeToDataSync(callback) {
   window.addEventListener(SYNC_EVENT, handleCustomSync);
   window.addEventListener("storage", handleStorageSync);
   window.addEventListener("focus", handleFocus);
-  document.addEventListener("visibilitychange", () => {
+  const handleVisibility = () => {
     if (document.visibilityState === "visible") {
       callback({ eventType: "visibility" });
     }
-  });
+  };
+  document.addEventListener("visibilitychange", handleVisibility);
 
-  // Light heartbeat interval to synchronize background or cross-tab operations reliably
+  // Heartbeat so dashboards pick up other users' changes from the server.
+  // Skipped while the tab is hidden; focus/visibility refresh immediately.
   const intervalId = setInterval(() => {
+    if (document.visibilityState === "hidden") return;
     callback({ eventType: "poll" });
-  }, 4000);
+  }, 10000);
 
   return () => {
     window.removeEventListener(SYNC_EVENT, handleCustomSync);
     window.removeEventListener("storage", handleStorageSync);
     window.removeEventListener("focus", handleFocus);
+    document.removeEventListener("visibilitychange", handleVisibility);
     clearInterval(intervalId);
   };
 }

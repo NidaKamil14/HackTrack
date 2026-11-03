@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import app from '../src/app.js';
+import { memoryProvider } from '../src/notifications/providers.js';
+import { waitForEmailIdle } from '../src/notifications/emailQueue.js';
 
 let server;
 let baseUrl;
@@ -115,8 +117,15 @@ test('HackTrack Authentication & RBAC (FR-1 to FR-5)', async (t) => {
     });
     assert.equal(forgotRes.status, 200);
     const forgotBody = await forgotRes.json();
-    const token = forgotBody.resetTokenPreview;
-    assert.ok(token, 'Must provide reset token in dev environment');
+    assert.equal(forgotBody.resetTokenPreview, undefined, 'reset token must never be returned by the API');
+
+    // The token is delivered only by email (in-memory provider under node --test).
+    await waitForEmailIdle(3000);
+    const resetMail = memoryProvider.sent.filter((m) => m.to === testEmail.toLowerCase() && /reset/i.test(m.subject)).pop();
+    assert.ok(resetMail, 'reset email should be queued and delivered');
+    const token = /token=([a-f0-9]{48})/.exec(resetMail.text)?.[1];
+    assert.ok(token, 'reset link must contain the token');
+    assert.ok(!JSON.stringify(resetMail.headers || {}).includes(token), 'token must not leak into email headers');
 
     // Perform reset
     const resetRes = await fetch(`${baseUrl}/api/v1/auth/reset-password`, {

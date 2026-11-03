@@ -192,7 +192,13 @@ test('HackTrack Submissions, Evaluation & Results (FR-17 to FR-31, BR-7 to BR-9)
   });
 
   await t.test('7. FR-28 & FR-29: Automatic ranking and leaderboard calculation', async () => {
-    const res = await fetch(`${baseUrl}/api/v1/evaluations/leaderboard/hack-001`);
+    // BR-9: scores stay private until results are published…
+    const anon = await fetch(`${baseUrl}/api/v1/evaluations/leaderboard/hack-001`);
+    assert.equal(anon.status, 403);
+    const asStudent = await fetch(`${baseUrl}/api/v1/evaluations/leaderboard/hack-001`, { headers: { Authorization: `Bearer ${studentToken}` } });
+    assert.equal(asStudent.status, 403);
+    // …but the event's organizer can review the ranking before publishing.
+    const res = await fetch(`${baseUrl}/api/v1/evaluations/leaderboard/hack-001`, { headers: { Authorization: `Bearer ${organizerToken}` } });
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.ok(Array.isArray(body.leaderboard));

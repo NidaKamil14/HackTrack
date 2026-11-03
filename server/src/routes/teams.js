@@ -1,12 +1,15 @@
 import express from 'express';
 import store from '../database/store.js';
-import { requireAuth, optionalAuth } from '../middleware/auth.js';
-import { notifyJoinDecision, notifyJoinRequested, notifyTeamCreated } from '../notifications/notifier.js';
+import { requireAuth } from '../middleware/auth.js';
+import { notifyJoinDecision, notifyJoinRequested, notifyTeamCreated, notifyRosterLocked, notifyScreeningDecision } from '../notifications/notifier.js';
+import { canSeeTeamPrivate, isAdmin, isBoundReviewer, ownsHackathon, publicTeam } from '../access/policies.js';
 
 const router = express.Router();
 
-// GET /api/v1/teams: List teams for a specific hackathon or platform-wide for Admin
-router.get('/', optionalAuth, (req, res) => {
+// GET /api/v1/teams: List teams for a specific hackathon or platform-wide for Admin.
+// Join codes and member emails are only included for admins, the event's
+// organizers and the team's own members; everyone else gets publicTeam().
+router.get('/', requireAuth, (req, res) => {
   const { hackathonId } = req.query;
 
   // Platform admin oversight: Admin can list all teams across all hackathons
@@ -56,6 +59,7 @@ router.get('/', optionalAuth, (req, res) => {
   }
 
   const teams = store.getTeamsByHackathon(canonicalId).map((team) => {
+    if (!canSeeTeamPrivate(req.user, team)) return publicTeam(team);
     const members = store.getTeamMembers(team.id);
     const hackathon = store.getHackathonById(team.hackathonId);
     const leaderUser = store.findUserById(team.leaderId);
@@ -100,6 +104,9 @@ router.get('/mine', requireAuth, (req, res) => {
     const hackathon = store.getHackathonById(team.hackathonId);
     return {
       ...team,
+      // Progress only (judge counts, no scores) until results are published.
+      judgingProgress: store.getJudgingProgress(team.id),
+      resultsPublished: Boolean(hackathon?.resultsPublished),
       hackathonTitle: hackathon?.title || team.hackathonId,
       memberCount: members.filter((m) => m.status === 'accepted').length,
       members,
@@ -138,6 +145,7 @@ router.put('/:id/roster-lock', requireAuth, (req, res) => {
       leaderId: req.user.id,
       locked: Boolean(locked),
     });
+    notifyRosterLocked(team, req.user.id);
     return res.json({
       status: 200,
       message: `Team roster ${team.rosterLocked ? 'locked' : 'unlocked'} successfully.`,
@@ -153,8 +161,31 @@ router.put('/:id/roster-lock', requireAuth, (req, res) => {
   }
 });
 
+// GET /api/v1/teams/:id/results: the team's published result (members, event organizers, admins)
+router.get('/:id/results', requireAuth, (req, res) => {
+  const team = store.findTeamById(req.params.id);
+  if (!team || !canSeeTeamPrivate(req.user, team)) {
+    return res.status(404).json({ status: 404, error: 'Not Found', message: 'Team not found.' });
+  }
+  const results = store.getTeamResults(team.id);
+  if (!results) {
+    return res.status(403).json({ status: 403, error: 'Forbidden', message: 'Results are shared once the organizer publishes them.', judgingProgress: store.getJudgingProgress(team.id) });
+  }
+  return res.json({ status: 200, results });
+});
+
+// GET /api/v1/teams/:id/screening-reviews: decision history incl. internal notes
+// (the event's screening committee, organizers and admins — never the team)
+router.get('/:id/screening-reviews', requireAuth, (req, res) => {
+  const team = store.findTeamById(req.params.id);
+  if (!team) return res.status(404).json({ status: 404, error: 'Not Found', message: 'Team not found.' });
+  const allowed = isAdmin(req.user) || ownsHackathon(req.user, team.hackathonId) || isBoundReviewer(req.user, team.hackathonId, ['screening']);
+  if (!allowed) return res.status(404).json({ status: 404, error: 'Not Found', message: 'Team not found.' });
+  return res.json({ status: 200, reviews: store.getScreeningReviews(team.id) });
+});
+
 // GET /api/v1/teams/:id: Get team details, code, and members
-router.get('/:id', optionalAuth, (req, res) => {
+router.get('/:id', requireAuth, (req, res) => {
   const team = store.findTeamById(req.params.id);
   if (!team) {
     return res.status(404).json({
@@ -176,6 +207,9 @@ router.get('/:id', optionalAuth, (req, res) => {
     }
   }
 
+  if (!canSeeTeamPrivate(req.user, team)) {
+    return res.json({ status: 200, team: publicTeam(team) });
+  }
   const members = store.getTeamMembers(team.id);
   return res.json({
     status: 200,
@@ -239,7 +273,10 @@ router.post('/', requireAuth, (req, res) => {
 // POST /api/v1/teams/join: Student requests to join a team using Team Code (FR-14, FR-16, BR-2)
 router.post('/join', requireAuth, (req, res) => {
   const { teamCode } = req.body || {};
-  if (!teamCode) {
+  if (!['student', 'leader'].includes(req.user.role)) {
+    return res.status(403).json({ status: 403, error: 'Forbidden', message: 'Only participants can join teams.' });
+  }
+  if (!teamCode || typeof teamCode !== 'string') {
     return res.status(400).json({
       status: 400,
       error: 'Bad Request',
@@ -315,7 +352,10 @@ router.patch('/:id/screening', requireAuth, (req, res) => {
     });
   }
 
-  const { status } = req.body || {};
+  const { status, feedback, internalNote } = req.body || {};
+  if ((feedback !== undefined && (typeof feedback !== 'string' || feedback.length > 2000)) || (internalNote !== undefined && (typeof internalNote !== 'string' || internalNote.length > 2000))) {
+    return res.status(400).json({ status: 400, error: 'Bad Request', message: 'feedback and internalNote must be text of at most 2000 characters.' });
+  }
   if (!['pending', 'shortlisted', 'rejected'].includes(status)) {
     return res.status(400).json({
       status: 400,
@@ -324,7 +364,21 @@ router.patch('/:id/screening', requireAuth, (req, res) => {
     });
   }
 
-  const team = store.updateTeamScreeningStatus(req.params.id, status);
+  const existing = store.findTeamById(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ status: 404, error: 'Not Found', message: 'Team not found.' });
+  }
+  // Screening members act only on hackathons they joined with a screening code.
+  if (!isAdmin(req.user) && !isBoundReviewer(req.user, existing.hackathonId, ['screening'])) {
+    return res.status(403).json({
+      status: 403,
+      error: 'Forbidden',
+      message: 'You can only screen teams in hackathons you joined with a screening access code.',
+    });
+  }
+
+  const previous = existing.screeningStatus;
+  const team = store.recordScreeningDecision(req.params.id, status, { reviewerId: req.user.id, feedback, internalNote })?.team;
   if (!team) {
     return res.status(404).json({
       status: 404,
@@ -332,6 +386,7 @@ router.patch('/:id/screening', requireAuth, (req, res) => {
       message: 'Team not found.',
     });
   }
+  if (previous !== status) notifyScreeningDecision(team, status);
 
   return res.json({
     status: 200,

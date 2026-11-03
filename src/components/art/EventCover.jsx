@@ -55,7 +55,7 @@ function StackMotif({ seed, ids }) {
             key={i}
             x={14 + (i % 2) * 12}
             y={36 + i * 11}
-            width={40 + ((seed >> i) % 70)}
+            width={40 + ((seed >>> i) % 70)}
             height="5"
             rx="2.5"
             fill={i % 3 === 0 ? `url(#${ids.grad})` : tokens.line}
@@ -82,7 +82,7 @@ function NeuralMotif({ seed, ids }) {
   const layers = [3, 5, 4, 2];
   const nodes = layers.map((count, li) =>
     Array.from({ length: count }, (_, ni) => ({
-      x: 70 + li * 90 + ((seed >> li) % 10),
+      x: 70 + li * 90 + ((seed >>> li) % 10),
       y: 80 + (ni - (count - 1) / 2) * 26,
     }))
   );
@@ -141,8 +141,8 @@ function CircuitMotif({ seed, ids }) {
 
 function ConstellationMotif({ seed, ids }) {
   const pts = Array.from({ length: 9 }, (_, i) => ({
-    x: 40 + ((seed >> (i * 2)) % 320),
-    y: 24 + ((seed >> (i + 3)) % 112),
+    x: 40 + ((seed >>> (i * 2)) % 320),
+    y: 24 + ((seed >>> (i + 3)) % 112),
   }));
   return (
     <g>
