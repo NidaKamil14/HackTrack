@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useOutletContext } from 'react-router-dom';
 import {
   ArrowRight, Check, ClipboardCheck, Compass, Crown, Gavel, KeyRound,
@@ -11,6 +11,7 @@ import HeroArtwork from '../components/art/HeroArtwork';
 import ParticleField from '../components/art/ParticleField';
 import { Button, Input, cn } from '../components/ui';
 import { getStoredHackathons } from '../utils/hackathonService';
+import api from '../utils/api';
 import { SYSTEM_ROLES } from '../data/roles';
 
 // The competition lifecycle HackTrack enforces, and who acts at each stage.
@@ -48,7 +49,54 @@ export default function Home({
   const setTeamCodeInput = propSetTeamCodeInput || outletContext.setTeamCodeInput || (() => {});
 
   const [heroInput, setHeroInput] = useState("");
-  const [featured] = useState(() => getStoredHackathons().slice(0, 3));
+
+  // Fetch server hackathons and merge with local — same source-of-truth as the Student Dashboard
+  const [serverHackathons, setServerHackathons] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    api.getHackathons()
+      .then((res) => {
+        if (!cancelled && Array.isArray(res?.hackathons)) {
+          setServerHackathons(res.hackathons);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const featured = useMemo(() => {
+    const local = getStoredHackathons();
+    if (!serverHackathons.length) return local;
+    const combined = [...local];
+    serverHackathons.forEach((sh) => {
+      const idx = combined.findIndex(
+        (h) => h.id === sh.id || h.title?.toLowerCase() === sh.title?.toLowerCase()
+      );
+      const normalized = {
+        id: sh.id,
+        title: sh.title,
+        headline: sh.tagLine || `${sh.title} Innovation Sprint`,
+        deadline: sh.submissionDeadline
+          ? new Date(sh.submissionDeadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+          : 'TBD',
+        dates: `${sh.startDate ? new Date(sh.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''} - ${sh.endDate ? new Date(sh.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}`,
+        stage: sh.isRegistrationClosed ? 'Registration Closed' : 'Registration Open',
+        status: sh.status,
+        track: sh.track || 'General Track',
+        category: sh.category || 'Full-Stack',
+        teamSize: `${sh.minTeamSize || 1} - ${sh.maxTeamSize || 4} Members`,
+        summary: sh.description || sh.summary || `Official ${sh.title} competition.`,
+        tags: sh.tags || [],
+        prizePool: sh.prizePool || sh.prize || '',
+      };
+      if (idx >= 0) {
+        combined[idx] = { ...combined[idx], ...normalized, id: sh.id };
+      } else {
+        combined.push(normalized);
+      }
+    });
+    return combined;
+  }, [serverHackathons]);
 
   const handleHeroSubmit = (e) => {
     e.preventDefault();
@@ -171,16 +219,18 @@ export default function Home({
         <div className="container-page">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <h2 className="text-2xl font-semibold tracking-tight">Open hackathons</h2>
-              <p className="mt-1 text-sm text-fg-muted">Pick a competition to read its rules or register your team.</p>
+              <h2 className="text-2xl font-semibold tracking-tight">Hackathons</h2>
+              <p className="mt-1 text-sm text-fg-muted">
+                {featured.length} competition{featured.length !== 1 ? 's' : ''} available — pick one to read its rules or register your team.
+              </p>
             </div>
             <Button as={Link} to="/hackathons" variant="ghost" size="sm">
-              View all
+              Browse all ({featured.length})
               <ArrowRight aria-hidden="true" />
             </Button>
           </div>
 
-          <div className="mt-8 grid gap-4 md:grid-cols-3">
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {featured.map((h) => (
               <HackathonCard key={h.id} hackathon={h} variant="featured" />
             ))}

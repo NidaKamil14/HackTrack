@@ -1,16 +1,41 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { SearchX, Trophy } from 'lucide-react';
 import FilterBar from '../components/FilterBar';
 import HackathonCard from '../components/HackathonCard';
 import { Button, EmptyState, PageHeader } from '../components/ui';
 import { getStoredHackathons } from '../utils/hackathonService';
+import api from '../utils/api';
 
 // Deadlines are stored as display strings ("Oct 18, 2026"); compare them as dates.
 const toTime = (value) => {
   const time = Date.parse(value);
   return Number.isNaN(time) ? Number.POSITIVE_INFINITY : time;
 };
+
+// Normalise a server hackathon record into the shape HackathonCard expects.
+const normalizeServerHackathon = (sh) => ({
+  id: sh.id,
+  title: sh.title,
+  headline: sh.tagLine || `${sh.title} Innovation Sprint`,
+  deadline: sh.submissionDeadline
+    ? new Date(sh.submissionDeadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : 'TBD',
+  dates: `${sh.startDate ? new Date(sh.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''} - ${sh.endDate ? new Date(sh.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}`,
+  stage: sh.isRegistrationClosed ? 'Registration Closed' : 'Registration Open',
+  status: sh.status,
+  isRegistrationClosed: sh.isRegistrationClosed,
+  registrationDeadline: sh.registrationDeadline,
+  submissionDeadline: sh.submissionDeadline,
+  track: sh.track || 'General Track',
+  category: sh.category || 'Full-Stack',
+  teamSize: `${sh.minTeamSize || 1} - ${sh.maxTeamSize || 4} Members`,
+  summary: sh.description || sh.summary || `Official ${sh.title} competition.`,
+  tags: sh.tags || [],
+  prizePool: sh.prizePool || sh.prize || '',
+  organizerName: sh.organizerName || '',
+  organizerEmail: sh.organizerEmail || '',
+});
 
 export default function BrowseHackathons({
   onOpenTeamModal: propOpenTeamModal,
@@ -25,16 +50,49 @@ export default function BrowseHackathons({
   const [selectedStage, setSelectedStage] = useState("All");
   const [sortBy, setSortBy] = useState("deadline");
 
+  // Fetch server hackathons (no auth required — public endpoint)
+  const [serverHackathons, setServerHackathons] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    api.getHackathons()
+      .then((res) => {
+        if (!cancelled && Array.isArray(res?.hackathons)) {
+          setServerHackathons(res.hackathons);
+        }
+      })
+      .catch(() => {}); // silently fall back to localStorage only
+    return () => { cancelled = true; };
+  }, []);
+
+  // Merge local seed/localStorage hackathons with any extra ones from the server
+  const allHackathons = useMemo(() => {
+    const local = getStoredHackathons();
+    if (!serverHackathons.length) return local;
+
+    const combined = [...local];
+    serverHackathons.forEach((sh) => {
+      const idx = combined.findIndex(
+        (h) => h.id === sh.id || h.title?.toLowerCase() === sh.title?.toLowerCase()
+      );
+      const normalized = normalizeServerHackathon(sh);
+      if (idx >= 0) {
+        combined[idx] = { ...combined[idx], ...normalized, id: sh.id };
+      } else {
+        combined.push(normalized);
+      }
+    });
+    return combined;
+  }, [serverHackathons]);
+
   const categories = ["All", "Full-Stack", "AI & ML", "IoT"];
-  const stages = ["All", "Registration Open", "Team Formation", "Upcoming"];
+  const stages = ["All", "Registration Open", "Team Formation", "Upcoming", "Screening Gate", "Rubric Judging", "Leaderboard Published"];
 
   const filteredHackathons = useMemo(() => {
-    const list = getStoredHackathons();
-    return list.filter((h) => {
+    return allHackathons.filter((h) => {
       const matchSearch =
-        h.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        h.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        h.tags.some((t) => t.toLowerCase().includes(searchTerm.toLowerCase()));
+        (h.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (h.summary || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (h.tags || []).some((t) => t.toLowerCase().includes(searchTerm.toLowerCase()));
 
       const matchCategory = selectedCategory === "All" || h.category === selectedCategory;
       const matchStage = selectedStage === "All" || h.stage === selectedStage;
@@ -45,7 +103,7 @@ export default function BrowseHackathons({
       if (sortBy === "title") return a.title.localeCompare(b.title);
       return 0;
     });
-  }, [searchTerm, selectedCategory, selectedStage, sortBy]);
+  }, [allHackathons, searchTerm, selectedCategory, selectedStage, sortBy]);
 
   const resetFilters = () => {
     setSearchTerm("");
