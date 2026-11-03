@@ -256,6 +256,16 @@ const DEFAULT_CODES = [
     createdBy: "organizer@hacktrack.io",
     createdAt: new Date().toISOString(),
     redeemedBy: []
+  },
+  {
+    id: "code-devpulse-mentor",
+    hackathonId: "devpulse-2026",
+    hackathonTitle: "DevPulse National Sprint 2026",
+    role: "mentor",
+    code: "MENTOR-DEVP-5K1R",
+    createdBy: "organizer@hacktrack.io",
+    createdAt: new Date().toISOString(),
+    redeemedBy: [{ userId: "usr-mentor-008", email: "mentor@hacktrack.io", fullName: "David Sterling", redeemedAt: new Date().toISOString() }]
   }
 ];
 
@@ -422,6 +432,7 @@ export function getHackathonCommittee(hackathonId) {
 
   const judges = [];
   const screeners = [];
+  const mentors = [];
 
   hackCodes.forEach((c) => {
     if (c.role === "judge") {
@@ -431,6 +442,10 @@ export function getHackathonCommittee(hackathonId) {
     } else if (c.role === "screening") {
       (c.redeemedBy || []).forEach((u) => {
         if (!screeners.some((s) => s.email === u.email)) screeners.push(u);
+      });
+    } else if (c.role === "mentor") {
+      (c.redeemedBy || []).forEach((u) => {
+        if (!mentors.some((m) => m.email === u.email)) mentors.push(u);
       });
     }
   });
@@ -453,12 +468,21 @@ export function getHackathonCommittee(hackathonId) {
         redeemedAt: new Date().toISOString()
       });
     }
+    if (!mentors.some((m) => m.email === "mentor@hacktrack.io")) {
+      mentors.push({
+        userId: "usr-mentor-008",
+        email: "mentor@hacktrack.io",
+        fullName: "David Sterling",
+        redeemedAt: new Date().toISOString()
+      });
+    }
   }
 
   return {
     codes: hackCodes,
     judges,
-    screeners
+    screeners,
+    mentors
   };
 }
 

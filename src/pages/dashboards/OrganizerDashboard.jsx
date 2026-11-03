@@ -275,8 +275,15 @@ export default function OrganizerDashboard() {
     setJudgeAssignNotice(null);
   };
 
-  const handleRegenerateCode = (role) => {
+  const handleRegenerateCode = async (role) => {
     if (!manageTarget) return;
+    try {
+      if (api.getToken()) {
+        await api.generateHackathonCode(manageTarget.id, role);
+      }
+    } catch (e) {
+      console.warn('Backend code generation fallback to local store:', e.message);
+    }
     const res = generateHackathonCode(manageTarget.id, role, user?.email || "organizer@hacktrack.io");
     if (res.success) {
       setRefreshKey((k) => k + 1);
@@ -701,6 +708,7 @@ export default function OrganizerDashboard() {
   const committee = manageTarget ? getHackathonCommittee(manageTarget.id) : null;
   const judgeCodeRecord = committee ? (committee.codes || []).find((c) => c.role === "judge") : undefined;
   const screeningCodeRecord = committee ? (committee.codes || []).find((c) => c.role === "screening") : undefined;
+  const mentorCodeRecord = committee ? (committee.codes || []).find((c) => c.role === "mentor") : undefined;
 
   return (
     <DashboardLayout
@@ -1513,6 +1521,22 @@ export default function OrganizerDashboard() {
                 members={committee.judges}
                 fallbackName="Judge Evaluator"
                 emptyText="No judges have redeemed this code yet. Share the code above."
+              />
+
+              <AccessCodeSection
+                icon={Award}
+                tone="accent"
+                title="Technical Mentor access code"
+                badge="Guidance & Advisory"
+                description="Share this code with technical mentors. They enter it to unlock this hackathon, guide participating teams, and provide technical feedback."
+                code={mentorCodeRecord?.code}
+                copied={Boolean(mentorCodeRecord?.code) && copiedCode === mentorCodeRecord?.code}
+                onCopy={() => handleCopyCode(mentorCodeRecord?.code)}
+                onRegenerate={() => handleRegenerateCode('mentor')}
+                rosterLabel="Bound technical mentors"
+                members={committee.mentors || []}
+                fallbackName="Technical Mentor"
+                emptyText="No mentors have redeemed this code yet. Share the code above."
               />
 
               {/* Direct Judge Assignment Form */}

@@ -50,33 +50,37 @@ export function triggerDataSync(eventType = "general", payload = null) {
 export function subscribeToDataSync(callback) {
   if (typeof window === "undefined") return () => {};
 
+  let debounceTimer = null;
+  const debouncedCallback = (data) => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      callback(data);
+    }, 40);
+  };
+
   const handleBroadcast = (event) => {
-    callback(event.data || { eventType: "broadcast" });
+    debouncedCallback(event.data || { eventType: "broadcast" });
   };
 
   const handleCustomSync = (e) => {
-    callback(e.detail || { eventType: "general" });
+    debouncedCallback(e.detail || { eventType: "general" });
   };
 
   const handleStorageSync = (e) => {
-    if (e.key === SYNC_STORAGE_KEY || (e.key && e.key.startsWith("hacktrack_"))) {
+    if (e.key === SYNC_STORAGE_KEY) {
       let parsed = null;
       try {
         parsed = e.newValue ? JSON.parse(e.newValue) : null;
       } catch {
         parsed = null;
       }
-      callback({ eventType: parsed?.eventType || "storage", key: e.key, payload: parsed?.payload });
+      debouncedCallback({ eventType: parsed?.eventType || "storage", key: e.key, payload: parsed?.payload });
     }
-  };
-
-  const handleFocus = () => {
-    callback({ eventType: "focus" });
   };
 
   const handleVisibilityChange = () => {
     if (document.visibilityState === "visible") {
-      callback({ eventType: "visibility" });
+      debouncedCallback({ eventType: "visibility" });
     }
   };
 
@@ -85,22 +89,15 @@ export function subscribeToDataSync(callback) {
   }
   window.addEventListener(SYNC_EVENT, handleCustomSync);
   window.addEventListener("storage", handleStorageSync);
-  window.addEventListener("focus", handleFocus);
   document.addEventListener("visibilitychange", handleVisibilityChange);
 
-  // Fast heartbeat interval (2.5s) to guarantee background sync if events are missed
-  const intervalId = setInterval(() => {
-    callback({ eventType: "poll" });
-  }, 2500);
-
   return () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
     if (broadcastChannel) {
       broadcastChannel.removeEventListener("message", handleBroadcast);
     }
     window.removeEventListener(SYNC_EVENT, handleCustomSync);
     window.removeEventListener("storage", handleStorageSync);
-    window.removeEventListener("focus", handleFocus);
     document.removeEventListener("visibilitychange", handleVisibilityChange);
-    clearInterval(intervalId);
   };
 }

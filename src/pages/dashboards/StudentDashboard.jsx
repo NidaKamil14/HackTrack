@@ -557,8 +557,8 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     : null;
   const resultsReleased = activeSprint ? isResultsPublished(activeSprint.id) : false;
 
-  // Form state tracking
-  const currentSubmissionKey = `${activeSprint?.id || ''}_${currentTeam?.code || ''}_${refreshKey}`;
+  // Form state tracking: keyed strictly by sprint and team so background sync never resets draft values
+  const currentSubmissionKey = `${activeSprint?.id || ''}_${currentTeam?.code || ''}`;
   const [formOverride, setFormOverride] = useState({
     key: "",
     projectTitle: "",

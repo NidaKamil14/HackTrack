@@ -126,8 +126,8 @@ export default function Register({ navigate: propNavigate }) {
         designation: ['judge', 'mentor'].includes(roleId) ? prev.designation : "",
         // Clear accessCode when switching between roles
         accessCode: (roleId === prev.role) ? prev.accessCode : "",
-        // Department retained if role supports it, otherwise reset
-        department: ['student', 'leader', 'screening', 'organizer'].includes(roleId) ? prev.department : "",
+        // Department retained if student/leader, otherwise reset
+        department: ['student', 'leader'].includes(roleId) ? prev.department : "",
       };
     });
   };
@@ -182,10 +182,6 @@ export default function Register({ navigate: propNavigate }) {
         setStatusMessage({ type: "error", text: "Institution / University is required for Screening Committee registration." });
         return;
       }
-      if (!formData.department.trim()) {
-        setStatusMessage({ type: "error", text: "Committee / Department Affiliation is required." });
-        return;
-      }
       if (!formData.accessCode.trim()) {
         setStatusMessage({ type: "error", text: "A Screening Access Code or Invitation Key is required." });
         return;
@@ -221,10 +217,6 @@ export default function Register({ navigate: propNavigate }) {
         setStatusMessage({ type: "error", text: "Host Organization / University is required for Organizer registration." });
         return;
       }
-      if (!formData.department.trim()) {
-        setStatusMessage({ type: "error", text: "Organizing Committee / Department is required for Organizer registration." });
-        return;
-      }
       if (!formData.accessCode.trim()) {
         setStatusMessage({ type: "error", text: "An Organizer Authorization Key is required to register as an Organizer." });
         return;
@@ -253,7 +245,7 @@ export default function Register({ navigate: propNavigate }) {
       role: formData.role,
       university: formData.university.trim(),
       memberId: ['student', 'leader'].includes(formData.role) ? formData.memberId.trim() : null,
-      department: ['student', 'leader', 'screening', 'organizer'].includes(formData.role) && formData.department.trim()
+      department: ['student', 'leader'].includes(formData.role) && formData.department.trim()
         ? formData.department.trim()
         : undefined,
       yearOfStudy: ['student', 'leader'].includes(formData.role) && formData.yearOfStudy ? formData.yearOfStudy : undefined,
@@ -487,26 +479,19 @@ export default function Register({ navigate: propNavigate }) {
               {formData.role === "screening" && (
                 <>
                   <fieldset className="space-y-4">
-                    <legend className="mb-1 text-sm font-medium text-fg">Committee & Affiliation Details</legend>
+                    <legend className="mb-1 text-sm font-medium text-fg">Institution & Authorization</legend>
                     <div className="grid gap-4 sm:grid-cols-2">
-                      <Field label="Institution / University" required>
-                        <Input
-                          name="university"
-                          autoComplete="organization"
-                          value={formData.university}
-                          onChange={handleChange}
-                          placeholder="e.g. PCCOE Pune / Technical Review Board"
-                        />
-                      </Field>
-
-                      <Field label="Committee / Department Affiliation" required>
-                        <Input
-                          name="department"
-                          value={formData.department}
-                          onChange={handleChange}
-                          placeholder="e.g. Technical Screening Panel / Dept. of CSE"
-                        />
-                      </Field>
+                      <div className="sm:col-span-2">
+                        <Field label="Institution / University" required>
+                          <Input
+                            name="university"
+                            autoComplete="organization"
+                            value={formData.university}
+                            onChange={handleChange}
+                            placeholder="e.g. PCCOE Pune / Technical Review Board"
+                          />
+                        </Field>
+                      </div>
 
                       <div className="sm:col-span-2">
                         <Field
@@ -736,26 +721,19 @@ export default function Register({ navigate: propNavigate }) {
               {formData.role === "organizer" && (
                 <>
                   <fieldset className="space-y-4">
-                    <legend className="mb-1 text-sm font-medium text-fg">Host Organization & Committee</legend>
+                    <legend className="mb-1 text-sm font-medium text-fg">Host Organization & Authorization</legend>
                     <div className="grid gap-4 sm:grid-cols-2">
-                      <Field label="Host Organization / University" required>
-                        <Input
-                          name="university"
-                          autoComplete="organization"
-                          value={formData.university}
-                          onChange={handleChange}
-                          placeholder="e.g. PCCOE Pune / DevPulse Operations"
-                        />
-                      </Field>
-
-                      <Field label="Organizing Committee / Department" required>
-                        <Input
-                          name="department"
-                          value={formData.department}
-                          onChange={handleChange}
-                          placeholder="e.g. Operations Committee / Innovation Cell"
-                        />
-                      </Field>
+                      <div className="sm:col-span-2">
+                        <Field label="Host Organization / University" required>
+                          <Input
+                            name="university"
+                            autoComplete="organization"
+                            value={formData.university}
+                            onChange={handleChange}
+                            placeholder="e.g. PCCOE Pune / DevPulse Operations"
+                          />
+                        </Field>
+                      </div>
 
                       <div className="sm:col-span-2">
                         <Field

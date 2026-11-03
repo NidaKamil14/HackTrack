@@ -27,7 +27,7 @@ function getRoleDashboardPath(role) {
 }
 
 // FR-1: Register with unique email address and role-specific validation
-router.post('/register', (req, res) => {
+router.post('/register', async (req, res) => {
   const {
     email,
     password,
@@ -38,9 +38,11 @@ router.post('/register', (req, res) => {
     department,
     yearOfStudy,
     designation,
+    domain,
     phone,
     accessCode,
     inviteCode,
+    authorizationCode,
   } = req.body || {};
 
   // 1. Mandatory core credentials
@@ -89,7 +91,8 @@ router.post('/register', (req, res) => {
     });
   }
 
-  const codeToVerify = (accessCode || inviteCode || '').trim();
+  const codeToVerify = (authorizationCode || accessCode || inviteCode || '').trim();
+  const resolvedDesignation = (designation || domain || '').trim();
   let matchedCodeRecord = null;
 
   // 3. Role-specific validation rules
@@ -114,13 +117,6 @@ router.post('/register', (req, res) => {
         status: 400,
         error: 'Bad Request',
         message: 'Institution or organization is required for Screening Committee registration.',
-      });
-    }
-    if (!department || !String(department).trim()) {
-      return res.status(400).json({
-        status: 400,
-        error: 'Bad Request',
-        message: 'Committee or department affiliation is required for Screening Committee registration.',
       });
     }
     if (!codeToVerify) {
@@ -151,7 +147,7 @@ router.post('/register', (req, res) => {
         message: 'Organization or affiliation is required for Judge registration.',
       });
     }
-    if (!designation || !String(designation).trim()) {
+    if (!resolvedDesignation) {
       return res.status(400).json({
         status: 400,
         error: 'Bad Request',
@@ -186,7 +182,7 @@ router.post('/register', (req, res) => {
         message: 'Organization or university is required for Mentor registration.',
       });
     }
-    if (!designation || !String(designation).trim()) {
+    if (!resolvedDesignation) {
       return res.status(400).json({
         status: 400,
         error: 'Bad Request',
@@ -221,36 +217,31 @@ router.post('/register', (req, res) => {
         message: 'Host organization or institution is required for Organizer registration.',
       });
     }
-    if (!department || !String(department).trim()) {
-      return res.status(400).json({
-        status: 400,
-        error: 'Bad Request',
-        message: 'Department or organizing committee is required for Organizer registration.',
-      });
-    }
     if (!codeToVerify) {
       return res.status(400).json({
         status: 400,
         error: 'Bad Request',
-        message: 'A valid Organizer Authorization Code or Invitation Key is required.',
+        message: 'A valid Organizer Authorization Code is required.',
       });
     }
-    const isPlatformOrganizerKey =
-      /^(ORG|ORGANIZER)-/i.test(codeToVerify) ||
-      ['ORG-INVITE-2026', 'ORGANIZER-AUTH-2026', 'ORG-2026-DEV', 'DEVPULSE-ORG-2026', 'PCCOE-ORG-2026'].includes(codeToVerify.toUpperCase());
-    if (!isPlatformOrganizerKey) {
+
+    // Strict validation against database-backed organizer invitations
+    // Rejects permissive regex fallbacks and prevents reuse / expired codes
+    try {
+      await store.preValidateOrganizerCode(codeToVerify);
+    } catch (valErr) {
       return res.status(400).json({
         status: 400,
         error: 'Bad Request',
-        message: 'Invalid or unauthorized Organizer Authorization Code.',
+        message: valErr.message,
       });
     }
   }
 
   try {
     const roleCategory = ['judge', 'mentor'].includes(cleanRole)
-      ? (designation ? String(designation).trim() : undefined)
-      : (['screening', 'organizer'].includes(cleanRole) && department ? String(department).trim() : undefined);
+      ? (resolvedDesignation || undefined)
+      : undefined;
 
     const user = store.createUser({
       email: cleanEmail,
@@ -271,18 +262,31 @@ router.post('/register', (req, res) => {
       }
     }
 
+    // Atomically redeem organizer authorization invitation and link to user account
+    if (cleanRole === 'organizer' && codeToVerify) {
+      try {
+        await store.validateAndRedeemOrganizerInvitation(codeToVerify, user.id);
+      } catch (err) {
+        console.warn(`[Register] Organizer invitation redemption notice: ${err.message}`);
+      }
+    }
+
     const token = signToken(user);
     const redirectPath = getRoleDashboardPath(user.role);
 
     // FR-1: Trigger email notification for account registration
     notifyUserRegistered(user);
 
+    // Retrieve fresh user state after code redemptions
+    const freshUser = store.findUserById(user.id);
+    const safeUser = freshUser ? (({ passwordHash: _, ...u }) => u)(freshUser) : user;
+
     return res.status(201).json({
       status: 201,
       message: 'User registered successfully (FR-1).',
       token,
       redirectPath,
-      user,
+      user: safeUser,
     });
   } catch (err) {
     return res.status(409).json({

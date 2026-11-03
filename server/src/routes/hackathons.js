@@ -341,11 +341,11 @@ router.post('/:id/codes', requireAuth, requireRole('organizer'), (req, res) => {
   }
 
   const { role } = req.body || {};
-  if (!['judge', 'screening'].includes(role)) {
+  if (!['judge', 'screening', 'mentor'].includes(role)) {
     return res.status(400).json({
       status: 400,
       error: 'Bad Request',
-      message: "Role must be 'judge' or 'screening'.",
+      message: "Role must be 'judge', 'screening', or 'mentor'.",
     });
   }
 
@@ -354,6 +354,8 @@ router.post('/:id/codes', requireAuth, requireRole('organizer'), (req, res) => {
     return res.status(201).json({
       status: 201,
       message: `Access code generated for ${role} role.`,
+      code: codeRecord.code,
+      role: codeRecord.role,
       codeRecord,
     });
   } catch (err) {

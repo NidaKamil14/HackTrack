@@ -1,18 +1,23 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   AlertCircle,
   Award,
   CalendarRange,
   Check,
+  ChevronDown,
+  ChevronUp,
   ClipboardCheck,
+  Copy,
   ExternalLink,
+  KeyRound,
   Layers,
   Loader2,
   MoreVertical,
   Package,
   Plus,
   RefreshCw,
+  RotateCcw,
   Scale,
   ScanSearch,
   Search,
@@ -70,6 +75,13 @@ const ROLE_OPTIONS = [
   { value: 'organizer', label: 'Organizer' },
   { value: 'mentor', label: 'Technical Mentor' },
 ];
+
+export function getDisplayRole(role) {
+  const matched = ROLE_OPTIONS.find((r) => r.value === role);
+  if (matched) return matched.label;
+  if (!role) return 'Unknown';
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}
 
 // Presentation-only: Badge tone per role so each role reads distinctly.
 const ROLE_TONES = {
@@ -145,8 +157,6 @@ export default function AdminDashboard() {
   const [notice, setNotice] = useState(null);
 
   useEffect(() => {
-    const handleFocus = () => setRefreshKey((k) => k + 1);
-    window.addEventListener('focus', handleFocus);
     const unsubscribe = subscribeToDataSync((event) => {
       setRefreshKey((k) => k + 1);
       if (event?.eventType === 'hackathon_created' || event?.eventType === 'hackathons_updated') {
@@ -163,7 +173,6 @@ export default function AdminDashboard() {
       }
     });
     return () => {
-      window.removeEventListener('focus', handleFocus);
       unsubscribe();
     };
   }, []);
@@ -369,10 +378,18 @@ export default function AdminDashboard() {
   const [addUserError, setAddUserError] = useState(null);
 
   // Fetch actual user records directly from MySQL via backend API
+  const usersListRef = useRef([]);
+  useEffect(() => {
+    usersListRef.current = usersList;
+  }, [usersList]);
+
   useEffect(() => {
     let isMounted = true;
     async function fetchUsers() {
-      setLoadingUsers(true);
+      // Background refreshes are silent — do not flash loading skeletons over existing rows
+      if (usersListRef.current.length === 0) {
+        setLoadingUsers(true);
+      }
       setUsersError(null);
       try {
         const data = await api.getUsers({
@@ -578,6 +595,101 @@ export default function AdminDashboard() {
       setAddUserError(err.message || 'Failed to create user.');
     } finally {
       setAddUserSubmitting(false);
+    }
+  };
+
+  // ── Organizer Invitations State & Handlers ──
+  const [organizerInvitations, setOrganizerInvitations] = useState([]);
+  const [showAllInvitations, setShowAllInvitations] = useState(false);
+
+  const sortedOrganizerInvitations = useMemo(() => {
+    return [...organizerInvitations].sort((a, b) => {
+      const dateA = new Date(a.createdAt || 0).getTime();
+      const dateB = new Date(b.createdAt || 0).getTime();
+      return dateB - dateA;
+    });
+  }, [organizerInvitations]);
+
+  const displayedOrganizerInvitations = useMemo(() => {
+    if (showAllInvitations) return sortedOrganizerInvitations;
+    return sortedOrganizerInvitations.slice(0, 5);
+  }, [sortedOrganizerInvitations, showAllInvitations]);
+  const [showCreateOrgModal, setShowCreateOrgModal] = useState(false);
+  const [newOrgForm, setNewOrgForm] = useState({
+    organizationName: '',
+    expiresInDays: '7',
+    notes: '',
+  });
+  const [creatingOrgInvitation, setCreatingOrgInvitation] = useState(false);
+  const [createOrgError, setCreateOrgError] = useState(null);
+  const [issuedCodeModal, setIssuedCodeModal] = useState({ open: false, invitation: null });
+  const [copiedIssuedCode, setCopiedIssuedCode] = useState(false);
+  const [invitationActionNotice, setInvitationActionNotice] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchInvitations() {
+      try {
+        const res = await api.getOrganizerInvitations();
+        if (isMounted && res && Array.isArray(res.invitations)) {
+          setOrganizerInvitations(res.invitations);
+        }
+      } catch (err) {
+        console.warn('Failed to load organizer invitations from API:', err.message);
+      }
+    }
+    fetchInvitations();
+    return () => { isMounted = false; };
+  }, [refreshKey]);
+
+  const handleCreateOrgInvitation = async (e) => {
+    e.preventDefault();
+    if (!newOrgForm.organizationName.trim()) {
+      setCreateOrgError('Organization or institution name is required.');
+      return;
+    }
+    setCreatingOrgInvitation(true);
+    setCreateOrgError(null);
+    try {
+      const res = await api.createOrganizerInvitation({
+        organizationName: newOrgForm.organizationName.trim(),
+        expiresInDays: Number(newOrgForm.expiresInDays) || 7,
+        notes: newOrgForm.notes,
+      });
+      setShowCreateOrgModal(false);
+      setNewOrgForm({ organizationName: '', expiresInDays: '7', notes: '' });
+      setIssuedCodeModal({ open: true, invitation: res.invitation });
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      console.error('Failed to issue organizer invitation:', err);
+      setCreateOrgError(err.message || 'Failed to issue organizer invitation.');
+    } finally {
+      setCreatingOrgInvitation(false);
+    }
+  };
+
+  const handleRevokeInvitation = async (invId) => {
+    try {
+      await api.revokeOrganizerInvitation(invId);
+      setInvitationActionNotice('Organizer invitation revoked successfully.');
+      setRefreshKey((k) => k + 1);
+      setTimeout(() => setInvitationActionNotice(null), 3500);
+    } catch (err) {
+      setInvitationActionNotice(`Failed to revoke invitation: ${err.message}`);
+      setTimeout(() => setInvitationActionNotice(null), 4000);
+    }
+  };
+
+  const handleRegenerateInvitation = async (invId) => {
+    try {
+      const res = await api.regenerateOrganizerInvitation(invId);
+      setIssuedCodeModal({ open: true, invitation: res.invitation });
+      setInvitationActionNotice('New replacement code generated successfully.');
+      setRefreshKey((k) => k + 1);
+      setTimeout(() => setInvitationActionNotice(null), 3500);
+    } catch (err) {
+      setInvitationActionNotice(`Failed to regenerate invitation: ${err.message}`);
+      setTimeout(() => setInvitationActionNotice(null), 4000);
     }
   };
 
@@ -1246,10 +1358,20 @@ export default function AdminDashboard() {
                     </div>
                   }
                 />
-                <Button onClick={() => setShowAddUserModal(true)} className="sm:self-start">
-                  <Plus className="h-4 w-4" aria-hidden="true" />
-                  Add User
-                </Button>
+                <div className="flex flex-wrap items-center gap-2 sm:self-start">
+                  <Button
+                    variant="secondary"
+                    onClick={() => setShowCreateOrgModal(true)}
+                    className="border-accent/40 hover:bg-accent/10"
+                  >
+                    <KeyRound className="h-4 w-4 mr-1.5 text-accent" aria-hidden="true" />
+                    Create Organizer Invitation
+                  </Button>
+                  <Button onClick={() => setShowAddUserModal(true)}>
+                    <Plus className="h-4 w-4" aria-hidden="true" />
+                    Add User
+                  </Button>
+                </div>
               </div>
 
               {/* Filters toolbar */}
@@ -1303,8 +1425,8 @@ export default function AdminDashboard() {
                 </Alert>
               )}
 
-              {/* Loading state */}
-              {loadingUsers ? (
+              {/* Loading state: only show full card skeleton if no users are loaded yet */}
+              {loadingUsers && usersList.length === 0 ? (
                 <Card>
                   <div className="flex flex-col items-center justify-center p-12 text-center text-fg-muted space-y-3">
                     <Loader2 className="h-6 w-6 animate-spin text-accent" aria-hidden="true" />
@@ -1380,7 +1502,7 @@ export default function AdminDashboard() {
                             </td>
                             <td className={cn(tableClasses.td, 'font-mono text-xs')}>{u.email}</td>
                             <td className={tableClasses.td}>
-                              <Badge tone={ROLE_TONES[u.role] || 'neutral'} dot>{u.roleCategory || u.role}</Badge>
+                              <Badge tone={ROLE_TONES[u.role] || 'neutral'} dot>{getDisplayRole(u.role)}</Badge>
                             </td>
                             <td className={tableClasses.td}>
                               <Badge tone={u.isActive ? 'success' : 'danger'} dot>
@@ -1462,6 +1584,167 @@ export default function AdminDashboard() {
                     </tbody>
                   </table>
                 </TableContainer>
+              )}
+
+              {/* ORGANIZER INVITATIONS & AUTHORIZATION KEYS PANEL (Visible when role filter is organizer, placed below users list) */}
+              {userRoleFilter === 'organizer' && (
+                <div className="space-y-4 pt-4">
+                  {invitationActionNotice && (
+                    <Alert tone="info">
+                      {invitationActionNotice}
+                    </Alert>
+                  )}
+
+                  <Card className="border-accent/30 bg-accent/5">
+                    <CardHeader className="border-b border-line/60 pb-3">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <CardTitle className="flex items-center gap-2 text-base text-fg">
+                            <KeyRound className="h-4 w-4 text-accent" aria-hidden="true" />
+                            Admin-Governed Organizer Authorization Keys
+                            <Badge tone="neutral" className="ml-1 text-[11px]">
+                              {sortedOrganizerInvitations.length} {sortedOrganizerInvitations.length === 1 ? 'key' : 'keys'}
+                            </Badge>
+                          </CardTitle>
+                          <CardDescription className="text-xs">
+                            Cryptographically generated single-use keys governing platform organizer onboarding. Stored securely as SHA-256 hashes in MySQL.
+                          </CardDescription>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => setShowCreateOrgModal(true)}
+                        >
+                          <Plus className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
+                          Create Invitation
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      {sortedOrganizerInvitations.length === 0 ? (
+                        <div className="p-6 text-center text-xs text-fg-muted">
+                          No organizer invitations issued yet. Click &quot;Create Invitation&quot; to issue an authorization code for an institution.
+                        </div>
+                      ) : (
+                        <>
+                          <TableContainer>
+                            <table className={tableClasses.table}>
+                              <thead className={tableClasses.thead}>
+                                <tr>
+                                  <th scope="col" className={tableClasses.th}>Masked Code</th>
+                                  <th scope="col" className={tableClasses.th}>Organization</th>
+                                  <th scope="col" className={tableClasses.th}>Status</th>
+                                  <th scope="col" className={tableClasses.th}>Issued</th>
+                                  <th scope="col" className={tableClasses.th}>Expires</th>
+                                  <th scope="col" className={tableClasses.th}>Redeemed By</th>
+                                  <th scope="col" className={cn(tableClasses.th, "text-right")}>Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {displayedOrganizerInvitations.map((inv) => (
+                                  <tr key={inv.id} className={tableClasses.tr}>
+                                    <td className={cn(tableClasses.td, "font-mono font-bold text-accent-text")}>
+                                      {inv.maskedCode}
+                                    </td>
+                                    <td className={cn(tableClasses.td, "font-medium text-fg")}>
+                                      {inv.organizationName}
+                                    </td>
+                                    <td className={tableClasses.td}>
+                                      <Badge
+                                        tone={
+                                          inv.status === 'redeemed'
+                                            ? 'success'
+                                            : inv.status === 'pending'
+                                            ? 'warning'
+                                            : inv.status === 'revoked'
+                                            ? 'danger'
+                                            : 'neutral'
+                                        }
+                                        dot
+                                      >
+                                        {inv.status === 'pending' ? 'Pending Signup' : inv.status}
+                                      </Badge>
+                                    </td>
+                                    <td className={cn(tableClasses.td, "text-xs text-fg-muted")}>
+                                      {inv.createdAt ? new Date(inv.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                                    </td>
+                                    <td className={cn(tableClasses.td, "text-xs text-fg-muted")}>
+                                      {inv.expiresAt ? new Date(inv.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                                    </td>
+                                    <td className={cn(tableClasses.td, "text-xs")}>
+                                      {inv.redeemedByName ? (
+                                        <div className="flex flex-col">
+                                          <span className="font-semibold text-fg">{inv.redeemedByName}</span>
+                                          <span className="font-mono text-[11px] text-fg-muted">{inv.redeemedByEmail}</span>
+                                        </div>
+                                      ) : (
+                                        <span className="text-fg-subtle italic">Awaiting registration</span>
+                                      )}
+                                    </td>
+                                    <td className={cn(tableClasses.td, "text-right")}>
+                                      <div className="flex items-center justify-end gap-1.5">
+                                        {inv.status === 'pending' && (
+                                          <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={() => handleRevokeInvitation(inv.id)}
+                                            className="text-xs text-danger hover:text-danger"
+                                          >
+                                            Revoke
+                                          </Button>
+                                        )}
+                                        {(inv.status === 'pending' || inv.status === 'expired' || inv.status === 'revoked') && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleRegenerateInvitation(inv.id)}
+                                            title="Regenerate replacement code"
+                                            className="text-xs"
+                                          >
+                                            <RotateCcw className="h-3 w-3 mr-1" aria-hidden="true" />
+                                            Regen
+                                          </Button>
+                                        )}
+                                        {inv.status === 'redeemed' && (
+                                          <span className="text-[11px] font-medium text-success flex items-center gap-1">
+                                            <Check className="h-3.5 w-3.5" aria-hidden="true" /> Active
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </TableContainer>
+
+                          {sortedOrganizerInvitations.length > 5 && (
+                            <div className="flex items-center justify-between border-t border-line/60 bg-raised/20 px-4 py-3">
+                              <span className="text-xs text-fg-muted font-medium">
+                                Showing {displayedOrganizerInvitations.length} of {sortedOrganizerInvitations.length} authorization {sortedOrganizerInvitations.length === 1 ? 'key' : 'keys'}
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setShowAllInvitations((prev) => !prev)}
+                                className="text-xs font-semibold text-accent hover:text-accent-text"
+                              >
+                                {showAllInvitations ? (
+                                  <span className="flex items-center gap-1.5">
+                                    Show Less <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+                                  </span>
+                                ) : (
+                                  <span className="flex items-center gap-1.5">
+                                    Show More ({sortedOrganizerInvitations.length - 5} more) <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                                  </span>
+                                )}
+                              </Button>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
               )}
             </TabPanel>
 
@@ -1659,7 +1942,7 @@ export default function AdminDashboard() {
                 <div className="flex items-center justify-between">
                   <span className="text-xs uppercase tracking-wider text-fg-subtle font-medium">Target User</span>
                   <Badge tone={ROLE_TONES[deactivateConfirmUser.role] || 'neutral'}>
-                    {deactivateConfirmUser.roleCategory || deactivateConfirmUser.role}
+                    {getDisplayRole(deactivateConfirmUser.role)}
                   </Badge>
                 </div>
                 <p className="font-semibold text-fg text-base">{deactivateConfirmUser.fullName}</p>
@@ -1733,7 +2016,7 @@ export default function AdminDashboard() {
                 <div className="flex items-center justify-between">
                   <span className="text-xs uppercase tracking-wider text-fg-subtle font-medium">Target User</span>
                   <Badge tone={ROLE_TONES[reactivateConfirmUser.role] || 'neutral'}>
-                    {reactivateConfirmUser.roleCategory || reactivateConfirmUser.role}
+                    {getDisplayRole(reactivateConfirmUser.role)}
                   </Badge>
                 </div>
                 <p className="font-semibold text-fg text-base">{reactivateConfirmUser.fullName}</p>
@@ -1776,6 +2059,155 @@ export default function AdminDashboard() {
                   ) : (
                     'Reactivate User'
                   )}
+                </Button>
+              </div>
+            </div>
+          )}
+        </Dialog>
+
+        {/* DIALOG: CREATE ORGANIZER INVITATION */}
+        <Dialog
+          open={showCreateOrgModal}
+          onClose={() => setShowCreateOrgModal(false)}
+          title="Create Organizer Invitation"
+          description="Issue an official authorization code allowing an institution or event committee to register as an Organizer."
+        >
+          <form onSubmit={handleCreateOrgInvitation} className="space-y-4">
+            {createOrgError && (
+              <Alert tone="danger">
+                {createOrgError}
+              </Alert>
+            )}
+
+            <Field label="Host organization / institution name" required>
+              <Input
+                type="text"
+                value={newOrgForm.organizationName}
+                onChange={(e) => setNewOrgForm({ ...newOrgForm, organizationName: e.target.value })}
+                placeholder="e.g. Pune Institute of Computer Technology"
+                required
+              />
+            </Field>
+
+            <Field label="Code validity period" required>
+              <Select
+                value={newOrgForm.expiresInDays}
+                onChange={(e) => setNewOrgForm({ ...newOrgForm, expiresInDays: e.target.value })}
+              >
+                <option value="3">3 Days</option>
+                <option value="7">7 Days (Standard)</option>
+                <option value="14">14 Days</option>
+                <option value="30">30 Days</option>
+              </Select>
+            </Field>
+
+            <Field label="Internal notes / intended contact (optional)">
+              <Input
+                type="text"
+                value={newOrgForm.notes}
+                onChange={(e) => setNewOrgForm({ ...newOrgForm, notes: e.target.value })}
+                placeholder="e.g. Lead organizer Prof. Sharma"
+              />
+            </Field>
+
+            <div className="rounded-lg border border-accent/20 bg-accent/5 p-3 text-xs text-fg-muted space-y-1">
+              <p className="font-semibold text-accent flex items-center gap-1.5">
+                <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+                Security Policy:
+              </p>
+              <p>
+                A single-use cryptographically random code will be generated. The full code is displayed only once.
+                The backend stores only a secure SHA-256 hash.
+              </p>
+            </div>
+
+            <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+              <Button
+                variant="ghost"
+                onClick={() => setShowCreateOrgModal(false)}
+                disabled={creatingOrgInvitation}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={creatingOrgInvitation}
+              >
+                {creatingOrgInvitation ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-1.5" aria-hidden="true" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <KeyRound className="h-4 w-4 mr-1.5" aria-hidden="true" />
+                    Generate Authorization Code
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </Dialog>
+
+        {/* DIALOG: ORGANIZER INVITATION CODE ISSUED */}
+        <Dialog
+          open={issuedCodeModal.open}
+          onClose={() => { setIssuedCodeModal({ open: false, invitation: null }); setCopiedIssuedCode(false); }}
+          title="Organizer Authorization Code Issued"
+          description="Share this code with the intended organizer to complete account registration."
+        >
+          {issuedCodeModal.invitation && (
+            <div className="space-y-4">
+              <div className="rounded-xl border-2 border-accent bg-accent/10 p-5 text-center space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-accent-text">
+                  Official Organizer Authorization Code
+                </p>
+                <div className="flex items-center justify-center gap-3">
+                  <span className="font-mono text-2xl font-black tracking-widest text-fg select-all bg-canvas/80 px-4 py-2 rounded-lg border border-line">
+                    {issuedCodeModal.invitation.code}
+                  </span>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(issuedCodeModal.invitation.code);
+                      setCopiedIssuedCode(true);
+                      setTimeout(() => setCopiedIssuedCode(false), 3000);
+                    }}
+                    className="h-10"
+                  >
+                    {copiedIssuedCode ? (
+                      <>
+                        <Check className="h-4 w-4 text-success mr-1.5" aria-hidden="true" />
+                        Copied!
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-4 w-4 mr-1.5" aria-hidden="true" />
+                        Copy Code
+                      </>
+                    )}
+                  </Button>
+                </div>
+                <p className="text-xs text-fg-muted">
+                  Organization: <strong className="text-fg">{issuedCodeModal.invitation.organizationName}</strong> · Valid until {new Date(issuedCodeModal.invitation.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-fg space-y-1">
+                <p className="font-semibold text-warning flex items-center gap-1.5">
+                  <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  Important: Copy this code now
+                </p>
+                <p className="text-fg-muted">
+                  For platform security, the full plaintext code is revealed only once. In the database, only the SHA-256 hash is preserved. It cannot be recovered once you close this dialog.
+                </p>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <Button
+                  onClick={() => { setIssuedCodeModal({ open: false, invitation: null }); setCopiedIssuedCode(false); }}
+                >
+                  Done
                 </Button>
               </div>
             </div>
