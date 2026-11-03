@@ -44,6 +44,8 @@ test.before(async () => {
       password: 'password123',
       fullName: 'Aarav Deshmukh',
       role: 'student',
+      university: 'PCCOE Pune',
+      memberId: 'STU-PCCOE-993',
     }),
   });
   const otherData = await otherRes.json();
@@ -86,6 +88,8 @@ test('HackTrack Team Management & Join Code (FR-12 to FR-16, BR-1 to BR-3)', asy
         password: 'password123',
         fullName: 'Shruti Mane',
         role: 'leader',
+        university: 'PCCOE Pune',
+        memberId: 'LEAD-PCCOE-994',
       }),
     });
     const freshLeaderData = await freshLeaderRes.json();

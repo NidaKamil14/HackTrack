@@ -35,7 +35,14 @@ async function registerUser(role, fullName) {
   const email = `${role}_${unique()}@pccoe.edu.in`;
   const res = await api('/api/v1/auth/register', {
     method: 'POST',
-    body: { email, password: 'password123', fullName, role, university: 'PCCOE' },
+    body: {
+      email,
+      password: 'password123',
+      fullName,
+      role,
+      university: 'PCCOE',
+      memberId: ['student', 'leader'].includes(role) ? `STU-${unique()}` : undefined,
+    },
   });
   assert.equal(res.status, 201, `register ${role}: ${JSON.stringify(res.body)}`);
   await settle();
@@ -376,6 +383,7 @@ test('user registration sends confirmation email to new user', async () => {
       fullName: 'Aayush Phadke',
       role: 'student',
       university: 'PCCOE',
+      memberId: 'STU-PCCOE-391',
     },
   });
   assert.equal(res.status, 201);

@@ -1262,7 +1262,7 @@ class HackTrackStore {
     }
   }
 
-  createUser({ email, password, fullName, role = 'student', university, memberId }) {
+  createUser({ email, password, fullName, role = 'student', university, memberId, roleCategory }) {
     const cleanEmail = email.trim().toLowerCase();
     if (this.findUserByEmail(cleanEmail)) {
       throw new Error('An account with this email address already exists.');
@@ -1272,15 +1272,22 @@ class HackTrackStore {
     const passwordHash = bcrypt.hashSync(password, salt);
     const id = `usr-${crypto.randomBytes(4).toString('hex')}`;
 
+    // Student ID must only apply to student-based roles (student, leader).
+    // Non-student roles (screening, judge, organizer, admin) must store NULL, never fabricated IDs.
+    const isStudentRole = ['student', 'leader'].includes(role);
+    const resolvedMemberId = isStudentRole && memberId && String(memberId).trim()
+      ? String(memberId).trim()
+      : null;
+
     const newUser = {
       id,
       email: cleanEmail,
       passwordHash,
       fullName: fullName.trim(),
       role,
-      roleCategory: this.getRoleCategory(role),
+      roleCategory: roleCategory || this.getRoleCategory(role),
       university: university || 'University / Organization',
-      memberId: memberId || `ID-${Math.floor(10000 + Math.random() * 90000)}`,
+      memberId: resolvedMemberId,
       isActive: true,
       createdAt: new Date().toISOString(),
     };
