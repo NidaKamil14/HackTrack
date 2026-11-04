@@ -63,7 +63,7 @@ const DEFAULT_SUBMISSIONS = [
         uploadedAt: "2026-10-04T10:30:00.000Z"
       }
     ],
-    status: "draft",
+    status: "finalized",
     screeningStatus: "Pending Review",
     screeningRemarks: "",
     rejectionReason: "",
@@ -78,7 +78,7 @@ const DEFAULT_SUBMISSIONS = [
     screenedBy: null,
     createdAt: "2026-10-04T10:00:00.000Z",
     updatedAt: "2026-10-04T10:45:00.000Z",
-    finalizedAt: null
+    finalizedAt: "2026-10-04T10:45:00.000Z"
   },
   {
     submissionId: "sub-ai-catalyst-ht-ai-99",
@@ -691,9 +691,10 @@ export function finalizeSubmission({
     ...existing,
     status: "finalized",
     // Screening starts fresh on the finalized work: nothing recorded while it
-    // was a draft (seeded status, checks, remarks) carries over.
+    // was a draft (seeded status, remarks) carries over. The checklist defaults
+    // to all-false so the screener must actively verify each compliance gate.
     screeningStatus: "Pending Review",
-    checks: undefined,
+    checks: { gitFreshness: false, endpointsLive: false, envConfigured: false, licenseMIT: false },
     screeningRemarks: "",
     rejectionReason: "",
     screenedBy: undefined,

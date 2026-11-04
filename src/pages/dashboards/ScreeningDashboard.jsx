@@ -275,10 +275,10 @@ export default function ScreeningDashboard() {
       screeningRemarks: sub.screeningRemarks || "",
       rejectionReason: sub.rejectionReason || "",
       checks: sub.checks || {
-        gitFreshness: true,
-        endpointsLive: true,
-        envConfigured: true,
-        licenseMIT: true
+        gitFreshness: false,
+        endpointsLive: false,
+        envConfigured: false,
+        licenseMIT: false
       },
       flags: sub.flags || []
     }));
@@ -298,7 +298,7 @@ export default function ScreeningDashboard() {
         const mine = await api.getMyAssignedHackathons();
         const bound = (mine?.hackathons || []).map((h) => h.id);
         const lists = await Promise.all(bound.map((id) => api.getSubmissions(id).catch(() => ({ submissions: [] }))));
-        const STATUS = { pending: "Pending Review", shortlisted: "Shortlisted", rejected: "Rejected" };
+        const STATUS = { pending: "Pending Review", under_review: "Under Review", shortlisted: "Shortlisted", rejected: "Rejected" };
         const items = lists.flatMap((l) => l.submissions || []).map((s) => ({
           id: s.id,
           serverTeamId: s.teamId,
@@ -337,16 +337,20 @@ export default function ScreeningDashboard() {
   const [checkDrafts, setCheckDrafts] = useState({});
   const queue = useMemo(() => {
     const serverItems = serverQueue.items.map((it) => (checkDrafts[it.id] ? { ...it, checks: checkDrafts[it.id] } : it));
-    // A reviewer bound to events on the server reviews exactly those events'
-    // submissions; this browser's local demo entries are not mixed in.
-    if (serverQueue.boundIds.length > 0) return serverItems;
-    // A local copy of a submission that also exists on the server is the same entry.
+    // De-duplication keys: a local submission already mirrored on the server
+    // should not be shown twice.
     const serverKeys = new Set(serverQueue.items.map((s) => `${s.hackathonId}|${String(s.teamName).toLowerCase()}`));
     const serverIds = new Set(serverQueue.items.map((s) => s.id));
-    return [
-      ...serverItems,
-      ...submissions.filter((s) => !serverIds.has(s.id) && !serverKeys.has(`${s.hackathonId}|${String(s.teamName).toLowerCase()}`)),
-    ];
+
+    // Local finalized submissions for the reviewer's bound hackathons that are
+    // NOT yet present in the server queue (e.g. submitted offline via localStorage).
+    const localForBound = submissions.filter((s) =>
+      !serverIds.has(s.id) &&
+      !serverKeys.has(`${s.hackathonId}|${String(s.teamName).toLowerCase()}`) &&
+      (serverQueue.boundIds.length === 0 || serverQueue.boundIds.includes(s.hackathonId))
+    );
+
+    return [...serverItems, ...localForBound];
   }, [serverQueue, submissions, checkDrafts]);
 
   useEffect(() => {
