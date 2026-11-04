@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ExternalLink, FileText, Inbox, Layers, Lightbulb, MessageSquare, MousePointerClick, PenLine, Send, Trophy, Users } from 'lucide-react';
+import { ExternalLink, FileText, Inbox, KeyRound, Layers, Lightbulb, MessageSquare, MousePointerClick, PenLine, Send, Trophy, Users } from 'lucide-react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
 import {
   Alert,
@@ -12,6 +12,7 @@ import {
   CardTitle,
   EmptyState,
   Field,
+  Input,
   PageHeader,
   StatCard,
   Textarea,
@@ -24,6 +25,7 @@ import { getStoredHackathons } from '../../utils/hackathonService';
 import { addNotification } from '../../utils/notificationService';
 import { subscribeToDataSync } from '../../utils/syncService';
 import api from '../../utils/api';
+import { redeemReviewerCode } from '../../utils/redeemReviewerCode';
 
 const STORAGE_MENTOR_KEY = "hacktrack_mentor_notes";
 
@@ -256,6 +258,26 @@ export default function MentorDashboard() {
 
   const isFinalized = activeSubmission?.status === 'finalized';
 
+  // Joining another hackathon with the mentor access code its organizer shared.
+  const [codeInput, setCodeInput] = useState("");
+  const [codeNotice, setCodeNotice] = useState(null);
+  const [redeeming, setRedeeming] = useState(false);
+  const handleRedeem = async (e) => {
+    e.preventDefault();
+    if (!codeInput.trim()) return;
+    setRedeeming(true);
+    const res = await redeemReviewerCode(codeInput, user);
+    setRedeeming(false);
+    if (res.success) {
+      setCodeNotice({ tone: "success", text: res.message || `You now mentor ${res.hackathonTitle}.` });
+      setCodeInput("");
+      setRefreshKey((k) => k + 1);
+    } else {
+      setCodeNotice({ tone: "danger", text: res.error || "Invalid or unavailable access code." });
+    }
+    setTimeout(() => setCodeNotice(null), 6000);
+  };
+
   return (
     <DashboardLayout
       portalTitle="Technical Mentor Guild"
@@ -289,6 +311,32 @@ export default function MentorDashboard() {
         </div>
 
         {notice && <Alert tone="success" title="Guidance sent">{notice}</Alert>}
+
+        <Card>
+          <CardContent className="p-4">
+            <form onSubmit={handleRedeem} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <Field
+                label="Mentor access code"
+                hint="Enter the code a hackathon's organizer shared with you to see its teams."
+                className="flex-1"
+              >
+                <Input
+                  value={codeInput}
+                  onChange={(e) => setCodeInput(e.target.value)}
+                  placeholder="e.g. MENTOR-CODE-1A2B3C"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="font-mono uppercase"
+                />
+              </Field>
+              <Button type="submit" loading={redeeming} disabled={!codeInput.trim()}>
+                <KeyRound aria-hidden="true" />
+                Join hackathon
+              </Button>
+            </form>
+            {codeNotice && <Alert tone={codeNotice.tone} className="mt-3">{codeNotice.text}</Alert>}
+          </CardContent>
+        </Card>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           {/* Queue */}

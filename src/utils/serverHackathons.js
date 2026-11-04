@@ -39,6 +39,7 @@ export function normalizeServerHackathon(sh) {
     rubrics: Array.isArray(sh.criteria) ? sh.criteria.map((c) => ({ name: c.name, weight: `${c.maxScore}%`, desc: c.description || '' })) : undefined,
     createdBy: sh.createdBy,
     assignedOrganizers: sh.assignedOrganizers,
+    hasMentorship: Boolean(sh.hasMentorship),
     isServer: true,
   };
 }

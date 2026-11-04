@@ -42,11 +42,11 @@ import {
   getStoredHackathons,
   getUserAssignedHackathonIds,
   getStoredAssignmentIds,
-  redeemAccessCode
 } from '../../utils/hackathonService.js';
 import { addNotification } from '../../utils/notificationService.js';
 import { subscribeToDataSync } from '../../utils/syncService.js';
 import api from '../../utils/api.js';
+import { redeemReviewerCode } from '../../utils/redeemReviewerCode';
 
 /* ------------------------------------------------------------------------- */
 /* Review-workspace pattern. Kept visually identical in JudgeDashboard and    */
@@ -289,7 +289,7 @@ export default function ScreeningDashboard() {
 
   // Server queue: submissions of the hackathons this reviewer joined with a
   // screening code (the backend is the source of truth for these).
-  const [serverQueue, setServerQueue] = useState({ items: [], boundIds: [] });
+  const [serverQueue, setServerQueue] = useState({ items: [], boundIds: [], boundEvents: [] });
   useEffect(() => {
     if (!api.getToken()) return undefined;
     let cancelled = false;
@@ -325,7 +325,8 @@ export default function ScreeningDashboard() {
           flags: [],
           isServer: true,
         }));
-        if (!cancelled) setServerQueue({ boundIds: bound, items });
+        const boundEvents = (mine?.hackathons || []).map((h) => ({ id: h.id, title: h.title }));
+        if (!cancelled) setServerQueue({ boundIds: bound, boundEvents, items });
       } catch {
         /* offline: local queue only */
       }
@@ -365,10 +366,13 @@ export default function ScreeningDashboard() {
     return getUserAssignedHackathonIds(user);
   }, [user, refreshKey]);
 
+  // Events in the competition filter: the server's bindings when the reviewer
+  // has any, otherwise this browser's demo assignments.
   const assignedHackathons = useMemo(() => {
+    if (serverQueue.boundEvents.length > 0) return serverQueue.boundEvents;
     const list = allHackathons.filter((h) => assignedIds.includes(h.id));
     return list.length > 0 ? list : allHackathons.slice(0, 1);
-  }, [allHackathons, assignedIds]);
+  }, [allHackathons, assignedIds, serverQueue.boundEvents]);
 
   const [filterHackathon, setFilterHackathon] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -384,17 +388,11 @@ export default function ScreeningDashboard() {
     const cleanCode = accessCodeInput.trim().toUpperCase();
     if (!cleanCode) return;
 
-    if (api.getToken()) {
-      try {
-        await api.redeemCode(cleanCode);
-      } catch (err) {
-        console.warn("[ScreeningDashboard] Backend code redemption warning:", err.message);
-      }
-    }
-
-    const res = redeemAccessCode(cleanCode, user);
+    // Server first; a local fallback only for browser-only demo events.
+    const res = await redeemReviewerCode(cleanCode, user);
     if (res.success) {
-      addNotification({
+      // The server sends its own "access granted" notification.
+      if (!res.server) addNotification({
         userEmail: user?.email,
         title: "Screening Access Granted",
         message: res.message || "Access verified for screening committee panel.",

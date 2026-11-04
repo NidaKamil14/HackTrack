@@ -222,12 +222,22 @@ router.post('/register', registerLimiter, (req, res) => {
     }
   }
 
-  if (cleanRole === 'mentor' && !inviteKeys('MENTOR_INVITE_CODES', DEV_MENTOR_KEYS).has(codeToVerify.toUpperCase())) {
-    return res.status(400).json({
-      status: 400,
-      error: 'Bad Request',
-      message: 'A valid Mentor Invitation Code is required to register as a mentor.',
-    });
+  if (cleanRole === 'mentor') {
+    // Either an event's mentor access code (the account is bound to that event)
+    // or a platform mentor invitation key.
+    const given = String(codeToVerify || '').trim().toUpperCase();
+    const eventCode = given
+      ? store.hackathonCodes.find((c) => c.code.toUpperCase() === given && c.role === 'mentor')
+      : null;
+    if (eventCode) {
+      matchedCodeRecord = eventCode;
+    } else if (!given || !inviteKeys('MENTOR_INVITE_CODES', DEV_MENTOR_KEYS).has(given)) {
+      return res.status(400).json({
+        status: 400,
+        error: 'Bad Request',
+        message: 'A valid mentor access code or Mentor Invitation Code is required to register as a mentor.',
+      });
+    }
   }
 
   try {

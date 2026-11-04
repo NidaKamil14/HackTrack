@@ -489,12 +489,14 @@ router.get('/:id/codes', requireAuth, requireRole('organizer'), (req, res) => {
   const codes = store.getCodesForHackathon(req.params.id);
   const judges = store.getHackathonAssignedUsers(req.params.id, 'judge');
   const screeners = store.getHackathonAssignedUsers(req.params.id, 'screening');
+  const mentors = store.getHackathonAssignedUsers(req.params.id, 'mentor');
   return res.json({
     status: 200,
     hackathonId: req.params.id,
     codes,
     assignedJudges: judges,
     assignedScreeners: screeners,
+    assignedMentors: mentors,
   });
 });
 

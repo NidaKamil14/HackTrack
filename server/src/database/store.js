@@ -3096,16 +3096,15 @@ class HackTrackStore {
       .filter(Boolean);
   }
 
+  /**
+   * Committee members bound to an event (optionally one role). Read from the
+   * users' own bindings, not from code redemptions, so regenerating a code
+   * never hides people who joined with the previous one.
+   */
   getHackathonAssignedUsers(hackathonId, role) {
-    const codes = this.hackathonCodes.filter(
-      (c) => c.hackathonId === hackathonId && (!role || c.role === role)
-    );
-    const userIds = new Set(
-      codes.flatMap((c) => c.redeemedBy.map((r) => r.userId))
-    );
-    return [...userIds]
-      .map((id) => this.findUserById(id))
-      .filter(Boolean)
+    const roles = role ? [role] : ['judge', 'screening', 'mentor'];
+    return this.users
+      .filter((u) => roles.includes(u.role) && Array.isArray(u.assignedHackathonIds) && u.assignedHackathonIds.includes(hackathonId))
       .map(toSafeUser);
   }
 }

@@ -39,13 +39,13 @@ import {
   getStoredHackathons,
   getUserAssignedHackathonIds,
   getStoredAssignmentIds,
-  redeemAccessCode
 } from '../../utils/hackathonService';
 import { getShortlistedSubmissions } from '../../utils/submissionService';
 import { getEvaluations, saveEvaluation, isResultsPublished } from '../../utils/evaluationService';
 import { addNotification } from '../../utils/notificationService';
 import { subscribeToDataSync } from '../../utils/syncService';
 import api from '../../utils/api';
+import { redeemReviewerCode } from '../../utils/redeemReviewerCode';
 
 /* ------------------------------------------------------------------------- */
 /* Review-workspace pattern. Kept visually identical in JudgeDashboard and    */
@@ -268,7 +268,7 @@ export default function JudgeDashboard() {
     return getUserAssignedHackathonIds(user);
   }, [user, refreshKey]);
 
-  const assignedHackathons = useMemo(() => {
+  const localAssignedHackathons = useMemo(() => {
     const list = allHackathons.filter((h) => assignedIds.includes(h.id));
     return list.length > 0 ? list : allHackathons.slice(0, 1);
   }, [allHackathons, assignedIds]);
@@ -286,17 +286,11 @@ export default function JudgeDashboard() {
     const cleanCode = accessCodeInput.trim().toUpperCase();
     if (!cleanCode) return;
 
-    if (api.getToken()) {
-      try {
-        await api.redeemCode(cleanCode);
-      } catch (err) {
-        console.warn("[JudgeDashboard] Backend code redemption warning:", err.message);
-      }
-    }
-
-    const res = redeemAccessCode(cleanCode, user);
+    // Server first; a local fallback only for browser-only demo events.
+    const res = await redeemReviewerCode(cleanCode, user);
     if (res.success) {
-      addNotification({
+      // The server sends its own "access granted" notification.
+      if (!res.server) addNotification({
         userEmail: user?.email,
         title: "Judging Assignment Activated",
         message: res.message || "Access verified. Assigned to evaluation chamber.",
@@ -330,13 +324,17 @@ export default function JudgeDashboard() {
   // against the event's real rubric (criteria ids, max scores).
   const [serverAssigned, setServerAssigned] = useState([]);
   const [serverBoundIds, setServerBoundIds] = useState([]);
+  const [serverBoundEvents, setServerBoundEvents] = useState([]);
   useEffect(() => {
     if (!api.getToken()) return undefined;
     let cancelled = false;
     (async () => {
       try {
         const [res, mine] = await Promise.all([api.getAssignedSubmissions(), api.getMyAssignedHackathons().catch(() => null)]);
-        if (!cancelled) setServerBoundIds((mine?.hackathons || []).map((h) => h.id));
+        if (!cancelled) {
+          setServerBoundIds((mine?.hackathons || []).map((h) => h.id));
+          setServerBoundEvents((mine?.hackathons || []).map((h) => ({ id: h.id, title: h.title })));
+        }
         const subs = res?.assignedSubmissions || [];
         const hackIds = [...new Set(subs.map((s) => s.hackathonId))];
         const hacks = Object.fromEntries(
@@ -372,6 +370,10 @@ export default function JudgeDashboard() {
     })();
     return () => { cancelled = true; };
   }, [refreshKey]);
+
+  // Events in the competition filter: the server's bindings when the judge
+  // has any, otherwise this browser's demo assignments.
+  const assignedHackathons = serverBoundEvents.length > 0 ? serverBoundEvents : localAssignedHackathons;
 
   const combinedTeams = useMemo(() => {
     const list = [];

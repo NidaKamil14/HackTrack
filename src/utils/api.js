@@ -140,6 +140,18 @@ class ApiClient {
     return this.request(`/hackathons/${id}`);
   }
 
+  // Committee access codes and bound reviewers (organizer of the event).
+  async getHackathonCodes(hackathonId) {
+    return this.request(`/hackathons/${encodeURIComponent(hackathonId)}/codes`);
+  }
+
+  async generateHackathonCode(hackathonId, role) {
+    return this.request(`/hackathons/${encodeURIComponent(hackathonId)}/codes`, {
+      method: 'POST',
+      body: JSON.stringify({ role }),
+    });
+  }
+
   async createHackathon(data) {
     return this.request('/hackathons', {
       method: 'POST',

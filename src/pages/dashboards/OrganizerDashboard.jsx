@@ -31,6 +31,7 @@ import {
   Check,
   Copy,
   FileText,
+  GraduationCap,
   KeyRound,
   Layers,
   ListChecks,
@@ -343,10 +344,32 @@ export default function OrganizerDashboard() {
     setManageTarget(hackathon);
     setCopiedCode(null);
     setJudgeAssignNotice(null);
+    setCodeError(null);
+    if (hackathon.isServer) refreshServerCommittee(hackathon.id).catch((err) => setCodeError(err.message));
   };
 
-  const handleRegenerateCode = (role) => {
+  // Server events: codes and the committee live on the server (the only codes
+  // reviewers can redeem). Local demo events keep the browser-only codes.
+  const [codeError, setCodeError] = useState(null);
+  const refreshServerCommittee = async (hackathonId) => {
+    const res = await api.getHackathonCodes(hackathonId);
+    setServerData((prev) => ({ ...prev, committee: { ...prev.committee, [hackathonId]: res } }));
+  };
+
+  const handleRegenerateCode = async (role) => {
     if (!manageTarget) return;
+    if (manageTarget.isServer) {
+      setCodeError(null);
+      try {
+        const res = await api.generateHackathonCode(manageTarget.id, role);
+        await refreshServerCommittee(manageTarget.id);
+        setNotice(`New ${role} code for ${manageTarget.title}: ${res.codeRecord.code}. The previous ${role} code no longer works; people who already joined keep their access.`);
+        setTimeout(() => setNotice(null), 6000);
+      } catch (err) {
+        setCodeError(err.message || "The code could not be generated.");
+      }
+      return;
+    }
     const res = generateHackathonCode(manageTarget.id, role, user?.email || "organizer@hacktrack.io");
     if (res.success) {
       setRefreshKey((k) => k + 1);
@@ -772,9 +795,20 @@ export default function OrganizerDashboard() {
 
   // Committee & access codes for the hackathon open in the "Codes & committee" dialog.
   // Re-read on every render so regenerated codes (refreshKey bump) show immediately.
-  const committee = manageTarget ? getHackathonCommittee(manageTarget.id) : null;
+  const serverCommittee = manageTarget?.isServer ? serverData.committee?.[manageTarget.id] : null;
+  const committee = !manageTarget
+    ? null
+    : manageTarget.isServer
+      ? {
+          codes: serverCommittee?.codes || [],
+          judges: serverCommittee?.assignedJudges || [],
+          screeners: serverCommittee?.assignedScreeners || [],
+          mentors: serverCommittee?.assignedMentors || [],
+        }
+      : { mentors: [], ...getHackathonCommittee(manageTarget.id) };
   const judgeCodeRecord = committee ? (committee.codes || []).find((c) => c.role === "judge") : undefined;
   const screeningCodeRecord = committee ? (committee.codes || []).find((c) => c.role === "screening") : undefined;
+  const mentorCodeRecord = committee ? (committee.codes || []).find((c) => c.role === "mentor") : undefined;
 
   return (
     <DashboardLayout
@@ -1566,6 +1600,8 @@ export default function OrganizerDashboard() {
                 </div>
               </div>
 
+              {codeError && <Alert tone="danger">{codeError}</Alert>}
+
               {/* Access code sections */}
               <AccessCodeSection
                 icon={ShieldCheck}
@@ -1599,7 +1635,26 @@ export default function OrganizerDashboard() {
                 emptyText="No judges have redeemed this code yet. Share the code above."
               />
 
-              {/* Direct Judge Assignment Form */}
+              {manageTarget.hasMentorship && (
+                <AccessCodeSection
+                  icon={GraduationCap}
+                  tone="success"
+                  title="Mentor access code"
+                  badge="Team guidance"
+                  description="Share this code with mentors. They enter it on their Mentor dashboard (or when signing up as a mentor) to see this hackathon's teams and send them guidance."
+                  code={mentorCodeRecord?.code}
+                  copied={Boolean(mentorCodeRecord?.code) && copiedCode === mentorCodeRecord?.code}
+                  onCopy={() => handleCopyCode(mentorCodeRecord?.code)}
+                  onRegenerate={() => handleRegenerateCode('mentor')}
+                  rosterLabel="Bound mentors"
+                  members={committee.mentors}
+                  fallbackName="Mentor"
+                  emptyText="No mentors have joined this hackathon yet. Share the code above."
+                />
+              )}
+
+              {/* Direct Judge Assignment Form (browser-only events; server events use the codes above) */}
+              {!manageTarget.isServer && (
               <div className="rounded-lg border border-line bg-raised/30 p-4 space-y-3">
                 <div className="flex items-center gap-2">
                   <IconTile icon={UserPlus} tone="info" size="sm" />
@@ -1631,6 +1686,7 @@ export default function OrganizerDashboard() {
                   </Button>
                 </form>
               </div>
+              )}
 
               {/* Footer controls */}
               <div className="flex flex-col gap-2 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1670,7 +1726,7 @@ export default function OrganizerDashboard() {
   );
 }
 
-const sectionToneText = { warning: 'text-warning', info: 'text-info' };
+const sectionToneText = { warning: 'text-warning', info: 'text-info', success: 'text-success' };
 
 /** One role's access code: copy / regenerate controls plus the roster of reviewers bound to it. */
 function AccessCodeSection({
@@ -1703,7 +1759,7 @@ function AccessCodeSection({
         </div>
         <Button variant="secondary" size="sm" onClick={onRegenerate} className="self-start">
           <RefreshCw aria-hidden="true" />
-          Regenerate
+          {code ? "Regenerate" : "Generate"}
         </Button>
       </div>
 
