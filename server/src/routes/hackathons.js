@@ -116,6 +116,16 @@ router.get('/', optionalAuth, (req, res) => {
   });
 });
 
+// GET /api/v1/hackathons/my-registrations: Get registered competitions for current authenticated user
+router.get('/my-registrations', requireAuth, (req, res) => {
+  const registrations = store.getUserRegistrations(req.user.id);
+  return res.json({
+    status: 200,
+    count: registrations.length,
+    registrations,
+  });
+});
+
 // GET /api/v1/hackathons/:id: Get hackathon details & evaluation criteria
 router.get('/:id', optionalAuth, (req, res) => {
   const hackathon = store.getHackathonById(req.params.id);
@@ -452,7 +462,7 @@ router.post('/:id/codes', requireAuth, requireRole('organizer'), (req, res) => {
     return res.status(400).json({
       status: 400,
       error: 'Bad Request',
-      message: "Role must be 'judge', 'screening' or 'mentor'.",
+      message: "Role must be 'judge', 'screening', or 'mentor'.",
     });
   }
 
@@ -461,6 +471,8 @@ router.post('/:id/codes', requireAuth, requireRole('organizer'), (req, res) => {
     return res.status(201).json({
       status: 201,
       message: `Access code generated for ${role} role.`,
+      code: codeRecord.code,
+      role: codeRecord.role,
       codeRecord,
     });
   } catch (err) {

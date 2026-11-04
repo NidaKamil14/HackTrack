@@ -30,8 +30,17 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    const handleStorageChange = () => {
-      setUser(getCurrentUser());
+    const handleStorageChange = (e) => {
+      if (!e.key || e.key === 'hacktrack_current_user' || e.key === 'hacktrack_token') {
+        const nextUser = getCurrentUser();
+        setUser((prev) => {
+          if (!prev && !nextUser) return null;
+          if (prev && nextUser && prev.id === nextUser.id && prev.role === nextUser.role && prev.email === nextUser.email) {
+            return prev;
+          }
+          return nextUser;
+        });
+      }
     };
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);

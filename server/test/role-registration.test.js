@@ -108,7 +108,7 @@ test('HackTrack Role-Specific Registration & Security Verification', async (t) =
   });
 
   // 3. Screening Committee Registration
-  await t.test('5. Screening Committee registers WITHOUT Student ID using valid access code', async () => {
+  await t.test('5. Screening Committee registers WITHOUT Student ID or Department using valid access code', async () => {
     const res = await fetch(`${baseUrl}/api/v1/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -118,7 +118,6 @@ test('HackTrack Role-Specific Registration & Security Verification', async (t) =
         fullName: 'Dr. Marcus Vance',
         role: 'screening',
         university: 'PCCOE Pune',
-        department: 'Technical Screening Committee',
         accessCode: 'SCREEN-CODE-3M2P',
       }),
     });
@@ -199,7 +198,7 @@ test('HackTrack Role-Specific Registration & Security Verification', async (t) =
   });
 
   // 5. Organizer Registration
-  await t.test('9. Organizer registers WITHOUT Student ID using valid authorization key', async () => {
+  await t.test('9. Organizer registers WITHOUT Student ID or Department using valid authorization key', async () => {
     const res = await fetch(`${baseUrl}/api/v1/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -209,7 +208,6 @@ test('HackTrack Role-Specific Registration & Security Verification', async (t) =
         fullName: 'Kavita Rao',
         role: 'organizer',
         university: 'DevPulse Operations',
-        department: 'Operations Committee',
         accessCode: 'ORG-INVITE-2026',
       }),
     });

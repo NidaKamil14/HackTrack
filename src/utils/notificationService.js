@@ -1,3 +1,6 @@
+import { normalizeHackathonId } from './registrationService.js';
+import { getUserAssignedHackathonIds } from './hackathonService.js';
+
 const STORAGE_KEY = "hacktrack_notifications";
 
 export function getNotifications() {
@@ -36,7 +39,7 @@ export function syncRoleNotifications(user) {
   if (!cleanEmail) return;
 
   const role = (typeof user === "object" ? user?.role : null) || "";
-  const all = getNotifications();
+  let all = getNotifications();
   let updated = false;
 
   const pushIfAbsent = (notif) => {
@@ -51,12 +54,102 @@ export function syncRoleNotifications(user) {
   };
 
   try {
-    // 1. Approaching Deadlines (All authenticated users)
     const rawHacks = localStorage.getItem("hacktrack_hackathons");
     const hackathons = rawHacks ? JSON.parse(rawHacks) : [];
+
+    const rawRegs = localStorage.getItem("hacktrack_registrations");
+    const regs = rawRegs ? JSON.parse(rawRegs) : [];
+
+    const rawTeams = localStorage.getItem("hacktrack_teams");
+    const teamsObj = rawTeams ? JSON.parse(rawTeams) : {};
+    const teamsList = Object.values(teamsObj || {});
+
+    // Compute user's legitimate hackathon associations
+    const userRegHackIds = new Set();
+    if (Array.isArray(regs)) {
+      regs
+        .filter((r) => String(r.userId || "").toLowerCase().trim() === cleanEmail)
+        .forEach((r) => {
+          if (r.hackathonId) userRegHackIds.add(normalizeHackathonId(r.hackathonId));
+        });
+    }
+
+    const userTeamHackIds = new Set();
+    teamsList.forEach((t) => {
+      if (!t || !t.code) return;
+      const isLead = (t.leadEmail || "").toLowerCase().trim() === cleanEmail;
+      const isMember = Array.isArray(t.members) && t.members.some((m) => (m.email || "").toLowerCase().trim() === cleanEmail);
+      if (isLead || isMember) {
+        if (t.hackathonId) userTeamHackIds.add(normalizeHackathonId(t.hackathonId));
+        if (t.hackathon) userTeamHackIds.add(normalizeHackathonId(t.hackathon));
+      }
+    });
+
+    const userOrgHackIds = new Set();
+    if (role === 'organizer' && Array.isArray(hackathons)) {
+      hackathons.forEach((h) => {
+        const hEmail = (h.organizerEmail || "").toLowerCase().trim();
+        const hCreator = String(h.createdBy || "").toLowerCase().trim();
+        if (hEmail === cleanEmail || (user?.id && hCreator === String(user.id).toLowerCase()) || cleanEmail === "organizer@hacktrack.io") {
+          userOrgHackIds.add(normalizeHackathonId(h.id));
+        }
+      });
+    }
+
+    const assignedIds = getUserAssignedHackathonIds(user) || [];
+    const userAssignedHackIds = new Set(assignedIds.map(normalizeHackathonId));
+
+    // A hackathon is associated with this user if:
+    // - User registered for it
+    // - User is in a team for it
+    // - User is the organizer for it
+    // - User is an assigned reviewer (judge, screening, mentor) for it
+    // - Or user is admin (admin has platform-wide oversight)
+    const isAssociatedWithHackathon = (hackId) => {
+      if (role === 'admin') return true;
+      const norm = normalizeHackathonId(hackId);
+      return userRegHackIds.has(norm) ||
+        userTeamHackIds.has(norm) ||
+        userOrgHackIds.has(norm) ||
+        userAssignedHackIds.has(norm);
+    };
+
+    // 0. PRUNE STALE / LEAKED NOTIFICATIONS:
+    // Purge any previously stored notifications for hackathons the user is NOT associated with
+    const initialCount = all.length;
+    all = all.filter((n) => {
+      if (n.userEmail && n.userEmail.toLowerCase().trim() === cleanEmail) {
+        if (n.id && n.id.startsWith("deadline-")) {
+          const suffix = `-${cleanEmail}`;
+          if (n.id.endsWith(suffix)) {
+            const hackId = n.id.slice("deadline-".length, n.id.length - suffix.length);
+            if (hackId && !isAssociatedWithHackathon(hackId)) {
+              return false;
+            }
+          }
+        }
+        if (n.id && n.id.startsWith("reg-") && !n.id.startsWith("reg-demo-")) {
+          const suffix = `-${cleanEmail}`;
+          if (n.id.endsWith(suffix)) {
+            const hackId = n.id.slice("reg-".length, n.id.length - suffix.length);
+            if (hackId && !userRegHackIds.has(normalizeHackathonId(hackId))) {
+              return false;
+            }
+          }
+        }
+      }
+      return true;
+    });
+    if (all.length !== initialCount) {
+      updated = true;
+    }
+
+    // 1. Approaching Deadlines: STRICTLY for associated hackathons only!
     if (Array.isArray(hackathons)) {
       hackathons.forEach((h) => {
         if (!h || !h.id) return;
+        if (!isAssociatedWithHackathon(h.id)) return; // Strict Isolation Check!
+
         const deadline = h.deadline || h.submissionDeadline || h.dates;
         if (!deadline || deadline === "TBD") return;
 
@@ -72,8 +165,6 @@ export function syncRoleNotifications(user) {
     }
 
     // 2. Participant / Student Notifications
-    const rawRegs = localStorage.getItem("hacktrack_registrations");
-    const regs = rawRegs ? JSON.parse(rawRegs) : [];
     if (Array.isArray(regs)) {
       regs
         .filter((r) => String(r.userId || "").toLowerCase().trim() === cleanEmail)
@@ -90,10 +181,6 @@ export function syncRoleNotifications(user) {
     }
 
     // 3. Team-specific notifications (Participant & Team Leader)
-    const rawTeams = localStorage.getItem("hacktrack_teams");
-    const teamsObj = rawTeams ? JSON.parse(rawTeams) : {};
-    const teamsList = Object.values(teamsObj || {});
-
     teamsList.forEach((t) => {
       if (!t || !t.code) return;
       const isLead = (t.leadEmail || "").toLowerCase().trim() === cleanEmail;
@@ -188,14 +275,15 @@ export function syncRoleNotifications(user) {
       if (Array.isArray(regs) && Array.isArray(hackathons)) {
         const myHacks = hackathons.filter((h) => {
           const hEmail = (h.organizerEmail || "").toLowerCase().trim();
-          return hEmail === cleanEmail || cleanEmail === "organizer@hacktrack.io";
+          const hCreator = String(h.createdBy || "").toLowerCase().trim();
+          return hEmail === cleanEmail || (user?.id && hCreator === String(user.id).toLowerCase()) || cleanEmail === "organizer@hacktrack.io";
         });
-        const myHackIds = new Set(myHacks.map((h) => h.id));
+        const myHackIds = new Set(myHacks.map((h) => normalizeHackathonId(h.id)));
         regs
-          .filter((r) => myHackIds.has(r.hackathonId))
+          .filter((r) => myHackIds.has(normalizeHackathonId(r.hackathonId)))
           .forEach((r) => {
             pushIfAbsent({
-              id: `org-reg-${r.hackathonId}-${r.userId}`,
+              id: `org-reg-${r.hackathonId}-${r.userId}-${cleanEmail}`,
               userEmail: cleanEmail,
               title: "Participant Registered",
               message: `Participant ${r.userId} registered for competition "${r.hackathonId}".`,
@@ -208,7 +296,12 @@ export function syncRoleNotifications(user) {
 
     // 6. Screening Committee Notifications
     if (role === "screening") {
-      const pendingScreening = Array.isArray(subs) && subs.filter((s) => s.screeningStatus === "Pending Review" || s.screeningStatus === "pending").length;
+      const myAssignedIds = userAssignedHackIds;
+      const pendingScreening = Array.isArray(subs) && subs.filter((s) => {
+        const matchHack = myAssignedIds.size === 0 || myAssignedIds.has(normalizeHackathonId(s.hackathonId));
+        return matchHack && (s.screeningStatus === "Pending Review" || s.screeningStatus === "pending");
+      }).length;
+
       if (pendingScreening > 0) {
         pushIfAbsent({
           id: `screening-pending-queue-${cleanEmail}`,
@@ -233,7 +326,19 @@ export function syncRoleNotifications(user) {
       });
     }
 
-    // 8. Admin Notifications
+    // 8. Mentor Notifications
+    if (role === "mentor") {
+      pushIfAbsent({
+        id: `mentor-panel-active-${cleanEmail}`,
+        userEmail: cleanEmail,
+        title: "Technical Mentorship Active",
+        message: "Guide competitor squads, review technical architecture drafts, and provide domain advisory.",
+        type: "info",
+        link: "/dashboard/mentor",
+      });
+    }
+
+    // 9. Admin Notifications
     if (role === "admin") {
       pushIfAbsent({
         id: `admin-hub-active-${cleanEmail}`,

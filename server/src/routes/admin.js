@@ -289,4 +289,94 @@ router.post('/announcements', requireAuth, requireRole('admin', 'organizer'), (r
   });
 });
 
+// ── Admin-Controlled Organizer Authorization Invitations ─────────────────────
+
+// GET /api/v1/admin/organizers/invitations: List all organizer invitations with status
+router.get('/organizers/invitations', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const invitations = await store.getOrganizerInvitations();
+    return res.json({
+      status: 200,
+      count: invitations.length,
+      invitations,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      status: 500,
+      error: 'Internal Server Error',
+      message: err.message,
+    });
+  }
+});
+
+// POST /api/v1/admin/organizers/invitations: Issue a new cryptographically generated organizer invitation
+router.post('/organizers/invitations', requireAuth, requireRole('admin'), async (req, res) => {
+  const { organizationName, expiresInDays, notes } = req.body || {};
+  if (!organizationName || !String(organizationName).trim()) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: 'Organization name is required to create an Organizer invitation.',
+    });
+  }
+
+  try {
+    const invitation = await store.createOrganizerInvitation({
+      organizationName,
+      createdBy: req.user.id,
+      expiresInDays: expiresInDays || 7,
+      notes,
+    });
+
+    return res.status(201).json({
+      status: 201,
+      message: 'Organizer invitation created successfully. Share this code with the intended organizer.',
+      code: invitation.code,
+      invitation,
+    });
+  } catch (err) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: err.message,
+    });
+  }
+});
+
+// POST /api/v1/admin/organizers/invitations/:id/revoke: Revoke an unredeemed organizer invitation
+router.post('/organizers/invitations/:id/revoke', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const result = await store.revokeOrganizerInvitation(req.params.id, req.user.id);
+    return res.json({
+      status: 200,
+      message: result.message || 'Invitation revoked successfully.',
+    });
+  } catch (err) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: err.message,
+    });
+  }
+});
+
+// POST /api/v1/admin/organizers/invitations/:id/regenerate: Revoke old and generate a fresh replacement code
+router.post('/organizers/invitations/:id/regenerate', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const invitation = await store.regenerateOrganizerInvitation(req.params.id, req.user.id);
+    return res.status(201).json({
+      status: 201,
+      message: 'Organizer authorization code regenerated successfully.',
+      code: invitation.code,
+      invitation,
+    });
+  } catch (err) {
+    return res.status(400).json({
+      status: 400,
+      error: 'Bad Request',
+      message: err.message,
+    });
+  }
+});
+
 export default router;

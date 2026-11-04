@@ -536,7 +536,8 @@ class HackTrackStore {
     this.certificates = [];
     this.notifications = [];
     this.announcements = [];
-    this.hackathonCodes = []; // Access codes for judge/screening assignment
+    this.hackathonCodes = []; // Access codes for judge/screening/mentor assignment
+    this.organizerInvitations = []; // Admin-governed organizer authorization codes
     this.resetTokens = new Map();
     // Email notifications: idempotency keys for notify() and the delivery outbox.
     this.notificationKeys = new Set();
@@ -629,6 +630,16 @@ class HackTrackStore {
         createdAt: new Date().toISOString(),
         redeemedBy: [],
       },
+      {
+        id: 'code-demo-7',
+        hackathonId: 'hack-001',
+        hackathonTitle: 'CodeSprint Global 2026',
+        role: 'mentor',
+        code: 'MENTOR-CODE-5K1R',
+        createdBy: 'usr-organizer-007',
+        createdAt: new Date().toISOString(),
+        redeemedBy: [{ userId: 'usr-mentor-008', redeemedAt: new Date().toISOString() }],
+      },
     ];
 
     // Pre-assign demo users to hack-001
@@ -682,6 +693,34 @@ class HackTrackStore {
         memberId: 'STU-55412',
         status: 'Registration Verified',
         registeredAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+      },
+    ];
+
+    // Seed initial organizer authorization invitations (cryptographically hashed)
+    this.organizerInvitations = [
+      {
+        id: 'inv-seed-001',
+        codeHash: crypto.createHash('sha256').update('ORG-INVITE-2026').digest('hex'),
+        maskedCode: 'ORG-****-2026',
+        organizationName: 'DevPulse Hackathon Operations',
+        createdBy: 'usr-admin-006',
+        status: 'pending',
+        redeemedByUserId: null,
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        redeemedAt: null,
+      },
+      {
+        id: 'inv-seed-002',
+        codeHash: crypto.createHash('sha256').update('ORGANIZER-AUTH-2026').digest('hex'),
+        maskedCode: 'ORG-****-AUTH',
+        organizationName: 'AI Catalyst Global Foundation',
+        createdBy: 'usr-admin-006',
+        status: 'pending',
+        redeemedByUserId: null,
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        redeemedAt: null,
       },
     ];
   }
@@ -1195,6 +1234,55 @@ class HackTrackStore {
         console.warn('screening_reviews sync warning:', revErr.message);
       }
 
+      // 11. Organizer Invitations (Admin-governed authorization codes)
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS organizer_invitations (
+            id VARCHAR(64) NOT NULL,
+            code_hash VARCHAR(64) NOT NULL,
+            masked_code VARCHAR(32) NOT NULL,
+            organization_name VARCHAR(150) NOT NULL,
+            created_by VARCHAR(64) NOT NULL,
+            status ENUM('pending', 'redeemed', 'revoked', 'expired') NOT NULL DEFAULT 'pending',
+            redeemed_by_user_id VARCHAR(64) NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME NOT NULL,
+            redeemed_at DATETIME NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY idx_org_inv_hash (code_hash),
+            INDEX idx_org_inv_status (status)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `);
+
+        const [dbInvs] = await pool.query('SELECT * FROM organizer_invitations');
+        if (dbInvs.length === 0) {
+          for (const inv of this.organizerInvitations) {
+            await pool.query(
+              `INSERT INTO organizer_invitations
+               (id, code_hash, masked_code, organization_name, created_by, status, created_at, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE status = VALUES(status)`,
+              [inv.id, inv.codeHash, inv.maskedCode, inv.organizationName, inv.createdBy, inv.status, toSqlDate(inv.createdAt) || toSqlDate(new Date()), toSqlDate(inv.expiresAt) || toSqlDate(new Date(Date.now() + 30 * 86400000))]
+            );
+          }
+        } else {
+          this.organizerInvitations = dbInvs.map((r) => ({
+            id: r.id,
+            codeHash: r.code_hash,
+            maskedCode: r.masked_code,
+            organizationName: r.organization_name,
+            createdBy: r.created_by,
+            status: r.status,
+            redeemedByUserId: r.redeemed_by_user_id,
+            createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+            expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : new Date().toISOString(),
+            redeemedAt: r.redeemed_at ? new Date(r.redeemed_at).toISOString() : null,
+          }));
+        }
+      } catch (invErr) {
+        console.warn('organizer_invitations sync warning:', invErr.message);
+      }
+
       console.log('✓ Store successfully synchronized with MySQL database.');
       return true;
     } catch (err) {
@@ -1571,7 +1659,7 @@ class HackTrackStore {
       screening: 'Screening Committee',
       mentor: 'Technical Mentor',
       admin: 'Platform Administrator',
-      organizer: 'Hackathon Organizer',
+      organizer: 'Organizer',
     };
     return map[role] || 'Participant';
   }
@@ -1710,6 +1798,33 @@ class HackTrackStore {
         (r.hackathonId === targetHackId || (hackathon && r.hackathonId === hackathon.id)) &&
         (r.userId === targetUserId || (r.userEmail && r.userEmail.toLowerCase() === targetUserEmail))
     );
+  }
+
+  getUserRegistrations(userIdOrEmail) {
+    if (!userIdOrEmail) return [];
+    const cleanUser = String(userIdOrEmail).trim().toLowerCase();
+    const user = this.findUserById(userIdOrEmail) || this.findUserByEmail(userIdOrEmail);
+    const targetUserId = user ? user.id : cleanUser;
+    const targetUserEmail = user ? user.email.toLowerCase() : cleanUser;
+
+    return this.registrations
+      .filter(
+        (r) =>
+          r.userId === targetUserId ||
+          (r.userEmail && r.userEmail.toLowerCase() === targetUserEmail)
+      )
+      .map((r) => {
+        const hackathon = this.getHackathonById(r.hackathonId);
+        return {
+          id: r.id,
+          hackathonId: r.hackathonId,
+          hackathonTitle: hackathon ? hackathon.title : r.hackathonTitle || r.hackathonId,
+          userId: r.userId,
+          userEmail: r.userEmail,
+          status: r.status,
+          registeredAt: r.registeredAt,
+        };
+      });
   }
 
   getRegistrationsForHackathon(hackathonId) {
@@ -3013,7 +3128,7 @@ class HackTrackStore {
     };
   }
 
-  // --- Hackathon Access Codes (Judge / Screening assignment) ---
+  // --- Hackathon Access Codes (Judge / Screening / Mentor assignment) ---
 
   generateHackathonCode(hackathonId, role, createdBy) {
     const hackathon = this.getHackathonById(hackathonId);
@@ -3047,6 +3162,19 @@ class HackTrackStore {
     };
 
     this.hackathonCodes.push(record);
+
+    // Sync to MySQL if available
+    try {
+      if (!isTestMode()) {
+        pool.query(
+          `INSERT INTO hackathon_codes (id, hackathon_id, role, code, created_by, created_at, redeemed_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE code = VALUES(code)`,
+          [record.id, record.hackathonId, record.role, record.code, record.createdBy, toSqlDate(record.createdAt), JSON.stringify([])]
+        ).catch(() => {});
+      }
+    } catch { /* ignore */ }
+
     return record;
   }
 
@@ -3058,7 +3186,7 @@ class HackTrackStore {
     const user = this.findUserById(userId);
     if (!user) throw new Error('Invalid or unavailable access code.');
 
-    // Check role matches — judge code for judge role, etc.
+    // Check role matches — judge code for judge role, mentor code for mentor, etc.
     if (user.role !== record.role) {
       console.warn(`[AccessCode] Role mismatch for user ${userId} (${user.role}) attempting to redeem ${record.role} code.`);
       throw new Error('Invalid or unavailable access code.');
@@ -3075,6 +3203,20 @@ class HackTrackStore {
     if (!user.assignedHackathonIds.includes(record.hackathonId)) {
       user.assignedHackathonIds.push(record.hackathonId);
     }
+
+    // Sync redemption to MySQL
+    try {
+      if (!isTestMode()) {
+        pool.query(
+          'UPDATE hackathon_codes SET redeemed_by = ? WHERE code = ?',
+          [JSON.stringify(record.redeemedBy), record.code]
+        ).catch(() => {});
+        pool.query(
+          'UPDATE users SET assigned_hackathon_ids = ? WHERE id = ?',
+          [JSON.stringify(user.assignedHackathonIds), user.id]
+        ).catch(() => {});
+      }
+    } catch { /* ignore */ }
 
     return {
       hackathonId: record.hackathonId,
@@ -3106,6 +3248,259 @@ class HackTrackStore {
     return this.users
       .filter((u) => roles.includes(u.role) && Array.isArray(u.assignedHackathonIds) && u.assignedHackathonIds.includes(hackathonId))
       .map(toSafeUser);
+  }
+
+  // --- Admin-Governed Organizer Authorization System ---
+
+  async createOrganizerInvitation({ organizationName, createdBy, expiresInDays = 7, notes = '' }) {
+    if (!organizationName || !String(organizationName).trim()) {
+      throw new Error('Organization name is mandatory to issue an Organizer invitation.');
+    }
+    const cleanOrg = String(organizationName).trim();
+    // Cryptographically secure random 12-char unique key (ORG-XXXX-XXXX)
+    const p1 = crypto.randomBytes(2).toString('hex').toUpperCase();
+    const p2 = crypto.randomBytes(2).toString('hex').toUpperCase();
+    const rawCode = `ORG-${p1}-${p2}`;
+    const codeHash = crypto.createHash('sha256').update(rawCode).digest('hex');
+    const maskedCode = `ORG-****-${p2}`;
+    const id = `inv-${crypto.randomBytes(6).toString('hex')}`;
+    const createdAt = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + Math.max(1, Number(expiresInDays) || 7) * 86400000).toISOString();
+
+    const record = {
+      id,
+      codeHash,
+      maskedCode,
+      organizationName: cleanOrg,
+      createdBy,
+      status: 'pending',
+      redeemedByUserId: null,
+      notes: notes ? String(notes).trim() : null,
+      createdAt,
+      expiresAt,
+      redeemedAt: null,
+    };
+
+    this.organizerInvitations.unshift(record);
+
+    // Persist to MySQL
+    try {
+      const connStatus = await testConnection();
+      if (connStatus.connected) {
+        await pool.query(
+          `INSERT INTO organizer_invitations
+           (id, code_hash, masked_code, organization_name, created_by, status, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`,
+          [id, codeHash, maskedCode, cleanOrg, createdBy, toSqlDate(createdAt), toSqlDate(expiresAt)]
+        );
+      }
+    } catch (err) {
+      console.warn('organizer_invitations insert DB error:', err.message);
+    }
+
+    return {
+      ...record,
+      code: rawCode, // Revealed once to Admin for copy-to-clipboard
+    };
+  }
+
+  async getOrganizerInvitations() {
+    try {
+      const connStatus = await testConnection();
+      if (connStatus.connected) {
+        const [rows] = await pool.query(`
+          SELECT oi.id, oi.masked_code AS maskedCode, oi.organization_name AS organizationName,
+                 oi.created_by AS createdBy, oi.status, oi.redeemed_by_user_id AS redeemedByUserId,
+                 oi.created_at AS createdAt, oi.expires_at AS expiresAt, oi.redeemed_at AS redeemedAt,
+                 u.full_name AS redeemedByName, u.email AS redeemedByEmail,
+                 admin.full_name AS creatorName, admin.email AS creatorEmail
+          FROM organizer_invitations oi
+          LEFT JOIN users u ON oi.redeemed_by_user_id = u.id
+          LEFT JOIN users admin ON oi.created_by = admin.id
+          ORDER BY oi.created_at DESC
+        `);
+        if (rows.length > 0) {
+          const now = new Date();
+          return rows.map((r) => {
+            let status = r.status;
+            if (status === 'pending' && r.expiresAt && new Date(r.expiresAt) < now) {
+              status = 'expired';
+            }
+            return {
+              id: r.id,
+              maskedCode: r.maskedCode,
+              organizationName: r.organizationName,
+              status,
+              createdBy: r.createdBy,
+              creatorName: r.creatorName || 'Platform Administrator',
+              creatorEmail: r.creatorEmail,
+              redeemedByUserId: r.redeemedByUserId,
+              redeemedByName: r.redeemedByName,
+              redeemedByEmail: r.redeemedByEmail,
+              createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
+              expiresAt: r.expiresAt ? new Date(r.expiresAt).toISOString() : null,
+              redeemedAt: r.redeemedAt ? new Date(r.redeemedAt).toISOString() : null,
+            };
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('getOrganizerInvitations DB query fallback to memory:', err.message);
+    }
+
+    // In-memory fallback
+    const now = new Date();
+    return this.organizerInvitations.map((inv) => {
+      let status = inv.status;
+      if (status === 'pending' && inv.expiresAt && new Date(inv.expiresAt) < now) {
+        status = 'expired';
+      }
+      const redeemer = inv.redeemedByUserId ? this.findUserById(inv.redeemedByUserId) : null;
+      const creator = inv.createdBy ? this.findUserById(inv.createdBy) : null;
+      return {
+        id: inv.id,
+        maskedCode: inv.maskedCode,
+        organizationName: inv.organizationName,
+        status,
+        createdBy: inv.createdBy,
+        creatorName: creator?.fullName || 'Platform Administrator',
+        creatorEmail: creator?.email,
+        redeemedByUserId: inv.redeemedByUserId,
+        redeemedByName: redeemer?.fullName,
+        redeemedByEmail: redeemer?.email,
+        createdAt: inv.createdAt,
+        expiresAt: inv.expiresAt,
+        redeemedAt: inv.redeemedAt,
+      };
+    });
+  }
+
+  async revokeOrganizerInvitation(id, adminUserId) {
+    let inv = this.organizerInvitations.find((i) => i.id === id);
+    if (inv && inv.status === 'redeemed') {
+      throw new Error('Cannot revoke an invitation that has already been redeemed.');
+    }
+    if (inv) inv.status = 'revoked';
+
+    try {
+      const connStatus = await testConnection();
+      if (connStatus.connected) {
+        const [result] = await pool.query(
+          "UPDATE organizer_invitations SET status = 'revoked' WHERE id = ? AND status != 'redeemed'",
+          [id]
+        );
+        if (result.affectedRows === 0 && (!inv || inv.status === 'redeemed')) {
+          throw new Error('Cannot revoke an already-redeemed or non-existent invitation.');
+        }
+      }
+    } catch (err) {
+      if (err.message.includes('Cannot revoke')) throw err;
+      console.warn('Revoke invitation DB warning:', err.message);
+    }
+
+    return { success: true, message: 'Organizer invitation successfully revoked.' };
+  }
+
+  async regenerateOrganizerInvitation(id, adminUserId) {
+    const list = await this.getOrganizerInvitations();
+    const existing = list.find((i) => i.id === id);
+    if (!existing) throw new Error('Original invitation not found.');
+
+    if (existing.status === 'pending') {
+      await this.revokeOrganizerInvitation(id, adminUserId);
+    }
+
+    return this.createOrganizerInvitation({
+      organizationName: existing.organizationName,
+      createdBy: adminUserId,
+      expiresInDays: 7,
+      notes: `Replacement for ${existing.maskedCode}`,
+    });
+  }
+
+  async preValidateOrganizerCode(rawCode) {
+    if (!rawCode || !String(rawCode).trim()) {
+      throw new Error('Organizer authorization code is required for organizer registration.');
+    }
+    const cleanCode = String(rawCode).trim().toUpperCase();
+    const inputHash = crypto.createHash('sha256').update(cleanCode).digest('hex');
+
+    // 1. Look up invitation by hash in memory
+    let inv = this.organizerInvitations.find((i) => i.codeHash === inputHash);
+
+    // 2. Query MySQL if not found in memory
+    if (!inv) {
+      try {
+        const connStatus = await testConnection();
+        if (connStatus.connected) {
+          const [rows] = await pool.query(
+            'SELECT * FROM organizer_invitations WHERE code_hash = ?',
+            [inputHash]
+          );
+          if (rows.length > 0) {
+            const r = rows[0];
+            inv = {
+              id: r.id,
+              codeHash: r.code_hash,
+              maskedCode: r.masked_code,
+              organizationName: r.organization_name,
+              status: r.status,
+              expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : null,
+              redeemedByUserId: r.redeemed_by_user_id,
+              redeemedAt: r.redeemed_at,
+            };
+          }
+        }
+      } catch (err) {
+        console.warn('preValidateOrganizerCode DB query warning:', err.message);
+      }
+    }
+
+    if (!inv) {
+      throw new Error('Invalid or unrecognized Organizer Authorization Code. Please obtain a valid authorization code from Platform Administration.');
+    }
+
+    if (inv.status === 'revoked') {
+      throw new Error('This Organizer invitation code has been revoked by Platform Administration.');
+    }
+
+    if (inv.status === 'redeemed' || inv.redeemedByUserId) {
+      throw new Error('This Organizer invitation code has already been redeemed and cannot be reused.');
+    }
+
+    if (inv.expiresAt && new Date() > new Date(inv.expiresAt)) {
+      inv.status = 'expired';
+      throw new Error('This Organizer invitation code has expired. Please request a new invitation from Platform Administration.');
+    }
+
+    return inv;
+  }
+
+  async validateAndRedeemOrganizerInvitation(rawCode, userId) {
+    const inv = await this.preValidateOrganizerCode(rawCode);
+    const nowIso = new Date().toISOString();
+
+    inv.status = 'redeemed';
+    inv.redeemedByUserId = userId;
+    inv.redeemedAt = nowIso;
+
+    try {
+      const connStatus = await testConnection();
+      if (connStatus.connected) {
+        await pool.query(
+          "UPDATE organizer_invitations SET status = 'redeemed', redeemed_by_user_id = ?, redeemed_at = NOW() WHERE id = ? AND status = 'pending'",
+          [userId, inv.id]
+        );
+      }
+    } catch (err) {
+      console.warn('validateAndRedeemOrganizerInvitation DB warning:', err.message);
+    }
+
+    return {
+      success: true,
+      invitationId: inv.id,
+      organizationName: inv.organizationName,
+    };
   }
 }
 

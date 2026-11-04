@@ -90,7 +90,7 @@ test('Mentors join an event with its mentor code (sign-up or later) and appear o
   const email = `mentor.${unique()}@example.org`;
   const signup = await api('/api/v1/auth/register', {
     method: 'POST',
-    body: { email, password: 'password123', fullName: 'New Mentor', role: 'mentor', university: 'Guild', accessCode: mentorCode },
+    body: { email, password: 'password123', fullName: 'New Mentor', role: 'mentor', university: 'Guild', designation: 'Cloud architecture', accessCode: mentorCode },
   });
   assert.equal(signup.status, 201, signup.text);
   const teams = await api('/api/v1/teams?hackathonId=hack-001', { token: signup.body.token });
@@ -99,7 +99,7 @@ test('Mentors join an event with its mentor code (sign-up or later) and appear o
   // A random code is not a mentor key.
   const bad = await api('/api/v1/auth/register', {
     method: 'POST',
-    body: { email: `mentor.bad.${unique()}@example.org`, password: 'password123', fullName: 'No Code', role: 'mentor', university: 'Guild', accessCode: 'NOPE-1234' },
+    body: { email: `mentor.bad.${unique()}@example.org`, password: 'password123', fullName: 'No Code', role: 'mentor', university: 'Guild', designation: 'Cloud architecture', accessCode: 'MENTOR-FAKE-1234' },
   });
   assert.equal(bad.status, 400);
 

@@ -192,6 +192,10 @@ class ApiClient {
     });
   }
 
+  async getMyRegistrations() {
+    return this.request('/hackathons/my-registrations');
+  }
+
   async getHackathonRegistrations(hackathonId) {
     return this.request(`/hackathons/${hackathonId}/registrations`);
   }
@@ -413,6 +417,44 @@ class ApiClient {
     return this.request('/admin/announcements', {
       method: 'POST',
       body: JSON.stringify({ hackathonId, title, content, targetRole }),
+    });
+  }
+
+  // ── Organizer Authorization Invitations (Admin only) ─────────────────
+
+  async getOrganizerInvitations() {
+    return this.request('/admin/organizers/invitations');
+  }
+
+  async createOrganizerInvitation({ organizationName, expiresInDays = 7, notes = '' }) {
+    return this.request('/admin/organizers/invitations', {
+      method: 'POST',
+      body: JSON.stringify({ organizationName, expiresInDays, notes }),
+    });
+  }
+
+  async revokeOrganizerInvitation(id) {
+    return this.request(`/admin/organizers/invitations/${encodeURIComponent(id)}/revoke`, {
+      method: 'POST',
+    });
+  }
+
+  async regenerateOrganizerInvitation(id) {
+    return this.request(`/admin/organizers/invitations/${encodeURIComponent(id)}/regenerate`, {
+      method: 'POST',
+    });
+  }
+
+  // ── Hackathon Event Access Codes (Organizer / Admin) ─────────────────
+
+  async getHackathonCodes(hackathonId) {
+    return this.request(`/hackathons/${encodeURIComponent(hackathonId)}/codes`);
+  }
+
+  async generateHackathonCode(hackathonId, role) {
+    return this.request(`/hackathons/${encodeURIComponent(hackathonId)}/codes`, {
+      method: 'POST',
+      body: JSON.stringify({ role }),
     });
   }
 

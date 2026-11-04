@@ -337,3 +337,22 @@ CREATE TABLE IF NOT EXISTS `screening_reviews` (
   INDEX `idx_screening_team` (`team_id`),
   INDEX `idx_screening_hackathon` (`hackathon_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------------------------
+-- 16. Organizer Invitations Table (Admin-governed authorization code system)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `organizer_invitations` (
+  `id` VARCHAR(64) NOT NULL,
+  `code_hash` VARCHAR(64) NOT NULL,
+  `masked_code` VARCHAR(32) NOT NULL,
+  `organization_name` VARCHAR(150) NOT NULL,
+  `created_by` VARCHAR(64) NOT NULL,
+  `status` ENUM('pending', 'redeemed', 'revoked', 'expired') NOT NULL DEFAULT 'pending',
+  `redeemed_by_user_id` VARCHAR(64) NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `expires_at` DATETIME NOT NULL,
+  `redeemed_at` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_org_inv_hash` (`code_hash`),
+  INDEX `idx_org_inv_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

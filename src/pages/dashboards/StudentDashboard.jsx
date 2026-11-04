@@ -447,31 +447,48 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     });
   }, [allHackathons]);
 
-  // Registrations
-  // Registrations saved on the server (e.g. made on another device) plus local ones.
+  // Server registrations from backend MySQL API
   const [serverRegistrations, setServerRegistrations] = useState([]);
+
   useEffect(() => {
-    if (!api.getToken()) return undefined;
-    let cancelled = false;
-    api.getMyRegistrations()
-      .then((res) => { if (!cancelled) setServerRegistrations(res?.registrations || []); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [refreshKey, userEmail]);
+    let isMounted = true;
+    if (api.getToken()) {
+      api.getMyRegistrations()
+        .then((res) => {
+          if (isMounted && res && Array.isArray(res.registrations)) {
+            setServerRegistrations(res.registrations);
+          }
+        })
+        .catch(() => {});
+    }
+    return () => { isMounted = false; };
+  }, [userEmail, refreshKey]);
+
+  // Combined user registration records (local + server API)
   const registrations = useMemo(() => {
     if (refreshKey) { /* trigger re-eval */ }
     const local = getUserRegistrations(userEmail);
-    const fromServer = serverRegistrations
-      .filter((r) => !local.some((l) => l.hackathonId === r.hackathonId))
-      .map((r) => ({
-        id: r.id,
-        userId: userEmail,
-        hackathonId: r.hackathonId,
-        hackathonTitle: r.hackathonTitle,
-        status: r.status,
-        registrationDate: r.registeredAt ? new Date(r.registeredAt).toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" }) : "",
-      }));
-    return [...fromServer, ...local];
+    if (!serverRegistrations.length) return local;
+
+    const combined = [...local];
+    serverRegistrations.forEach((sr) => {
+      const exists = combined.some((r) =>
+        matchHackathon(r.hackathonId, sr.hackathonId, r.hackathonTitle, sr.hackathonTitle)
+      );
+      if (!exists) {
+        combined.push({
+          id: sr.id,
+          userId: userEmail,
+          hackathonId: sr.hackathonId,
+          hackathonTitle: sr.hackathonTitle,
+          status: sr.status || 'Registration Verified',
+          registrationDate: sr.registeredAt
+            ? new Date(sr.registeredAt).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+            : 'Recent',
+        });
+      }
+    });
+    return combined;
   }, [userEmail, refreshKey, serverRegistrations]);
 
   // The hackathon shown in the dashboard. A notification link opens a specific
@@ -555,14 +572,9 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
         matchHackathon(h.id, selectedHackathonId, h.title)
       );
       if (foundInReg) return foundInReg;
-
-      const foundInAll = allHackathons.find((h) =>
-        matchHackathon(h.id, selectedHackathonId, h.title)
-      );
-      if (foundInAll) return foundInAll;
     }
-    return registeredHackathons[0] || allHackathons[0] || null;
-  }, [selectedHackathonId, registeredHackathons, allHackathons]);
+    return registeredHackathons[0] || null;
+  }, [selectedHackathonId, registeredHackathons]);
 
   // 1. Backend team from MySQL API
   const backendTeam = useMemo(() => {
@@ -1836,7 +1848,11 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                   <div className="min-w-0 space-y-1">
                     <CardTitle as="h2">Team Details & Roster</CardTitle>
                     <CardDescription>
-                      {currentTeam ? `${currentTeam.name} · ${activeSprint?.title || currentTeam.hackathon}` : `No team formed for ${activeSprint?.title || "this hackathon"}`}
+                      {currentTeam
+                        ? `${currentTeam.name} · ${activeSprint?.title || currentTeam.hackathon}`
+                        : activeSprint
+                        ? `No team formed for ${activeSprint.title}`
+                        : "Select or register for a competition"}
                     </CardDescription>
                   </div>
                 </div>
@@ -2081,8 +2097,12 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                     title="No team yet"
                     description={
                       isLeaderRole
-                        ? `No team formed for ${activeSprint?.title || "this hackathon"}. Create a new team below to get started.`
-                        : `No team joined yet for ${activeSprint?.title || "this hackathon"}. Enter an invite code below to join an existing team.`
+                        ? (activeSprint
+                            ? `No team formed for ${activeSprint.title}. Create a new team below to get started.`
+                            : "Register for an open hackathon to create a team.")
+                        : (activeSprint
+                            ? `No team joined yet for ${activeSprint.title}. Enter an invite code below to join an existing team.`
+                            : "Register for a hackathon or enter an invite code below to join an existing team.")
                     }
                   />
                 )}

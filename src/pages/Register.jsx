@@ -9,6 +9,7 @@ import {
   Lock,
   ArrowRight,
   ShieldAlert,
+  Lightbulb,
 } from 'lucide-react';
 import { Alert, Button, Field, Input, Select, Logo, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
@@ -83,6 +84,14 @@ export default function Register({ navigate: propNavigate }) {
       bg: "bg-violet-50 dark:bg-violet-950/40 border-violet-200 dark:border-violet-900/50",
     },
     {
+      id: "mentor",
+      title: "Technical Mentor",
+      desc: "Guide competitor squads, review technical drafts & provide domain advisory",
+      icon: Lightbulb,
+      color: "text-amber-500 dark:text-amber-400",
+      bg: "bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/50",
+    },
+    {
       id: "organizer",
       title: "Hackathon Organizer",
       desc: "Create and govern hackathons, define rubrics & manage competitions",
@@ -113,12 +122,12 @@ export default function Register({ navigate: propNavigate }) {
         // Clear student-specific fields when switching away from student/leader
         memberId: isNewStudentRole ? (isPrevStudentRole ? prev.memberId : "") : "",
         yearOfStudy: isNewStudentRole ? (isPrevStudentRole ? prev.yearOfStudy : "") : "",
-        // Clear designation if not judge
-        designation: roleId === 'judge' ? prev.designation : "",
+        // Clear designation if not judge or mentor
+        designation: ['judge', 'mentor'].includes(roleId) ? prev.designation : "",
         // Clear accessCode when switching between roles
         accessCode: (roleId === prev.role) ? prev.accessCode : "",
-        // Department retained if role supports it, otherwise reset
-        department: ['student', 'leader', 'screening', 'organizer'].includes(roleId) ? prev.department : "",
+        // Department retained if student/leader, otherwise reset
+        department: ['student', 'leader'].includes(roleId) ? prev.department : "",
       };
     });
   };
@@ -173,10 +182,6 @@ export default function Register({ navigate: propNavigate }) {
         setStatusMessage({ type: "error", text: "Institution / University is required for Screening Committee registration." });
         return;
       }
-      if (!formData.department.trim()) {
-        setStatusMessage({ type: "error", text: "Committee / Department Affiliation is required." });
-        return;
-      }
       if (!formData.accessCode.trim()) {
         setStatusMessage({ type: "error", text: "A Screening Access Code or Invitation Key is required." });
         return;
@@ -194,13 +199,22 @@ export default function Register({ navigate: propNavigate }) {
         setStatusMessage({ type: "error", text: "A Judge Access Code or Invitation Key is required to register as a Judge." });
         return;
       }
+    } else if (formData.role === 'mentor') {
+      if (!formData.university.trim()) {
+        setStatusMessage({ type: "error", text: "Organization / University is required for Mentor registration." });
+        return;
+      }
+      if (!formData.designation.trim()) {
+        setStatusMessage({ type: "error", text: "Technical Expertise / Domain is required for Mentor registration." });
+        return;
+      }
+      if (!formData.accessCode.trim()) {
+        setStatusMessage({ type: "error", text: "A Mentor Authorization Key or Invitation Code is required to register as a Mentor." });
+        return;
+      }
     } else if (formData.role === 'organizer') {
       if (!formData.university.trim()) {
         setStatusMessage({ type: "error", text: "Host Organization / University is required for Organizer registration." });
-        return;
-      }
-      if (!formData.department.trim()) {
-        setStatusMessage({ type: "error", text: "Organizing Committee / Department is required for Organizer registration." });
         return;
       }
       if (!formData.accessCode.trim()) {
@@ -231,11 +245,11 @@ export default function Register({ navigate: propNavigate }) {
       role: formData.role,
       university: formData.university.trim(),
       memberId: ['student', 'leader'].includes(formData.role) ? formData.memberId.trim() : null,
-      department: ['student', 'leader', 'screening', 'organizer'].includes(formData.role) && formData.department.trim()
+      department: ['student', 'leader'].includes(formData.role) && formData.department.trim()
         ? formData.department.trim()
         : undefined,
       yearOfStudy: ['student', 'leader'].includes(formData.role) && formData.yearOfStudy ? formData.yearOfStudy : undefined,
-      designation: formData.role === 'judge' ? formData.designation.trim() : undefined,
+      designation: ['judge', 'mentor'].includes(formData.role) ? formData.designation.trim() : undefined,
       phone: formData.phone.trim() || undefined,
       accessCode: formData.accessCode.trim() || undefined,
     };
@@ -335,6 +349,7 @@ export default function Register({ navigate: propNavigate }) {
                 {formData.role === "leader" && "Complete your team leader profile to create competitive squads, generate shareable invite codes, and submit project repositories."}
                 {formData.role === "screening" && "Authorized registration for review committee members. Evaluate project repos, verify demo URLs, and shortlist qualifying squads."}
                 {formData.role === "judge" && "Authorized registration for expert evaluators. Score shortlisted teams using weighted rubrics and provide expert feedback."}
+                {formData.role === "mentor" && "Authorized registration for technical mentors and domain advisors. Guide competitor squads, review technical drafts, and provide architectural mentorship."}
                 {formData.role === "organizer" && "Authorized registration for competition directors. Create and govern hackathons, define evaluation stages, and manage review panels."}
                 {formData.role === "admin" && "Administrative governance accounts are provisioned exclusively through platform configuration or existing administrators."}
               </p>
@@ -464,26 +479,19 @@ export default function Register({ navigate: propNavigate }) {
               {formData.role === "screening" && (
                 <>
                   <fieldset className="space-y-4">
-                    <legend className="mb-1 text-sm font-medium text-fg">Committee & Affiliation Details</legend>
+                    <legend className="mb-1 text-sm font-medium text-fg">Institution & Authorization</legend>
                     <div className="grid gap-4 sm:grid-cols-2">
-                      <Field label="Institution / University" required>
-                        <Input
-                          name="university"
-                          autoComplete="organization"
-                          value={formData.university}
-                          onChange={handleChange}
-                          placeholder="e.g. PCCOE Pune / Technical Review Board"
-                        />
-                      </Field>
-
-                      <Field label="Committee / Department Affiliation" required>
-                        <Input
-                          name="department"
-                          value={formData.department}
-                          onChange={handleChange}
-                          placeholder="e.g. Technical Screening Panel / Dept. of CSE"
-                        />
-                      </Field>
+                      <div className="sm:col-span-2">
+                        <Field label="Institution / University" required>
+                          <Input
+                            name="university"
+                            autoComplete="organization"
+                            value={formData.university}
+                            onChange={handleChange}
+                            placeholder="e.g. PCCOE Pune / Technical Review Board"
+                          />
+                        </Field>
+                      </div>
 
                       <div className="sm:col-span-2">
                         <Field
@@ -626,30 +634,106 @@ export default function Register({ navigate: propNavigate }) {
                 </>
               )}
 
-              {/* 4. HACKATHON ORGANIZER REGISTRATION FORM */}
-              {formData.role === "organizer" && (
+              {/* 4. TECHNICAL MENTOR REGISTRATION FORM */}
+              {formData.role === "mentor" && (
                 <>
                   <fieldset className="space-y-4">
-                    <legend className="mb-1 text-sm font-medium text-fg">Host Organization & Committee</legend>
+                    <legend className="mb-1 text-sm font-medium text-fg">Professional Advisory & Domain Expertise</legend>
                     <div className="grid gap-4 sm:grid-cols-2">
-                      <Field label="Host Organization / University" required>
+                      <Field label="Organization / University" required>
                         <Input
                           name="university"
                           autoComplete="organization"
                           value={formData.university}
                           onChange={handleChange}
-                          placeholder="e.g. PCCOE Pune / DevPulse Operations"
+                          placeholder="e.g. Google Cloud / PCCOE Pune / Tech Guild"
                         />
                       </Field>
 
-                      <Field label="Organizing Committee / Department" required>
+                      <Field label="Technical Expertise / Domain" required hint="e.g. AI / Cloud / Full Stack / IoT">
                         <Input
-                          name="department"
-                          value={formData.department}
+                          name="designation"
+                          value={formData.designation}
                           onChange={handleChange}
-                          placeholder="e.g. Operations Committee / Innovation Cell"
+                          placeholder="e.g. AI Architect / Distributed Systems Specialist"
                         />
                       </Field>
+
+                      <div className="sm:col-span-2">
+                        <Field
+                          label="Mentor Authorization Key"
+                          required
+                          hint="Enter your mentor authorization code or invite key (e.g. MENTOR-INVITE-2026)"
+                        >
+                          <Input
+                            name="accessCode"
+                            value={formData.accessCode}
+                            onChange={handleChange}
+                            placeholder="e.g. MENTOR-INVITE-2026"
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  </fieldset>
+
+                  <fieldset className="space-y-4">
+                    <legend className="mb-1 text-sm font-medium text-fg">Personal & Contact Information</legend>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field label="Full name" required>
+                        <Input
+                          name="fullName"
+                          autoComplete="name"
+                          value={formData.fullName}
+                          onChange={handleChange}
+                          placeholder="e.g. David Sterling"
+                        />
+                      </Field>
+
+                      <Field label="Official / Professional email" required>
+                        <Input
+                          type="email"
+                          name="email"
+                          autoComplete="email"
+                          value={formData.email}
+                          onChange={handleChange}
+                          placeholder="e.g. david.sterling@guild.org"
+                        />
+                      </Field>
+
+                      <div className="sm:col-span-2">
+                        <Field label="Contact phone" hint="Optional">
+                          <Input
+                            type="tel"
+                            name="phone"
+                            autoComplete="tel"
+                            value={formData.phone}
+                            onChange={handleChange}
+                            placeholder="e.g. +91 98765 43210"
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  </fieldset>
+                </>
+              )}
+
+              {/* 5. HACKATHON ORGANIZER REGISTRATION FORM */}
+              {formData.role === "organizer" && (
+                <>
+                  <fieldset className="space-y-4">
+                    <legend className="mb-1 text-sm font-medium text-fg">Host Organization & Authorization</legend>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="sm:col-span-2">
+                        <Field label="Host Organization / University" required>
+                          <Input
+                            name="university"
+                            autoComplete="organization"
+                            value={formData.university}
+                            onChange={handleChange}
+                            placeholder="e.g. PCCOE Pune / DevPulse Operations"
+                          />
+                        </Field>
+                      </div>
 
                       <div className="sm:col-span-2">
                         <Field
@@ -766,6 +850,8 @@ export default function Register({ navigate: propNavigate }) {
                     ? "Register for Screening Committee"
                     : formData.role === "judge"
                     ? "Register as Judge"
+                    : formData.role === "mentor"
+                    ? "Register as Technical Mentor"
                     : formData.role === "organizer"
                     ? "Register as Organizer"
                     : "Create account"}

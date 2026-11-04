@@ -254,6 +254,16 @@ const DEFAULT_CODES = [
     createdBy: "organizer@hacktrack.io",
     createdAt: new Date().toISOString(),
     redeemedBy: []
+  },
+  {
+    id: "code-devpulse-mentor",
+    hackathonId: "devpulse-2026",
+    hackathonTitle: "DevPulse National Sprint 2026",
+    role: "mentor",
+    code: "MENTOR-DEVP-5K1R",
+    createdBy: "organizer@hacktrack.io",
+    createdAt: new Date().toISOString(),
+    redeemedBy: [{ userId: "usr-mentor-008", email: "mentor@hacktrack.io", fullName: "David Sterling", redeemedAt: new Date().toISOString() }]
   }
 ];
 
@@ -388,7 +398,7 @@ export function getStoredAssignmentIds(user) {
 
 export function getUserAssignedHackathonIds(user) {
   const userIdentifier = user?.id || user?.email;
-  if (!userIdentifier) return ["devpulse-2026"];
+  if (!userIdentifier) return [];
 
   // Assignments may be saved under the user's id (code redemption) or email
   // (organizer's direct assignment); read both so neither is missed.
@@ -404,12 +414,13 @@ export function getUserAssignedHackathonIds(user) {
   }
   if (merged.size > 0) return [...merged];
 
-  // Default pre-assigned hackathons for demo roles
-  if (user?.role === 'judge' || user?.role === 'screening') {
+  // Pre-assigned hackathons only for specific core demo seed accounts
+  const cleanEmail = (typeof user === 'string' ? user : user?.email || '').toLowerCase().trim();
+  if (['judge@hacktrack.io', 'screening@hacktrack.io', 'mentor@hacktrack.io'].includes(cleanEmail)) {
     return ["devpulse-2026"];
   }
 
-  return ["devpulse-2026"];
+  return [];
 }
 
 export function saveUserHackathonAssignment(userIdentifier, hackathonId) {
@@ -437,6 +448,7 @@ export function getHackathonCommittee(hackathonId) {
 
   const judges = [];
   const screeners = [];
+  const mentors = [];
 
   hackCodes.forEach((c) => {
     if (c.role === "judge") {
@@ -446,6 +458,10 @@ export function getHackathonCommittee(hackathonId) {
     } else if (c.role === "screening") {
       (c.redeemedBy || []).forEach((u) => {
         if (!screeners.some((s) => s.email === u.email)) screeners.push(u);
+      });
+    } else if (c.role === "mentor") {
+      (c.redeemedBy || []).forEach((u) => {
+        if (!mentors.some((m) => m.email === u.email)) mentors.push(u);
       });
     }
   });
@@ -468,12 +484,21 @@ export function getHackathonCommittee(hackathonId) {
         redeemedAt: new Date().toISOString()
       });
     }
+    if (!mentors.some((m) => m.email === "mentor@hacktrack.io")) {
+      mentors.push({
+        userId: "usr-mentor-008",
+        email: "mentor@hacktrack.io",
+        fullName: "David Sterling",
+        redeemedAt: new Date().toISOString()
+      });
+    }
   }
 
   return {
     codes: hackCodes,
     judges,
-    screeners
+    screeners,
+    mentors
   };
 }
 
