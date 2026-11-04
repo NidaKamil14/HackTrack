@@ -27,7 +27,7 @@ export default function BrowseHackathons({
   const [sortBy, setSortBy] = useState("deadline");
 
   const categories = ["All", "Full-Stack", "AI & ML", "IoT"];
-  const stages = ["All", "Registration Open", "Team Formation", "Upcoming"];
+  const stages = ["All", "Registration Open", "Team Formation", "Upcoming", "Screening Gate", "Rubric Judging", "Leaderboard Published"];
 
   const [serverHackathons, setServerHackathons] = useState([]);
   useEffect(() => {
@@ -41,9 +41,9 @@ export default function BrowseHackathons({
     const list = mergeHackathons(getStoredHackathons(), serverHackathons).filter((h) => h.status !== 'draft');
     return list.filter((h) => {
       const matchSearch =
-        h.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        h.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        h.tags.some((t) => t.toLowerCase().includes(searchTerm.toLowerCase()));
+        (h.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (h.summary || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (h.tags || []).some((t) => t.toLowerCase().includes(searchTerm.toLowerCase()));
 
       const matchCategory = selectedCategory === "All" || h.category === selectedCategory;
       const matchStage = selectedStage === "All" || h.stage === selectedStage;

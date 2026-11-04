@@ -40,7 +40,7 @@ export default function Home() {
     return () => { cancelled = true; };
   }, []);
   const featured = useMemo(
-    () => mergeHackathons(getStoredHackathons(), serverHackathons).filter((h) => h.status !== 'draft').slice(0, 3),
+    () => mergeHackathons(getStoredHackathons(), serverHackathons).filter((h) => h.status !== 'draft'),
     [serverHackathons]
   );
 
@@ -104,16 +104,18 @@ export default function Home() {
         <div className="container-page">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <h2 className="text-2xl font-semibold tracking-tight">Open hackathons</h2>
-              <p className="mt-1 text-sm text-fg-muted">Pick a competition to read its rules or register your team.</p>
+              <h2 className="text-2xl font-semibold tracking-tight">Hackathons</h2>
+              <p className="mt-1 text-sm text-fg-muted">
+                {featured.length} competition{featured.length !== 1 ? 's' : ''} available — pick one to read its rules or register your team.
+              </p>
             </div>
             <Button as={Link} to="/hackathons" variant="ghost" size="sm">
-              View all
+              Browse all ({featured.length})
               <ArrowRight aria-hidden="true" />
             </Button>
           </div>
 
-          <div className="mt-8 grid gap-4 md:grid-cols-3">
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {featured.map((h) => (
               <HackathonCard key={h.id} hackathon={h} variant="featured" />
             ))}
