@@ -85,7 +85,10 @@ export default function OrganizerDashboard() {
               api.getHackathonProgress(h.id).catch(() => null),
               api.request(`/hackathons/${encodeURIComponent(h.id)}/codes`).catch(() => null),
             ]);
-            return { id: h.id, subs: subs.submissions || [], progress: progress?.progress || null, codes };
+            // Scores submitted so far (the event's organizer may review them before publishing).
+            const judged = (progress?.progress?.judging?.complete || 0) + (progress?.progress?.judging?.in_progress || 0) > 0;
+            const board = judged ? await api.getLeaderboard(h.id).catch(() => null) : null;
+            return { id: h.id, subs: subs.submissions || [], progress: progress?.progress || null, codes, leaderboard: board?.leaderboard || [] };
           })
         );
         if (cancelled) return;
@@ -94,6 +97,7 @@ export default function OrganizerDashboard() {
           submissions: perEvent.flatMap((e) => e.subs),
           progress: Object.fromEntries(perEvent.map((e) => [e.id, e.progress])),
           committee: Object.fromEntries(perEvent.map((e) => [e.id, e.codes])),
+          leaderboards: Object.fromEntries(perEvent.map((e) => [e.id, e.leaderboard])),
         });
       } catch {
         /* offline: local data only */
@@ -238,15 +242,19 @@ export default function OrganizerDashboard() {
     }));
     const serverCodes = new Set(fromServer.map((t) => String(t.code).toUpperCase().trim()));
     const localEntries = Object.entries(teams).map(([code, t]) => ({ ...t, code }));
+    // For events that live on the server, the server's teams are the record;
+    // a local copy (e.g. from before a demo reset) would show up twice.
+    const serverEventIds = new Set(serverData.hackathons.map((h) => h.id));
     const filteredLocal = localEntries.filter((t) => {
       if (!t) return false;
+      if (serverEventIds.has(t.hackathonId) || serverEventIds.has(normalizeHackathonId(t.hackathonId))) return false;
       if (serverCodes.has(String(t.code || t.teamCode || '').toUpperCase().trim())) return false;
       if (myHackathonIds.has(t.hackathonId)) return true;
       const norm = normalizeHackathonId(t.hackathonId);
       return norm && myHackathonIds.has(norm);
     });
     return [...fromServer, ...filteredLocal];
-  }, [teams, serverTeams, myHackathonIds]);
+  }, [teams, serverTeams, myHackathonIds, serverData]);
 
   // Unified participant registrations for organizer's managed hackathons
   const participantsList = useMemo(() => {
@@ -622,9 +630,8 @@ export default function OrganizerDashboard() {
     // Server first: it ranks teams, issues certificates and notifies participants.
     if (api.getToken()) {
       try {
+        // The server is the record for its events; no local flag is written.
         await api.publishResults(hackathonId);
-        setResultsPublished(hackathonId, true);
-        updateHackathon(hackathonId, { resultsPublished: true });
         setNotice(`✓ Official results published and certificates issued to participants for "${title}"!`);
         setRefreshKey((k) => k + 1);
         setTimeout(() => setNotice(null), 4500);
@@ -925,7 +932,7 @@ export default function OrganizerDashboard() {
                           </dl>
 
                           {h.isServer && serverData.progress[h.id] && (
-                            <EventProgress progress={serverData.progress[h.id]} committee={serverData.committee[h.id]} teams={sprintTeams} />
+                            <EventProgress progress={serverData.progress[h.id]} committee={serverData.committee[h.id]} teams={sprintTeams} leaderboard={serverData.leaderboards?.[h.id] || []} />
                           )}
 
                           <div className="mt-auto space-y-1.5">
@@ -1809,7 +1816,7 @@ function ModuleCheckbox({ label, checked, onChange }) {
 }
 
 /** Live lifecycle counts for a server event (registrations → results). */
-function EventProgress({ progress: p, committee, teams }) {
+function EventProgress({ progress: p, committee, teams, leaderboard = [] }) {
   const judges = committee?.assignedJudges || [];
   const screeners = committee?.assignedScreeners || [];
   const rows = [
@@ -1839,13 +1846,36 @@ function EventProgress({ progress: p, committee, teams }) {
                 <span className="font-medium text-fg">{t.name}</span>
                 {t.screeningStatus && (
                   <Badge tone={t.screeningStatus === "shortlisted" ? "success" : t.screeningStatus === "rejected" ? "danger" : "neutral"}>
-                    {t.screeningStatus === "shortlisted" ? "Shortlisted" : t.screeningStatus === "rejected" ? "Rejected" : "Screening pending"}
+                    {t.screeningStatus === "shortlisted" ? "Shortlisted" : t.screeningStatus === "rejected" ? "Rejected" : t.screeningStatus === "not_submitted" ? "Not submitted" : "Screening pending"}
                   </Badge>
                 )}
                 {t.members?.length > 0 && <span className="w-full text-fg-subtle">{t.members.map((m) => m.name).join(", ")}</span>}
               </li>
             ))}
           </ul>
+        </div>
+      )}
+      {/* Submitted scores, visible to the organizer before publishing (participants see them only after). */}
+      {leaderboard.some((l) => l.judgeCount > 0) && (
+        <div className="border-t border-line pt-2">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <p className="text-fg-subtle">Judged scores {p.resultsPublished ? "(published)" : "(private until you publish)"}</p>
+            {!p.resultsPublished && p.judging.complete > 0 && p.judging.complete === p.screening.shortlisted && (
+              <Badge tone="success">Ready to publish</Badge>
+            )}
+          </div>
+          <ol className="space-y-1">
+            {leaderboard.filter((l) => l.judgeCount > 0).map((l) => (
+              <li key={l.teamId} className="flex items-center justify-between gap-2">
+                <span className="text-fg">
+                  <span className="tabular-nums text-fg-subtle">#{l.rank}</span> {l.teamName}
+                </span>
+                <span className="tabular-nums font-medium text-fg">
+                  {l.totalScore} <span className="font-normal text-fg-subtle">· {l.judgeCount} judge{l.judgeCount === 1 ? "" : "s"}</span>
+                </span>
+              </li>
+            ))}
+          </ol>
         </div>
       )}
       {(judges.length > 0 || screeners.length > 0) && (

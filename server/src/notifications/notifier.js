@@ -38,6 +38,7 @@ const EVENT_CATEGORY = {
   registration_confirmed: 'team',
   roster_locked: 'team',
   screening_decision: 'submissions',
+  mentor_note: 'team',
   certificate_issued: 'results',
   team_created: 'team',
   join_request_submitted: 'team',
@@ -423,6 +424,18 @@ export const notifyScreeningDecision = (team, status) => guard('screening_decisi
             ? `${team.teamName} was not shortlisted.`
             : `${team.teamName} is back in screening.`,
     },
+  });
+});
+
+/** A mentor advised the team → every accepted member (and the leader). */
+export const notifyMentorNote = (team, entry) => guard('mentor_note', () => {
+  const hackathon = store.getHackathonById(team.hackathonId);
+  return notify({
+    type: 'mentor_note',
+    recipients: acceptedMemberIds(team.id).concat(team.leaderId),
+    dedupeBase: entry.id,
+    data: () => ({ team, hackathon, entry }),
+    inApp: { message: () => `${entry.mentorName} shared guidance with ${team.teamName}: "${entry.note.slice(0, 140)}"` },
   });
 });
 

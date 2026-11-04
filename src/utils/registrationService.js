@@ -85,7 +85,7 @@ export function isUserRegistered(userId, hackathonId) {
   });
 }
 
-export function registerForHackathon(userId, hackathonId) {
+export function registerForHackathon(userId, hackathonId, { skipApi = false, details = null } = {}) {
   if (!userId || !hackathonId) {
     return { success: false, error: "User ID and Hackathon ID are required." };
   }
@@ -118,7 +118,8 @@ export function registerForHackathon(userId, hackathonId) {
       day: "2-digit",
       year: "numeric"
     }),
-    status: "Registration Verified"
+    status: "Registration Verified",
+    ...(details ? { details } : {})
   };
 
   const updated = [newReg, ...all];
@@ -130,7 +131,7 @@ export function registerForHackathon(userId, hackathonId) {
   }
 
   // Attempt backend persistence to MySQL
-  if (api.getToken()) {
+  if (api.getToken() && !skipApi) {
     api.registerForHackathon(hackathonId).catch((err) => {
       console.warn("Backend registration sync warning:", err.message);
     });
@@ -166,4 +167,30 @@ export function registerForHackathon(userId, hackathonId) {
   }
 
   return { success: true, registration: newReg };
+}
+
+/**
+ * Registration from the registration form: the server decides (open window,
+ * duplicate, details) when the participant is signed in to it; local-only
+ * events and offline sessions fall back to this browser's demo data.
+ * Resolves to { success, error?, alreadyRegistered? }.
+ */
+export async function submitRegistration(user, hackathon, details) {
+  if (!user?.email || !hackathon?.id) return { success: false, error: "Please sign in to register." };
+  if (api.getToken()) {
+    try {
+      await api.registerForHackathon(hackathon.id, details);
+      registerForHackathon(user.email, hackathon.id, { skipApi: true, details });
+      return { success: true };
+    } catch (err) {
+      if (err.status === 400 && /already registered/i.test(err.message || "")) {
+        registerForHackathon(user.email, hackathon.id, { skipApi: true, details });
+        return { success: false, alreadyRegistered: true, error: err.message };
+      }
+      // 404: the event only exists in this browser's demo data.
+      if (err.status !== 404 && !err.isNetworkError) return { success: false, error: err.message };
+    }
+  }
+  const res = registerForHackathon(user.email, hackathon.id, { skipApi: true, details });
+  return res.success ? { success: true } : { success: false, alreadyRegistered: res.alreadyRegistered, error: res.error };
 }

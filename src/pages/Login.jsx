@@ -5,7 +5,6 @@ import { Alert, Button, Field, Input, Logo, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 import { DEMO_USERS, getRoleDashboardPath } from '../utils/auth';
-import { registerForHackathon } from '../utils/registrationService';
 
 const ROLE_PREVIEWS = [
   {
@@ -130,14 +129,15 @@ export default function Login({ navigate: propNavigate }) {
 
     // Check if user came from a hackathon registration attempt
     if (location.state?.registerHackathonId) {
-      registerForHackathon(res.user.email, location.state.registerHackathonId);
+      // Back to the event with its registration form open; nothing is
+      // registered until the participant confirms their details.
       const targetHackathonId = location.state.registerHackathonId;
       setStatusMessage({
         type: "success",
-        text: `Signed in as ${res.user.fullName}. Registering you and returning to the hackathon…`
+        text: `Signed in as ${res.user.fullName}. Returning to the hackathon to complete your registration…`
       });
       setTimeout(() => {
-        navigate(`/hackathons/${targetHackathonId}`, { replace: true });
+        navigate(`/hackathons/${targetHackathonId}`, { replace: true, state: { openRegistration: true } });
       }, 400);
       return;
     }

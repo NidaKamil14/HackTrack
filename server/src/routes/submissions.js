@@ -18,8 +18,10 @@ router.get('/', requireAuth, (req, res) => {
           ...s,
           teamName: team?.teamName || 'Unknown Team',
           hackathonTitle: store.getHackathonById(s.hackathonId)?.title || s.hackathonId,
-          screeningStatus: team?.screeningStatus || 'pending',
+          screeningStatus: store.effectiveScreeningStatus(team),
           screeningFeedback: team?.screeningFeedback || '',
+          screeningChecks: store.effectiveScreeningStatus(team) === 'not_submitted' ? null : team?.screeningChecks || null,
+          screenedAt: store.effectiveScreeningStatus(team) === 'not_submitted' ? null : team?.screenedAt || null,
           judgingProgress: team ? store.getJudgingProgress(team.id) : null,
         };
       });
@@ -42,8 +44,10 @@ router.get('/', requireAuth, (req, res) => {
             ...s,
             teamName: team?.teamName || 'Unknown Team',
             hackathonTitle: store.getHackathonById(s.hackathonId)?.title || s.hackathonId,
-            screeningStatus: team?.screeningStatus || 'pending',
+            screeningStatus: store.effectiveScreeningStatus(team),
             screeningFeedback: team?.screeningFeedback || '',
+            screeningChecks: store.effectiveScreeningStatus(team) === 'not_submitted' ? null : team?.screeningChecks || null,
+            screenedAt: store.effectiveScreeningStatus(team) === 'not_submitted' ? null : team?.screenedAt || null,
             judgingProgress: team ? store.getJudgingProgress(team.id) : null,
           };
         });
@@ -79,14 +83,19 @@ router.get('/', requireAuth, (req, res) => {
   // Whole-event lists: admins, the event's organizers and bound reviewers.
   // Participants only ever see their own team's submission.
   const seesAll = isAdmin(req.user) || ownsHackathon(req.user, targetHackathon.id) || isBoundReviewer(req.user, targetHackathon.id);
-  const submissions = store.getSubmissionsByHackathon(targetHackathon.id).filter((s) => seesAll || canSeeSubmission(req.user, s)).map((s) => {
+  // The screening committee's queue only contains finalized (locked) work;
+  // drafts are still being edited by the team.
+  const onlyFinalized = req.user.role === 'screening';
+  const submissions = store.getSubmissionsByHackathon(targetHackathon.id).filter((s) => (seesAll || canSeeSubmission(req.user, s)) && (!onlyFinalized || s.isLocked)).map((s) => {
     const team = store.findTeamById(s.teamId);
     return {
       ...s,
       teamName: team?.teamName || 'Unknown Team',
       hackathonTitle: targetHackathon.title,
-      screeningStatus: team?.screeningStatus || 'pending',
+      screeningStatus: store.effectiveScreeningStatus(team),
       screeningFeedback: team?.screeningFeedback || '',
+      screeningChecks: store.effectiveScreeningStatus(team) === 'not_submitted' ? null : team?.screeningChecks || null,
+      screenedAt: store.effectiveScreeningStatus(team) === 'not_submitted' ? null : team?.screenedAt || null,
       members: team ? store.getTeamMembers(team.id).filter((m) => m.status === 'accepted').map((m) => ({ name: m.name, role: m.role })) : [],
       judgingProgress: team ? store.getJudgingProgress(team.id) : null,
     };
@@ -128,8 +137,10 @@ router.get('/:id', requireAuth, (req, res) => {
     submission: {
       ...submission,
       teamName: team?.teamName || 'Unknown Team',
-      screeningStatus: team?.screeningStatus || 'pending',
+      screeningStatus: store.effectiveScreeningStatus(team),
       screeningFeedback: team?.screeningFeedback || '',
+      screeningChecks: store.effectiveScreeningStatus(team) === 'not_submitted' ? null : team?.screeningChecks || null,
+      screenedAt: store.effectiveScreeningStatus(team) === 'not_submitted' ? null : team?.screenedAt || null,
       judgingProgress: team ? store.getJudgingProgress(team.id) : null,
     },
   });
@@ -164,8 +175,10 @@ router.get('/team/:teamId', requireAuth, (req, res) => {
     submission: {
       ...submission,
       teamName: team?.teamName || 'Unknown Team',
-      screeningStatus: team?.screeningStatus || 'pending',
+      screeningStatus: store.effectiveScreeningStatus(team),
       screeningFeedback: team?.screeningFeedback || '',
+      screeningChecks: store.effectiveScreeningStatus(team) === 'not_submitted' ? null : team?.screeningChecks || null,
+      screenedAt: store.effectiveScreeningStatus(team) === 'not_submitted' ? null : team?.screenedAt || null,
       judgingProgress: team ? store.getJudgingProgress(team.id) : null,
     },
   });

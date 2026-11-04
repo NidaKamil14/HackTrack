@@ -173,9 +173,10 @@ class ApiClient {
     });
   }
 
-  async registerForHackathon(hackathonId) {
+  async registerForHackathon(hackathonId, details = undefined) {
     return this.request(`/hackathons/${hackathonId}/register`, {
       method: 'POST',
+      body: details ? JSON.stringify(details) : undefined,
     });
   }
 
@@ -233,11 +234,19 @@ class ApiClient {
     });
   }
 
-  async updateTeamScreening(teamId, status, { feedback, internalNote } = {}) {
+  async updateTeamScreening(teamId, status, { feedback, internalNote, checks } = {}) {
     return this.request(`/teams/${teamId}/screening`, {
       method: 'PATCH',
-      body: JSON.stringify({ status, feedback, internalNote }),
+      body: JSON.stringify({ status, feedback, internalNote, checks }),
     });
+  }
+
+  async getMentorNotes(teamId) {
+    return this.request(`/teams/${encodeURIComponent(teamId)}/mentor-notes`);
+  }
+
+  async addMentorNote(teamId, note) {
+    return this.request(`/teams/${encodeURIComponent(teamId)}/mentor-notes`, { method: 'POST', body: JSON.stringify({ note }) });
   }
 
   async getScreeningReviews(teamId) {

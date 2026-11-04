@@ -690,7 +690,13 @@ export function finalizeSubmission({
   const finalizedRecord = {
     ...existing,
     status: "finalized",
+    // Screening starts fresh on the finalized work: nothing recorded while it
+    // was a draft (seeded status, checks, remarks) carries over.
     screeningStatus: "Pending Review",
+    checks: undefined,
+    screeningRemarks: "",
+    rejectionReason: "",
+    screenedBy: undefined,
     finalizedAt: finalizedTimestamp,
     updatedAt: finalizedTimestamp
   };

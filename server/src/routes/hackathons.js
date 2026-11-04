@@ -448,11 +448,11 @@ router.post('/:id/codes', requireAuth, requireRole('organizer'), (req, res) => {
   }
 
   const { role } = req.body || {};
-  if (!['judge', 'screening'].includes(role)) {
+  if (!['judge', 'screening', 'mentor'].includes(role)) {
     return res.status(400).json({
       status: 400,
       error: 'Bad Request',
-      message: "Role must be 'judge' or 'screening'.",
+      message: "Role must be 'judge', 'screening' or 'mentor'.",
     });
   }
 
@@ -531,21 +531,38 @@ router.post('/:id/register', requireAuth, (req, res) => {
     });
   }
 
-  if (hackathon.status === 'draft') {
-    return res.status(400).json({
-      status: 400,
-      error: 'Bad Request',
-      message: 'Hackathon is not published for registration.',
-    });
+  // Registration is open only for a published event, before its registration
+  // deadline, and never once judging has started or results are out.
+  const closedReason =
+    hackathon.status === 'draft'
+      ? 'Registration has not opened for this hackathon yet.'
+      : hackathon.resultsPublished || ['completed', 'judging', 'registration_closed'].includes(hackathon.status)
+        ? 'Registration is closed: this hackathon has moved past registration.'
+        : new Date() > new Date(hackathon.registrationDeadline)
+          ? 'Registration deadline has passed for this hackathon.'
+          : null;
+  if (closedReason) {
+    return res.status(400).json({ status: 400, error: 'Bad Request', message: closedReason });
   }
 
-  if (new Date() > new Date(hackathon.registrationDeadline)) {
-    return res.status(400).json({
-      status: 400,
-      error: 'Bad Request',
-      message: 'Registration deadline has passed for this hackathon.',
-    });
+  // Optional registration form details (validated when provided).
+  const body = req.body || {};
+  const details = {};
+  const textFields = { phone: 20, institution: 200, course: 120, yearOfStudy: 60, experience: 300 };
+  for (const [k, max] of Object.entries(textFields)) {
+    if (body[k] === undefined || body[k] === null || body[k] === '') continue;
+    if (typeof body[k] !== 'string' || body[k].length > max) {
+      return res.status(400).json({ status: 400, error: 'Bad Request', message: `${k} must be text of at most ${max} characters.` });
+    }
+    details[k] = body[k].trim();
   }
+  if (details.phone && !/^[+0-9 ()-]{7,20}$/.test(details.phone)) {
+    return res.status(400).json({ status: 400, error: 'Bad Request', message: 'Please provide a valid phone number.' });
+  }
+  if (body.acceptTerms !== undefined && body.acceptTerms !== true) {
+    return res.status(400).json({ status: 400, error: 'Bad Request', message: 'You must accept the hackathon rules to register.' });
+  }
+  if (body.acceptTerms === true) details.acceptedTermsAt = new Date().toISOString();
 
   // Reject duplicate registration attempts (FR-10, BR-2)
   const isAlreadyRegistered = store.registrations.some(
@@ -567,6 +584,7 @@ router.post('/:id/register', requireAuth, (req, res) => {
       userId: req.user.id,
       userEmail: req.user.email,
       status: 'Registration Verified',
+      details: Object.keys(details).length ? details : null,
     });
 
     notifyRegistrationConfirmed(registration);

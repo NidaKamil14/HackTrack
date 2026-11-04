@@ -4,6 +4,7 @@ import { Bell, Check, ExternalLink } from 'lucide-react';
 import { Badge, Button, Dialog, EmptyState, cn } from '../ui';
 import { getUserNotifications, markAsRead, markAllAsRead } from '../../utils/notificationService';
 import api from '../../utils/api';
+import { resolveNotificationLink } from '../../utils/notificationLinks';
 
 export default function NotificationCenterDialog({ open, onClose, user }) {
   const navigate = useNavigate();
@@ -62,9 +63,10 @@ export default function NotificationCenterDialog({ open, onClose, user }) {
     setNotifications((prev) =>
       prev.map((n) => (n.id === item.id ? { ...n, read: true } : n))
     );
-    if (item.link) {
+    const target = resolveNotificationLink(item.link, user);
+    if (target) {
       onClose();
-      navigate(item.link);
+      navigate(target);
     }
   };
 

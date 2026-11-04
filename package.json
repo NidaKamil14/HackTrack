@@ -11,7 +11,7 @@
     "server": "npm --prefix server start",
     "server:dev": "npm --prefix server run dev",
     "test:server": "npm --prefix server test",
-    "test:web": "node --test src/utils/serverSubmissions.test.js"
+    "test:web": "node --test src/utils/serverSubmissions.test.js src/utils/notificationLinks.test.js"
   },
   "dependencies": {
     "clsx": "^2.1.1",

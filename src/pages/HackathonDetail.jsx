@@ -6,7 +6,9 @@ import { normalizeServerHackathon } from '../utils/serverHackathons';
 import api from '../utils/api';
 import EventCover from '../components/art/EventCover';
 import { useAuth } from '../context/AuthContext';
-import { isUserRegistered, registerForHackathon } from '../utils/registrationService';
+import { isUserRegistered } from '../utils/registrationService';
+import { getRegistrationWindow } from '../utils/registrationWindow';
+import RegistrationDialog from '../components/RegistrationDialog';
 import { Alert, Badge, Button, Card, DescriptionList, EmptyState, TabPanel, Tabs, stageTone } from '../components/ui';
 
 const TABS = [
@@ -92,6 +94,9 @@ export default function HackathonDetail({
   // Registration state
   const [registeredOverride, setRegisteredOverride] = useState(null);
   const [regFeedback, setRegFeedback] = useState(null);
+  // Coming back from sign-in with "register" intent opens the form (never auto-registers).
+  const [regOpen, setRegOpen] = useState(() => Boolean(location.state?.openRegistration));
+  const [regJustCompleted, setRegJustCompleted] = useState(false);
 
   if (!hackathon && lookingUp) {
     return (
@@ -116,6 +121,7 @@ export default function HackathonDetail({
     );
   }
 
+  const regWindow = getRegistrationWindow(hackathon);
   const isRegistered = registeredOverride !== null
     ? registeredOverride
     : (user?.email && hackathon?.id ? isUserRegistered(user.email, hackathon.id) : false);
@@ -138,23 +144,23 @@ export default function HackathonDetail({
       return;
     }
 
-    // 3. Register user
-    const res = registerForHackathon(user.email, hackathon.id);
-    if (res.success) {
-      setRegisteredOverride(true);
-      setRegFeedback({
-        type: "success",
-        text: `You're registered for ${hackathon.title}. You can now create or join a team for this competition.`
-      });
-    } else {
-      setRegFeedback({
-        type: "info",
-        text: res.error || "Registration completed."
-      });
-      if (res.alreadyRegistered) {
-        setRegisteredOverride(true);
-      }
+    // 3. Closed / not yet open
+    if (!regWindow.open) {
+      setRegFeedback({ type: "info", text: regWindow.reason });
+      return;
     }
+
+    // 4. Registration form (details + rules) — nothing is registered until confirmed
+    setRegOpen(true);
+  };
+
+  const handleRegistered = () => {
+    setRegJustCompleted(true); // keep the dialog open on its confirmation screen
+    setRegisteredOverride(true);
+    setRegFeedback({
+      type: "success",
+      text: `You're registered for ${hackathon.title}. You can now create or join a team for this competition.`
+    });
   };
 
   const openTeamCode = () => {
@@ -300,9 +306,18 @@ export default function HackathonDetail({
                   <ArrowRight aria-hidden="true" />
                 </Button>
               ) : (
-                <Button className="w-full" size="lg" onClick={handleRegisterClick}>
-                  {isAuthenticated ? "Register for this hackathon" : "Sign in to register"}
-                </Button>
+                regWindow.open ? (
+                  <Button className="w-full" size="lg" onClick={handleRegisterClick}>
+                    {isAuthenticated ? "Register for this hackathon" : "Sign in to register"}
+                  </Button>
+                ) : (
+                  <>
+                    <Button className="w-full" size="lg" disabled aria-describedby="reg-closed-reason">
+                      {regWindow.label}
+                    </Button>
+                    <p id="reg-closed-reason" className="text-xs text-fg-subtle">{regWindow.reason}</p>
+                  </>
+                )
               )}
               <Button className="w-full" size="lg" variant="secondary" onClick={openTeamCode}>
                 <KeyRound aria-hidden="true" />
@@ -328,6 +343,17 @@ export default function HackathonDetail({
           )}
         </aside>
       </div>
+
+      <RegistrationDialog
+        open={regOpen && isAuthenticated && (!isRegistered || regJustCompleted)}
+        onClose={() => {
+          setRegOpen(false);
+          setRegJustCompleted(false);
+        }}
+        hackathon={hackathon}
+        user={user}
+        onRegistered={handleRegistered}
+      />
     </div>
   );
 }

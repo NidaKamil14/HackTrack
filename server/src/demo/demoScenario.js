@@ -40,6 +40,7 @@ export const DEMO_ACCOUNTS = [
   { key: 'screening', id: 'usr-demo-screening', email: `screening@${DEMO_DOMAIN}`, fullName: 'Arjun Mehta', role: 'screening', university: 'Demo Screening Committee', memberId: 'DEMO-SCR-01' },
   { key: 'judge1', id: 'usr-demo-judge-1', email: `judge.nair@${DEMO_DOMAIN}`, fullName: 'Dr. Leela Nair', role: 'judge', university: 'Demo Judging Panel', memberId: 'DEMO-JDG-01' },
   { key: 'judge2', id: 'usr-demo-judge-2', email: `judge.fernandes@${DEMO_DOMAIN}`, fullName: 'Prof. Daniel Fernandes', role: 'judge', university: 'Demo Judging Panel', memberId: 'DEMO-JDG-02' },
+  { key: 'mentor', id: 'usr-demo-mentor', email: `mentor@${DEMO_DOMAIN}`, fullName: 'Rohan Desai', role: 'mentor', university: 'Demo Mentor Network', memberId: 'DEMO-MEN-01' },
   { key: 'leader', id: 'usr-demo-leader', email: `aanya.leader@${DEMO_DOMAIN}`, fullName: 'Aanya Sharma', role: 'leader', university: 'Demo Institute of Technology', memberId: 'DEMO-STU-101' },
   { key: 'member1', id: 'usr-demo-member-1', email: `kabir.member@${DEMO_DOMAIN}`, fullName: 'Kabir Rao', role: 'student', university: 'Demo Institute of Technology', memberId: 'DEMO-STU-102' },
   { key: 'member2', id: 'usr-demo-member-2', email: `meera.member@${DEMO_DOMAIN}`, fullName: 'Meera Iyer', role: 'student', university: 'Demo Institute of Technology', memberId: 'DEMO-STU-103' },
@@ -52,6 +53,8 @@ export const DEMO_CRITERIA = [
   { id: 'crit-demo-impact', name: 'Impact & Sustainability', maxScore: 25, weightage: 1, description: 'Real-world value and environmental benefit.' },
   { id: 'crit-demo-presentation', name: 'Presentation & Demo', maxScore: 15, weightage: 1, description: 'Clarity of the pitch and the live demo.' },
 ];
+
+const SEED_MENTOR_ID = 'usr-mentor-008';
 
 export const DEMO_STAGES = [
   { key: 'setup', label: 'Event published', description: 'Published event with rubric, screening committee and two bound judges. No participants yet — demonstrate registration live.' },
@@ -108,7 +111,7 @@ function ensureHackathon() {
       maxTeamSize: 4,
       hasScreeningRound: true,
       screeningRoundsCount: 1,
-      hasMentorship: false,
+      hasMentorship: true,
       evaluationWorkflow: 'screening_first',
       criteria: DEMO_CRITERIA,
       createdBy: account('organizer').id,
@@ -118,6 +121,7 @@ function ensureHackathon() {
   store.updateHackathon(hackathon.id, {
     ...dates,
     status: 'published',
+    hasMentorship: true,
     resultsPublished: false,
     resultsPublishedAt: null,
     criteria: DEMO_CRITERIA,
@@ -133,18 +137,23 @@ function ensureHackathon() {
 function ensureCommittee() {
   const organizerId = account('organizer').id;
   const codes = {};
-  for (const role of ['screening', 'judge']) {
+  for (const role of ['screening', 'judge', 'mentor']) {
     let record = store.getCodesForHackathon(DEMO_IDS.hackathon).find((c) => c.role === role);
     if (!record) record = store.generateHackathonCode(DEMO_IDS.hackathon, role, organizerId);
     codes[role] = record.code;
   }
-  for (const key of ['screening', 'judge1', 'judge2']) {
+  for (const key of ['screening', 'judge1', 'judge2', 'mentor']) {
     const a = account(key);
     const user = store.findUserById(a.id);
     if (!user.assignedHackathonIds?.includes(DEMO_IDS.hackathon)) {
       const result = store.redeemHackathonCode(codes[a.role], a.id);
       notifyAccessCodeRedeemed(result, a.id, organizerId);
     }
+  }
+  // The platform's seed mentor (mentor@hacktrack.io) also mentors the demo event.
+  const seedMentor = store.findUserById(SEED_MENTOR_ID);
+  if (seedMentor && seedMentor.role === 'mentor' && !seedMentor.assignedHackathonIds?.includes(DEMO_IDS.hackathon)) {
+    store.redeemHackathonCode(codes.mentor, seedMentor.id);
   }
   return codes;
 }
@@ -229,9 +238,9 @@ export function resetDemo(stage = 'setup') {
   store.purgeHackathonActivity(DEMO_IDS.hackathon, DEMO_ACCOUNTS.map((a) => a.id));
   ensureHackathon();
   // Committee bindings are re-made each reset so the redemption is real.
-  for (const key of ['screening', 'judge1', 'judge2']) {
-    const user = store.findUserById(account(key).id);
-    user.assignedHackathonIds = (user.assignedHackathonIds || []).filter((h) => h !== DEMO_IDS.hackathon);
+  for (const id of ['screening', 'judge1', 'judge2', 'mentor'].map((k) => account(k).id).concat(SEED_MENTOR_ID)) {
+    const user = store.findUserById(id);
+    if (user) user.assignedHackathonIds = (user.assignedHackathonIds || []).filter((h) => h !== DEMO_IDS.hackathon);
   }
   ensureCommittee();
   for (const s of DEMO_STAGES.slice(1, index + 1)) STEPS[s.key]();
@@ -239,11 +248,22 @@ export function resetDemo(stage = 'setup') {
   return demoStatus();
 }
 
+/**
+ * Stage the demo is built to when it has to be created from scratch (for
+ * example after a restart with the in-memory store). Defaults to "team" so
+ * Team Apex Innovators always exists for the mentor, organizer and leader
+ * panels; override with DEMO_START_STAGE (setup, registered, team, submitted…).
+ */
+export function demoStartStage() {
+  const wanted = process.env.DEMO_START_STAGE;
+  return DEMO_STAGES.some((s) => s.key === wanted) ? wanted : 'team';
+}
+
 /** Creates the demo at startup if it doesn't exist yet; never resets progress. */
 export function ensureDemo() {
   if (!demoEnabled()) return null;
   const exists = store.getAllHackathons().some((h) => h.id === DEMO_IDS.hackathon);
-  if (!exists) return resetDemo('setup');
+  if (!exists) return resetDemo(demoStartStage());
   ensureAccounts();
   ensureCommittee();
   return demoStatus();

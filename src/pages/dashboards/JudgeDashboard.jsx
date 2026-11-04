@@ -360,6 +360,7 @@ export default function JudgeDashboard() {
             status: s.isEvaluatedByMe ? "Evaluated" : "Pending Evaluation",
             screeningScore: "Shortlisted by the screening committee",
             criteria: h?.criteria || [],
+            resultsPublished: Boolean(h?.resultsPublished),
             scores: Object.fromEntries(mine.map((e) => [e.criterionId, Number(e.score)])),
             feedback: mine[0]?.remarks || "",
           };
@@ -556,7 +557,9 @@ export default function JudgeDashboard() {
 
   const evaluatedCount = teamsState.filter((t) => t.status === "Evaluated").length;
   const pendingCount = teamsState.length - evaluatedCount;
-  const resultsPublished = selectedTeam?.hackathonId ? isResultsPublished(selectedTeam.hackathonId) : false;
+  const resultsPublished = selectedTeam?.isServer
+    ? Boolean(selectedTeam.resultsPublished)
+    : selectedTeam?.hackathonId ? isResultsPublished(selectedTeam.hackathonId) : false;
 
   return (
     <DashboardLayout

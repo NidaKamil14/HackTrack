@@ -2,13 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mapServerSubmission } from './serverSubmissions.js';
 
-// Regression: the participant dashboard dropped the screening decision of
-// unlocked (draft) submissions and showed "Pending Review" instead.
+// Screening applies to finalized (locked) submissions only: a draft is never
+// shown as shortlisted or rejected, whatever the server recorded.
 
 const base = { id: 'sub-1', projectTitle: 'P', abstract: 'A', repoUrl: 'r', demoUrl: 'd', updatedAt: '2026-11-03T00:00:00Z' };
 
-test('a shortlisted draft submission keeps its status', () => {
-  assert.equal(mapServerSubmission({ ...base, isLocked: false, screeningStatus: 'shortlisted' }).screeningStatus, 'Shortlisted');
+test('a draft submission is awaiting final submission, never shortlisted', () => {
+  assert.equal(mapServerSubmission({ ...base, isLocked: false, screeningStatus: 'shortlisted' }).screeningStatus, 'Awaiting final submission');
+  assert.equal(mapServerSubmission({ ...base, isLocked: false, screeningStatus: 'not_submitted' }).screeningStatus, 'Awaiting final submission');
+  assert.equal(mapServerSubmission({ ...base, isLocked: false, screeningStatus: 'shortlisted' }).status, 'draft');
 });
 
 test('locked submissions map pending / shortlisted / rejected', () => {

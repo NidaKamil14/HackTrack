@@ -54,7 +54,7 @@ export function publicTeam(team) {
     name: team.teamName,
     track: team.track,
     rosterLocked: Boolean(team.rosterLocked),
-    screeningStatus: team.screeningStatus,
+    screeningStatus: store.effectiveScreeningStatus(team),
     leaderName: leader?.fullName || 'Lead Member',
     lead: leader?.fullName || 'Lead Member',
     memberCount: members.length,

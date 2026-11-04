@@ -25,6 +25,14 @@ const truncate = (text, max) => {
 
 const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || 'there';
 
+/**
+ * Link into a participant's dashboard: the tab that holds the update and the
+ * event it is about (the dashboard opens that hackathon). The frontend maps
+ * /dashboard/student to the reader's own dashboard (leader or member).
+ */
+const teamTab = (tab, hackathonId) =>
+  `/dashboard/student?tab=${tab}${hackathonId ? `&event=${encodeURIComponent(hackathonId)}` : ''}`;
+
 const CERT_LABELS = { winner: 'Winner', runner_up: 'Runner-up', participation: 'Participation' };
 
 /* ---- Event templates ------------------------------------------------------
@@ -57,7 +65,7 @@ export const TEMPLATES = {
       ? `Your team leader locked the roster of ${team.teamName} for ${hackathon.title}.`
       : `Your team leader reopened the roster of ${team.teamName} for ${hackathon.title}.`,
     body: [locked ? 'No new members can be accepted while the roster is locked.' : 'The leader can accept new join requests again.'],
-    cta: { label: 'Open your team', path: '/dashboard/student' },
+    cta: { label: 'Open your team', path: teamTab('roster', hackathon.id) },
   }),
 
   screening_decision: ({ team, hackathon, status }) => ({
@@ -70,7 +78,15 @@ export const TEMPLATES = {
           ? `The screening committee did not shortlist ${team.teamName} for ${hackathon.title}.`
           : `${team.teamName}’s submission for ${hackathon.title} is being screened again.`,
     body: [status === 'shortlisted' ? 'Your project will now be scored by the judges. Results are shared when the organizers publish them.' : 'You can see the current status on your dashboard.'],
-    cta: { label: 'Open your dashboard', path: '/dashboard/student' },
+    cta: { label: 'See the screening result', path: teamTab('results', hackathon.id) },
+  }),
+
+  mentor_note: ({ team, hackathon, entry }) => ({
+    subject: `New guidance from your mentor for ${team.teamName}`,
+    heading: 'Your mentor shared guidance',
+    intro: `${entry.mentorName} sent guidance to ${team.teamName} for ${hackathon.title}.`,
+    body: [entry.note],
+    cta: { label: 'Open your team', path: teamTab('roster', hackathon.id) },
   }),
 
   role_changed: ({ user, previousRole }) => ({
@@ -100,7 +116,7 @@ export const TEMPLATES = {
     body: [
       `Your ${CERT_LABELS[certificate.certificateType] || 'Participation'} Certificate for ${certificate.hackathonTitle || hackathon?.title} is now ready for download and verification.`,
     ],
-    cta: { label: 'View Certificate', path: '/dashboard/student?tab=results' },
+    cta: { label: 'View Certificate', path: teamTab('certificates', hackathon?.id || certificate.hackathonId) },
   }),
 
   team_created: ({ team, hackathon }) => ({
@@ -110,7 +126,7 @@ export const TEMPLATES = {
     body: [
       'Share your team’s invite code from your dashboard so teammates can request to join. You approve every request before anyone is added.',
     ],
-    cta: { label: 'Open team roster', path: '/dashboard/leader?tab=roster' },
+    cta: { label: 'Open team roster', path: teamTab('roster', hackathon.id) },
   }),
 
   join_request_submitted: ({ team, hackathon }) => ({
@@ -118,7 +134,7 @@ export const TEMPLATES = {
     heading: 'Your join request was sent',
     intro: `You asked to join ${team.teamName} in ${hackathon.title}.`,
     body: ['The team leader will review your request. We’ll email you as soon as they approve or decline it.'],
-    cta: { label: 'View your dashboard', path: '/dashboard/student?tab=roster' },
+    cta: { label: 'View your dashboard', path: teamTab('roster', hackathon.id) },
   }),
 
   join_request_received: ({ team, hackathon, requester }) => ({
@@ -126,7 +142,7 @@ export const TEMPLATES = {
     heading: 'New join request',
     intro: `${requester.fullName}${requester.university ? ` (${requester.university})` : ''} asked to join ${team.teamName} in ${hackathon.title}.`,
     body: ['Review the request to approve or decline it. Only you, as team leader, can make this decision.'],
-    cta: { label: 'Review request', path: '/dashboard/leader?tab=roster' },
+    cta: { label: 'Review request', path: teamTab('roster', hackathon.id) },
   }),
 
   join_request_approved: ({ team, hackathon }) => ({
@@ -134,7 +150,7 @@ export const TEMPLATES = {
     heading: 'Your request was approved',
     intro: `You’re now a member of ${team.teamName} for ${hackathon.title}.`,
     body: ['Check the roster and coordinate with your team leader on the project submission.'],
-    cta: { label: 'Open your team', path: '/dashboard/student?tab=roster' },
+    cta: { label: 'Open your team', path: teamTab('roster', hackathon.id) },
   }),
 
   join_request_rejected: ({ team, hackathon }) => ({
@@ -150,7 +166,7 @@ export const TEMPLATES = {
     heading: 'A new member joined your team',
     intro: `${member.fullName} is now part of ${team.teamName} for ${hackathon.title}.`,
     body: ['Say hello and make sure everyone knows the plan for your submission.'],
-    cta: { label: 'View roster', path: '/dashboard/student?tab=roster' },
+    cta: { label: 'View roster', path: teamTab('roster', hackathon.id) },
   }),
 
   submission_received: ({ team, hackathon, submission }) => ({
@@ -158,7 +174,7 @@ export const TEMPLATES = {
     heading: 'Your project was submitted',
     intro: `${team.teamName}’s project “${submission.projectTitle}” was received for ${hackathon.title}.`,
     body: ['Your team leader can keep editing it until the submission deadline. After that it is locked for screening and judging.'],
-    cta: { label: 'View submission', path: '/dashboard/student?tab=workspace' },
+    cta: { label: 'View submission', path: teamTab('workspace', hackathon.id) },
   }),
 
   submission_updated: ({ team, hackathon, submission }) => ({
@@ -166,7 +182,7 @@ export const TEMPLATES = {
     heading: 'Your project submission changed',
     intro: `${team.teamName}’s submission for ${hackathon.title} was updated by your team leader.`,
     body: ['Review the latest version so everyone agrees on what will be judged.'],
-    cta: { label: 'Review submission', path: '/dashboard/student?tab=workspace' },
+    cta: { label: 'Review submission', path: teamTab('workspace', hackathon.id) },
   }),
 
   judge_assigned: ({ hackathon, submission }) => ({
@@ -187,7 +203,7 @@ export const TEMPLATES = {
         ? [`Your ${CERT_LABELS[certificate.certificateType] || 'participation'} certificate has been issued and is ready to view.`]
         : []),
     ],
-    cta: { label: certificate ? 'View results & certificate' : 'View results', path: '/dashboard/student?tab=results' },
+    cta: { label: certificate ? 'View results & certificate' : 'View results', path: teamTab('results', hackathon.id) },
   }),
 
   announcement: ({ announcement, hackathon }) => ({
@@ -202,12 +218,14 @@ export const TEMPLATES = {
 
   access_granted: ({ hackathon, role }) => ({
     subject: `You now have ${role} access to ${hackathon.title}`,
-    heading: `You’re on the ${role === 'judge' ? 'judging panel' : 'screening committee'}`,
+    heading: `You’re on the ${role === 'judge' ? 'judging panel' : role === 'mentor' ? 'mentor team' : 'screening committee'}`,
     intro: `Your access code was verified for ${hackathon.title}.`,
     body: [role === 'judge'
       ? 'Shortlisted submissions for this hackathon will appear in your judging workspace.'
-      : 'Finalized submissions for this hackathon will appear in your screening queue.'],
-    cta: { label: 'Open your workspace', path: role === 'judge' ? '/dashboard/judge' : '/dashboard/screening' },
+      : role === 'mentor'
+        ? 'The teams of this hackathon will appear in your mentor workspace.'
+        : 'Finalized submissions for this hackathon will appear in your screening queue.'],
+    cta: { label: 'Open your workspace', path: role === 'judge' ? '/dashboard/judge' : role === 'mentor' ? '/dashboard/mentor' : '/dashboard/screening' },
   }),
 
   reviewer_joined: ({ hackathon, role, reviewer }) => ({

@@ -23,6 +23,7 @@ import { getSubmissions } from '../../utils/submissionService';
 import { getStoredHackathons } from '../../utils/hackathonService';
 import { addNotification } from '../../utils/notificationService';
 import { subscribeToDataSync } from '../../utils/syncService';
+import api from '../../utils/api';
 
 const STORAGE_MENTOR_KEY = "hacktrack_mentor_notes";
 
@@ -137,16 +138,90 @@ export default function MentorDashboard() {
   const [currentNoteInput, setCurrentNoteInput] = useState("");
   const [notice, setNotice] = useState(null);
 
-  const teamsList = Object.entries(allTeams).map(([code, t]) => ({ ...t, code }));
+  // Server data for the hackathons this mentor joined with a mentor code:
+  // the same teams and submissions every other panel shows.
+  const [server, setServer] = useState({ boundIds: [], teams: [], submissions: [], notes: {} });
+  useEffect(() => {
+    if (!api.getToken()) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const mine = await api.getMyAssignedHackathons();
+        const bound = (mine?.hackathons || []).map((h) => h.id);
+        const perEvent = await Promise.all(
+          bound.map(async (id) => {
+            const [t, s] = await Promise.all([
+              api.getTeams(id).catch(() => ({ teams: [] })),
+              api.getSubmissions(id).catch(() => ({ submissions: [] })),
+            ]);
+            return { teams: t.teams || [], subs: s.submissions || [] };
+          })
+        );
+        const teams = perEvent.flatMap((e) => e.teams);
+        const noteLists = await Promise.all(teams.map((t) => api.getMentorNotes(t.id).then((r) => [t.id, r.notes || []]).catch(() => [t.id, []])));
+        if (cancelled) return;
+        setServer({
+          boundIds: bound,
+          teams: teams.map((t) => ({
+            code: t.id,
+            name: t.teamName || t.name,
+            hackathon: t.hackathonTitle,
+            hackathonId: t.hackathonId,
+            track: t.track || "General",
+            lead: t.leaderName || t.lead,
+            capacity: `${t.memberCount} member${t.memberCount === 1 ? "" : "s"}`,
+            members: t.members || [],
+            isServer: true,
+          })),
+          submissions: perEvent.flatMap((e) => e.subs).map((s) => ({
+            teamId: s.teamId,
+            teamName: s.teamName,
+            projectTitle: s.projectTitle,
+            projectDescription: s.abstract,
+            repositoryUrl: s.repoUrl,
+            liveDemoUrl: s.demoUrl,
+            status: s.isLocked ? "finalized" : "draft",
+          })),
+          notes: Object.fromEntries(noteLists),
+        });
+      } catch {
+        /* offline: local demo data */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [refreshKey]);
+  const serverMode = server.boundIds.length > 0;
+
+  const teamsList = serverMode ? server.teams : Object.entries(allTeams).map(([code, t]) => ({ ...t, code }));
   const activeTeam = teamsList.find((t) => t.code === activeTeamCode) || teamsList[0];
+  const visibleSubmissions = serverMode ? server.submissions : submissions;
+  // Latest note per team (server notes for server teams, local notes otherwise).
+  const latestNote = (code) => (serverMode ? server.notes[code]?.at(-1)?.note : notesMap[code]);
 
   const activeSubmission = activeTeam
-    ? submissions.find((s) => s.teamId === activeTeam.code || (s.teamName && s.teamName === activeTeam.name))
+    ? visibleSubmissions.find((s) => s.teamId === activeTeam.code || (s.teamName && s.teamName === activeTeam.name))
     : null;
 
-  const handleSaveNote = (e) => {
+  const handleSaveNote = async (e) => {
     e.preventDefault();
     if (!activeTeam || !currentNoteInput.trim()) return;
+
+    if (activeTeam.isServer) {
+      // Saved on the server: every team member is notified and sees it.
+      try {
+        const res = await api.addMentorNote(activeTeam.code, currentNoteInput.trim());
+        setServer((prev) => ({
+          ...prev,
+          notes: { ...prev.notes, [activeTeam.code]: [...(prev.notes[activeTeam.code] || []), res.note] },
+        }));
+        setNotice(`Guidance sent to ${activeTeam.name}. Every team member was notified.`);
+        setCurrentNoteInput("");
+      } catch (err) {
+        setNotice(`The note was not sent: ${err.message}`);
+      }
+      setTimeout(() => setNotice(null), 4000);
+      return;
+    }
 
     const updated = {
       ...notesMap,
@@ -195,21 +270,21 @@ export default function MentorDashboard() {
         />
 
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-          <StatCard tone="accent" label="Assigned sprints" value={hackathons.length} icon={Trophy} />
+          <StatCard tone="accent" label="Assigned sprints" value={serverMode ? server.boundIds.length : hackathons.length} icon={Trophy} />
           <StatCard tone="cyan" label="Assigned squads" value={teamsList.length} icon={Users} />
           <StatCard
             tone="success"
             label="Notes dispatched"
-            value={Object.keys(notesMap).length}
+            value={serverMode ? Object.values(server.notes).reduce((n, l) => n + l.length, 0) : Object.keys(notesMap).length}
             icon={MessageSquare}
-            hint={teamsList.length > 0 ? `${teamsList.filter((t) => notesMap[t.code]).length} of ${teamsList.length} squads advised` : undefined}
+            hint={teamsList.length > 0 ? `${teamsList.filter((t) => latestNote(t.code)).length} of ${teamsList.length} squads advised` : undefined}
           />
           <StatCard
             tone="info"
             label="Deliverables staged"
-            value={submissions.length}
+            value={visibleSubmissions.length}
             icon={Layers}
-            hint={submissions.length > 0 ? `${submissions.filter((s) => s.status === 'finalized').length} finalized` : undefined}
+            hint={visibleSubmissions.length > 0 ? `${visibleSubmissions.filter((s) => s.status === 'finalized').length} finalized` : undefined}
           />
         </div>
 
@@ -235,7 +310,7 @@ export default function MentorDashboard() {
                       onSelect={() => setActiveTeamCode(t.code)}
                       title={t.name}
                       badge={
-                        notesMap[t.code] ? (
+                        latestNote(t.code) ? (
                           <Badge tone="success">Notes sent</Badge>
                         ) : (
                           <Badge tone="neutral">No notes</Badge>
@@ -310,7 +385,7 @@ export default function MentorDashboard() {
                     </Alert>
                   )}
 
-                  {notesMap[activeTeam.code] && (
+                  {latestNote(activeTeam.code) && (
                     <section className="space-y-3" aria-labelledby="mentor-advisory-heading">
                       <div className="flex items-center gap-3">
                         <IconTile icon={MessageSquare} tone="success" />
@@ -318,7 +393,7 @@ export default function MentorDashboard() {
                       </div>
                       <blockquote className="relative overflow-hidden rounded-lg bg-raised/50 py-4 pl-5 pr-4 text-sm leading-relaxed text-fg">
                         <span className="absolute inset-y-0 left-0 w-0.5 bg-gradient-to-b from-accent to-accent-2" aria-hidden="true" />
-                        {notesMap[activeTeam.code]}
+                        {latestNote(activeTeam.code)}
                       </blockquote>
                     </section>
                   )}

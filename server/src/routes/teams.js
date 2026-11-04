@@ -1,7 +1,7 @@
 import express from 'express';
 import store from '../database/store.js';
 import { requireAuth } from '../middleware/auth.js';
-import { notifyJoinDecision, notifyJoinRequested, notifyTeamCreated, notifyRosterLocked, notifyScreeningDecision } from '../notifications/notifier.js';
+import { notifyJoinDecision, notifyJoinRequested, notifyTeamCreated, notifyRosterLocked, notifyScreeningDecision, notifyMentorNote } from '../notifications/notifier.js';
 import { canSeeTeamPrivate, isAdmin, isBoundReviewer, ownsHackathon, publicTeam } from '../access/policies.js';
 
 const router = express.Router();
@@ -29,6 +29,7 @@ router.get('/', requireAuth, (req, res) => {
           hackathonTitle: hackathon?.title || team.hackathonId,
           memberCount: members.filter((m) => m.status === 'accepted').length,
           members,
+          screeningStatus: store.effectiveScreeningStatus(team),
         };
       });
       return res.json({
@@ -73,6 +74,7 @@ router.get('/', requireAuth, (req, res) => {
       hackathonTitle: hackathon?.title || team.hackathonId,
       memberCount: members.filter((m) => m.status === 'accepted').length,
       members,
+      screeningStatus: store.effectiveScreeningStatus(team),
     };
   });
 
@@ -105,6 +107,7 @@ router.get('/mine', requireAuth, (req, res) => {
     return {
       ...team,
       // Progress only (judge counts, no scores) until results are published.
+      screeningStatus: store.effectiveScreeningStatus(team),
       judgingProgress: store.getJudgingProgress(team.id),
       resultsPublished: Boolean(hackathon?.resultsPublished),
       hackathonTitle: hackathon?.title || team.hackathonId,
@@ -167,11 +170,38 @@ router.get('/:id/results', requireAuth, (req, res) => {
   if (!team || !canSeeTeamPrivate(req.user, team)) {
     return res.status(404).json({ status: 404, error: 'Not Found', message: 'Team not found.' });
   }
-  const results = store.getTeamResults(team.id);
+  // Teams learn their outcome; exact scores stay with organizers and admins.
+  const seesScores = isAdmin(req.user) || ownsHackathon(req.user, team.hackathonId);
+  const results = seesScores ? store.getTeamResults(team.id) : store.getTeamOutcome(team.id);
   if (!results) {
     return res.status(403).json({ status: 403, error: 'Forbidden', message: 'Results are shared once the organizer publishes them.', judgingProgress: store.getJudgingProgress(team.id) });
   }
   return res.json({ status: 200, results });
+});
+
+// GET /api/v1/teams/:id/mentor-notes: guidance from the event's mentors
+// (team members, mentors bound to the event, its organizers and admins)
+router.get('/:id/mentor-notes', requireAuth, (req, res) => {
+  const team = store.findTeamById(req.params.id);
+  const allowed = team && (canSeeTeamPrivate(req.user, team) || isBoundReviewer(req.user, team.hackathonId, ['mentor']));
+  if (!allowed) return res.status(404).json({ status: 404, error: 'Not Found', message: 'Team not found.' });
+  return res.json({ status: 200, notes: store.getMentorNotes(team.id) });
+});
+
+// POST /api/v1/teams/:id/mentor-notes { note }: a mentor bound to the event advises the team
+router.post('/:id/mentor-notes', requireAuth, (req, res) => {
+  const team = store.findTeamById(req.params.id);
+  if (!team) return res.status(404).json({ status: 404, error: 'Not Found', message: 'Team not found.' });
+  if (!isBoundReviewer(req.user, team.hackathonId, ['mentor'])) {
+    return res.status(403).json({ status: 403, error: 'Forbidden', message: 'Only mentors assigned to this hackathon can advise its teams.' });
+  }
+  const { note } = req.body || {};
+  if (typeof note !== 'string' || !note.trim() || note.length > 2000) {
+    return res.status(400).json({ status: 400, error: 'Bad Request', message: 'note must be text of 1-2000 characters.' });
+  }
+  const entry = store.addMentorNote({ teamId: team.id, mentorId: req.user.id, note: note.trim() });
+  notifyMentorNote(team, entry);
+  return res.status(201).json({ status: 201, note: entry });
 });
 
 // GET /api/v1/teams/:id/screening-reviews: decision history incl. internal notes
@@ -216,6 +246,7 @@ router.get('/:id', requireAuth, (req, res) => {
     team: {
       ...team,
       members,
+      screeningStatus: store.effectiveScreeningStatus(team),
     },
   });
 });
@@ -352,7 +383,14 @@ router.patch('/:id/screening', requireAuth, (req, res) => {
     });
   }
 
-  const { status, feedback, internalNote } = req.body || {};
+  const { status, feedback, internalNote, checks } = req.body || {};
+  // Compliance checklist: known keys only, booleans.
+  const CHECK_KEYS = ['gitFreshness', 'endpointsLive', 'envConfigured', 'licenseMIT'];
+  if (checks !== undefined && checks !== null) {
+    if (typeof checks !== 'object' || Array.isArray(checks) || Object.keys(checks).some((k) => !CHECK_KEYS.includes(k) || typeof checks[k] !== 'boolean')) {
+      return res.status(400).json({ status: 400, error: 'Bad Request', message: `checks must map ${CHECK_KEYS.join(', ')} to true/false.` });
+    }
+  }
   if ((feedback !== undefined && (typeof feedback !== 'string' || feedback.length > 2000)) || (internalNote !== undefined && (typeof internalNote !== 'string' || internalNote.length > 2000))) {
     return res.status(400).json({ status: 400, error: 'Bad Request', message: 'feedback and internalNote must be text of at most 2000 characters.' });
   }
@@ -377,8 +415,21 @@ router.patch('/:id/screening', requireAuth, (req, res) => {
     });
   }
 
+  // A team enters screening only after its submission is finalized (locked).
+  // Resetting to "pending" is always allowed.
+  const teamSubmission = store.getSubmissionByTeamId(existing.id);
+  if (status !== 'pending' && !(teamSubmission && teamSubmission.isLocked)) {
+    return res.status(409).json({
+      status: 409,
+      error: 'Conflict',
+      message: teamSubmission
+        ? 'This team has not finalized its submission yet, so it cannot be shortlisted or rejected.'
+        : 'This team has not submitted a project yet, so it cannot be shortlisted or rejected.',
+    });
+  }
+
   const previous = existing.screeningStatus;
-  const team = store.recordScreeningDecision(req.params.id, status, { reviewerId: req.user.id, feedback, internalNote })?.team;
+  const team = store.recordScreeningDecision(req.params.id, status, { reviewerId: req.user.id, feedback, internalNote, checks: checks || null })?.team;
   if (!team) {
     return res.status(404).json({
       status: 404,

@@ -270,6 +270,9 @@ test('Evaluations validate criteria, score ranges and the real deadline', async 
 
 test('Screening decisions require a binding to that hackathon and notify the team', async () => {
   assert.equal((await api('/api/v1/teams/team-coders-001/screening', { method: 'PATCH', token: screening, body: { status: 'rejected' } })).status, 403);
+  // Screening needs a finalized submission: the leader locks team-001's draft first.
+  assert.equal((await api('/api/v1/teams/team-001/screening', { method: 'PATCH', token: screening, body: { status: 'shortlisted' } })).status, 409);
+  assert.equal((await api('/api/v1/submissions/sub-001/lock', { method: 'PATCH', token: leader })).status, 200);
   await api('/api/v1/teams/team-001/screening', { method: 'PATCH', token: screening, body: { status: 'pending' } });
   await waitForEmailIdle(3000);
   memoryProvider.reset();
@@ -347,4 +350,26 @@ test('Role changes notify the affected user', async () => {
   noCredentials(res.body);
   await waitForEmailIdle(3000);
   assert.ok(memoryProvider.sent.some((m) => m.to === user.email && /role/i.test(m.subject)));
+});
+
+test('Registration needs an open window and accepts confirmed details', async () => {
+  const student = await signup('student');
+  // Results already published (hack-002) → closed.
+  const closed = await api('/api/v1/hackathons/hack-002/register', { method: 'POST', token: student.token, body: { acceptTerms: true } });
+  assert.equal(closed.status, 400);
+  assert.match(closed.body.message, /closed|deadline/i);
+  // Invalid details are refused; refusing the rules is refused.
+  assert.equal((await api('/api/v1/hackathons/hack-shesolves-001/register', { method: 'POST', token: student.token, body: { phone: 'call me', acceptTerms: true } })).status, 400);
+  assert.equal((await api('/api/v1/hackathons/hack-shesolves-001/register', { method: 'POST', token: student.token, body: { acceptTerms: false } })).status, 400);
+  // Valid form → registered with the confirmed details (visible to the event's organizer).
+  const ok = await api('/api/v1/hackathons/hack-shesolves-001/register', {
+    method: 'POST',
+    token: student.token,
+    body: { phone: '+91 98765 43210', institution: 'PCCOE', course: 'B.Tech CSE', yearOfStudy: '3rd Year', acceptTerms: true },
+  });
+  assert.equal(ok.status, 201, JSON.stringify(ok.body));
+  assert.equal(ok.body.registration.details.phone, '+91 98765 43210');
+  assert.ok(ok.body.registration.details.acceptedTermsAt);
+  const regs = await api('/api/v1/hackathons/hack-shesolves-001/registrations', { token: orgB });
+  assert.ok(regs.body.registrations.some((r) => r.details?.course === 'B.Tech CSE'));
 });

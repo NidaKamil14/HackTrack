@@ -319,32 +319,34 @@ export default function ScreeningDashboard() {
           status: STATUS[s.screeningStatus] || "Pending Review",
           screeningRemarks: s.screeningFeedback || "",
           rejectionReason: "",
-          checks: { gitFreshness: false, endpointsLive: false, envConfigured: false, licenseMIT: false },
+          // The checklist saved with the last decision (kept across logins).
+          checks: { gitFreshness: false, endpointsLive: false, envConfigured: false, licenseMIT: false, ...(s.screeningChecks || {}) },
+          screenedAt: s.screenedAt || null,
           flags: [],
           isServer: true,
         }));
-        if (!cancelled) {
-          setServerQueue((prev) => ({
-            boundIds: bound,
-            // keep checklist ticks the reviewer made in this session
-            items: items.map((it) => ({ ...it, checks: prev.items.find((p) => p.id === it.id)?.checks || it.checks })),
-          }));
-        }
+        if (!cancelled) setServerQueue({ boundIds: bound, items });
       } catch {
         /* offline: local queue only */
       }
     })();
     return () => { cancelled = true; };
   }, [refreshKey]);
+  // Unsaved checklist ticks per server entry (saved with the next decision).
+  const [checkDrafts, setCheckDrafts] = useState({});
   const queue = useMemo(() => {
+    const serverItems = serverQueue.items.map((it) => (checkDrafts[it.id] ? { ...it, checks: checkDrafts[it.id] } : it));
+    // A reviewer bound to events on the server reviews exactly those events'
+    // submissions; this browser's local demo entries are not mixed in.
+    if (serverQueue.boundIds.length > 0) return serverItems;
     // A local copy of a submission that also exists on the server is the same entry.
     const serverKeys = new Set(serverQueue.items.map((s) => `${s.hackathonId}|${String(s.teamName).toLowerCase()}`));
     const serverIds = new Set(serverQueue.items.map((s) => s.id));
     return [
-      ...serverQueue.items,
+      ...serverItems,
       ...submissions.filter((s) => !serverIds.has(s.id) && !serverKeys.has(`${s.hackathonId}|${String(s.teamName).toLowerCase()}`)),
     ];
-  }, [serverQueue, submissions]);
+  }, [serverQueue, submissions, checkDrafts]);
 
   useEffect(() => {
     return subscribeToDataSync(() => {
@@ -438,11 +440,17 @@ export default function ScreeningDashboard() {
       const status = newStatus === "Shortlisted" ? "shortlisted" : newStatus === "Rejected" ? "rejected" : "pending";
       const feedback = [newStatus === "Rejected" ? rejectionReason : "", finalRemarks].filter(Boolean).join(" — ");
       try {
-        await api.updateTeamScreening(target.serverTeamId, status, { feedback, internalNote: internalNotes[id] || "" });
+        // The checklist is the basis of the decision and is saved with it.
+        await api.updateTeamScreening(target.serverTeamId, status, { feedback, internalNote: internalNotes[id] || "", checks: target.checks });
         setServerQueue((prev) => ({
           ...prev,
-          items: prev.items.map((s) => (s.id === id ? { ...s, status: newStatus === "Under Review" ? "Pending Review" : newStatus, screeningRemarks: feedback } : s)),
+          items: prev.items.map((s) => (s.id === id ? { ...s, status: newStatus === "Under Review" ? "Pending Review" : newStatus, screeningRemarks: feedback, checks: target.checks } : s)),
         }));
+        setCheckDrafts((d) => {
+          const next = { ...d };
+          delete next[id];
+          return next;
+        });
         setFeedbackNotice({
           type: newStatus === "Shortlisted" ? "success" : newStatus === "Rejected" ? "error" : "info",
           text:
@@ -504,8 +512,8 @@ export default function ScreeningDashboard() {
 
     const nextChecks = { ...target.checks, [checkKey]: !target.checks[checkKey] };
     if (target.serverTeamId) {
-      // Checklist is the reviewer's working aid; the decision is what gets saved.
-      setServerQueue((prev) => ({ ...prev, items: prev.items.map((s) => (s.id === id ? { ...s, checks: nextChecks } : s)) }));
+      // Saved together with the next decision (Shortlist / Reject / Under review).
+      setCheckDrafts((d) => ({ ...d, [id]: nextChecks }));
       return;
     }
 

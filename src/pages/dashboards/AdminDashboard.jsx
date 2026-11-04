@@ -57,7 +57,7 @@ const TAB_ITEMS = [
   { value: 'demo', label: 'Demo scenario', icon: <Clapperboard aria-hidden="true" /> },
 ];
 const TAB_VALUES = TAB_ITEMS.map((t) => t.value);
-const SCREENING_LABEL = { pending: 'Pending Review', shortlisted: 'Shortlisted', rejected: 'Rejected' };
+const SCREENING_LABEL = { not_submitted: 'Not submitted', pending: 'Pending Review', shortlisted: 'Shortlisted', rejected: 'Rejected' };
 const DEFAULT_TAB = 'hackathons';
 
 // Badge tone for a submission's screening decision (Shortlisted / Rejected / pending).
@@ -610,7 +610,9 @@ export default function AdminDashboard() {
     scoped = { committee, judgeCodeRecord, screenCodeRecord, hackTeams, hackSubs, hackRegistrations };
   }
 
-  const publishedCount = hackathons.filter((h) => isResultsPublished(h.id)).length;
+  // Server events report their own state; the local flag only applies to local-only events.
+  const resultsPublishedFor = (h) => (h.isServer ? Boolean(h.resultsPublished) : isResultsPublished(h.id));
+  const publishedCount = hackathons.filter(resultsPublishedFor).length;
 
   return (
     <DashboardLayout
@@ -1150,7 +1152,7 @@ export default function AdminDashboard() {
                     </thead>
                     <tbody>
                       {hackathons.map((h) => {
-                        const isPub = isResultsPublished(h.id);
+                        const isPub = resultsPublishedFor(h);
                         const progress = stageProgress(h.stage);
                         return (
                           <tr key={h.id} className={tableClasses.tr}>
@@ -1471,7 +1473,7 @@ export default function AdminDashboard() {
                   <Card>
                     <ul className="divide-y divide-line">
                       {hackathons.map((h) => {
-                        const isPub = h.resultsPublished || isResultsPublished(h.id);
+                        const isPub = resultsPublishedFor(h);
                         return (
                           <li key={h.id} className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
                             <div className="min-w-0 space-y-1.5">

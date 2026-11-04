@@ -134,19 +134,95 @@ test('5. A member accepted after the decision sees the current status', async ()
   assert.ok(!sub.text.includes('REVIEWER-ONLY'));
 });
 
-test('Unlocked (draft) submissions expose the decision too — the original bug', async () => {
-  // team-001 / sub-001 is an unlocked seed submission (the case from the bug report).
+test('Drafts are not in screening: decisions are refused and nobody sees a status', async () => {
+  // team-001 / sub-001 is an unlocked (draft) seed submission.
   const seedReviewer = await login('screening@hacktrack.io');
   assert.equal(store.getSubmissionByTeamId('team-001').isLocked, false);
-  assert.equal((await api('/api/v1/teams/team-001/screening', { method: 'PATCH', token: seedReviewer, body: { status: 'shortlisted' } })).status, 200);
+  for (const status of ['shortlisted', 'rejected']) {
+    const res = await api('/api/v1/teams/team-001/screening', { method: 'PATCH', token: seedReviewer, body: { status } });
+    assert.equal(res.status, 409, status);
+    assert.match(res.body.message, /not finalized/);
+  }
+  // Even with a status recorded earlier (seed data), participants see "not submitted".
   for (const email of ['alex@university.edu', 'priya@university.edu']) {
     const token = await login(email);
     const sub = await api('/api/v1/submissions/team/team-001', { token });
-    assert.equal(sub.body.submission.isLocked, false);
-    assert.equal(sub.body.submission.screeningStatus, 'shortlisted', email);
+    assert.equal(sub.body.submission.screeningStatus, 'not_submitted', email);
+    const mine = await api('/api/v1/teams/mine', { token });
+    assert.equal(mine.body.teams.find((t) => t.id === 'team-001').screeningStatus, 'not_submitted');
   }
+  // The committee's queue only lists finalized work.
+  const queue = await api('/api/v1/submissions?hackathonId=hack-001', { token: seedReviewer });
+  assert.ok(queue.body.submissions.every((x) => x.isLocked), 'no drafts in the screening queue');
+  // Resetting to pending is always allowed.
+  assert.equal((await api('/api/v1/teams/team-001/screening', { method: 'PATCH', token: seedReviewer, body: { status: 'pending' } })).status, 200);
   // The demo team is unaffected by another team's decision.
   assert.equal(store.findTeamById(DEMO_IDS.team).screeningStatus, 'shortlisted');
+});
+
+test('A team with no submission at all cannot be screened', async () => {
+  resetDemo('team');
+  const res = await decide('shortlisted');
+  assert.equal(res.status, 409);
+  assert.match(res.body.message, /not submitted/);
+  const v = await participantView(MEMBERS[1]);
+  assert.equal(v.teamStatus, 'not_submitted');
+  resetDemo('submitted');
+});
+
+test('The compliance checklist is saved with the decision and shown to every member', async () => {
+  const checks = { gitFreshness: true, endpointsLive: true, envConfigured: true, licenseMIT: true };
+  assert.equal((await decide('shortlisted', { checks, feedback: 'All four checks passed.', internalNote: 'REVIEWER-ONLY: looked fine.' })).status, 200);
+
+  // The reviewer sees the same checklist after logging in again.
+  const again = await login('screening@demo.hacktrack.io');
+  const queue = await api(`/api/v1/submissions?hackathonId=${DEMO_IDS.hackathon}`, { token: again });
+  const entry = queue.body.submissions.find((x) => x.teamId === DEMO_IDS.team);
+  assert.deepEqual(entry.screeningChecks, checks);
+  assert.ok(entry.screenedAt);
+
+  // Every member sees the decision, its basis and date — never the internal note.
+  for (const email of MEMBERS) {
+    const token = await login(email);
+    const sub = await api(`/api/v1/submissions/team/${DEMO_IDS.team}`, { token });
+    assert.equal(sub.body.submission.screeningStatus, 'shortlisted');
+    assert.deepEqual(sub.body.submission.screeningChecks, checks, email);
+    assert.equal(sub.body.submission.screeningFeedback, 'All four checks passed.');
+    assert.ok(sub.body.submission.screenedAt);
+    assert.ok(!sub.text.includes('REVIEWER-ONLY'));
+  }
+
+  // Bad checklists are refused.
+  assert.equal((await decide('shortlisted', { checks: { hacked: true } })).status, 400);
+  assert.equal((await decide('shortlisted', { checks: { gitFreshness: 'yes' } })).status, 400);
+});
+
+test('Finalizing a submission starts screening fresh — no preset or stale "shortlisted"', async () => {
+  // team-001 is seeded with screeningStatus "shortlisted" but no recorded decision,
+  // a draft submission (sub-001) and seed judge scores on that draft.
+  const team = store.findTeamById('team-001');
+  team.screeningStatus = 'shortlisted';
+  store.getSubmissionById('sub-001').isLocked = false;
+  const leader = await login('alex@university.edu');
+  assert.equal((await api('/api/v1/submissions/sub-001/lock', { method: 'PATCH', token: leader })).status, 200);
+
+  for (const email of ['alex@university.edu', 'priya@university.edu']) {
+    const token = await login(email);
+    const sub = await api('/api/v1/submissions/team/team-001', { token });
+    assert.equal(sub.body.submission.isLocked, true);
+    assert.equal(sub.body.submission.screeningStatus, 'pending', `${email}: just submitted = pending, not shortlisted`);
+    assert.equal(sub.body.submission.screeningChecks, null);
+    assert.equal(sub.body.submission.screenedAt, null);
+    assert.equal(sub.body.submission.judgingProgress.judgesAssigned, 0, 'no judging before a real shortlist');
+  }
+  // It now waits in the reviewer's queue, and a real decision still works.
+  const reviewer = await login('screening@hacktrack.io');
+  const queue = await api('/api/v1/submissions?hackathonId=hack-001', { token: reviewer });
+  assert.equal(queue.body.submissions.find((x) => x.teamId === 'team-001').screeningStatus, 'pending');
+  assert.equal((await api('/api/v1/teams/team-001/screening', { method: 'PATCH', token: reviewer, body: { status: 'shortlisted' } })).status, 200);
+  // Locking again (already locked) does not wipe that decision.
+  store.lockSubmission('sub-001');
+  assert.equal(store.findTeamById('team-001').screeningStatus, 'shortlisted');
 });
 
 test('Participants cannot change or read screening internals', async () => {

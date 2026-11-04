@@ -162,11 +162,18 @@ test('Full lifecycle through the public API, starting from the bare event', asyn
 
   // Stage 5 — results and certificates
   assert.equal((await api(`/api/v1/evaluations/publish-results/${DEMO_IDS.hackathon}`, { method: 'POST', token: T.organizer })).status, 200);
+  // Members learn their outcome, not the judges' exact scores…
   const results = await api(`/api/v1/teams/${team.id}/results`, { token: T.member2 });
   assert.equal(results.status, 200);
+  assert.equal(results.body.results.outcome, 'winner');
   assert.equal(results.body.results.rank, 1);
-  assert.equal(results.body.results.totalScore, 85); // (86 + 84) / 2
-  assert.equal(results.body.results.criteria.length, 4);
+  assert.equal(results.body.results.totalScore, undefined);
+  assert.equal(results.body.results.criteria, undefined);
+  assert.ok(!/"score"|totalScore|averageScore/.test(results.text));
+  // …while the event's organizer still sees the full scores.
+  const orgResults = await api(`/api/v1/teams/${team.id}/results`, { token: T.organizer });
+  assert.equal(orgResults.body.results.totalScore, 85); // (86 + 84) / 2
+  assert.equal(orgResults.body.results.criteria.length, 4);
   for (const who of ['leader', 'member1', 'member2']) {
     const certs = await api('/api/v1/certificates/my-certificates', { token: T[who] });
     assert.ok(certs.body.certificates.some((c) => c.hackathonId === DEMO_IDS.hackathon && c.certificateType === 'winner'));
@@ -178,4 +185,34 @@ test('Full lifecycle through the public API, starting from the bare event', asyn
   // No real email is ever sent to the fictional demo domain.
   await waitForEmailIdle(3000);
   assert.equal(memoryProvider.sent.filter((m) => m.to.endsWith('@demo.hacktrack.io')).length, 0);
+});
+
+test('Mentors bound to the demo event see its team and can advise it', async () => {
+  resetDemo('submitted');
+  for (const email of ['mentor@demo.hacktrack.io', 'mentor@hacktrack.io']) {
+    const token = await login(email);
+    const mine = await api('/api/v1/auth/my-hackathons', { token });
+    assert.ok(mine.body.hackathons.some((h) => h.id === DEMO_IDS.hackathon), `${email} is bound to the demo event`);
+    const teams = await api(`/api/v1/teams?hackathonId=${DEMO_IDS.hackathon}`, { token });
+    const team = teams.body.teams.find((t) => t.id === DEMO_IDS.team);
+    assert.ok(team, `${email} sees Team Apex Innovators`);
+    assert.equal(team.memberCount, 3);
+    assert.equal(team.teamCode, undefined, 'mentors never get the invite code');
+    const subs = await api(`/api/v1/submissions?hackathonId=${DEMO_IDS.hackathon}`, { token });
+    assert.ok(subs.body.submissions.some((s) => s.id === DEMO_IDS.submission));
+  }
+  const mentor = await login('mentor@demo.hacktrack.io');
+  const sent = await api(`/api/v1/teams/${DEMO_IDS.team}/mentor-notes`, { method: 'POST', token: mentor, body: { note: 'Add a short demo video to your README.' } });
+  assert.equal(sent.status, 201);
+  for (const who of ['leader', 'member1', 'member2']) {
+    const notes = await api(`/api/v1/teams/${DEMO_IDS.team}/mentor-notes`, { token: T[who] });
+    assert.ok(notes.body.notes.some((n) => n.note.includes('demo video')), who);
+    const inbox = await api('/api/v1/notifications', { token: T[who] });
+    assert.ok(inbox.body.notifications.some((n) => n.type === 'mentor_note'), `${who} notified`);
+  }
+  // A mentor who isn't assigned to the event can't advise or read its notes.
+  const outsider = store.createUser({ email: `mentor_${Date.now()}@pccoe.edu.in`, password: 'password123', fullName: 'Other Mentor', role: 'mentor' });
+  const ot = await login(outsider.email);
+  assert.equal((await api(`/api/v1/teams/${DEMO_IDS.team}/mentor-notes`, { method: 'POST', token: ot, body: { note: 'x' } })).status, 403);
+  assert.equal((await api(`/api/v1/teams/${DEMO_IDS.team}/mentor-notes`, { token: ot })).status, 404);
 });

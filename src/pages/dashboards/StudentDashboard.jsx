@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Award, Bell, CalendarDays, Check, CheckCircle2, ClipboardCheck, Clock, Compass, Copy, FileText, Flag, FolderOpen, Gavel, KeyRound, Link2, Lock, LockOpen, Paperclip, Printer, Rocket, ShieldCheck, Trophy, Upload, UserPlus, Users, X, Mail } from 'lucide-react';
 import DashboardLayout from '../../components/dashboard/DashboardLayout';
 import EmailActivity from '../../components/notifications/EmailActivity';
@@ -32,10 +32,13 @@ import {
 } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { getStoredHackathons } from '../../utils/hackathonService';
-import { getUserRegistrations, registerForHackathon, isUserRegistered, normalizeHackathonId } from '../../utils/registrationService';
+import { getUserRegistrations, isUserRegistered, normalizeHackathonId } from '../../utils/registrationService';
 import { triggerDataSync } from '../../utils/syncService';
 import api from '../../utils/api';
+import { resolveNotificationLink } from '../../utils/notificationLinks';
 import { mapServerSubmission } from '../../utils/serverSubmissions';
+import { getRegistrationWindow } from '../../utils/registrationWindow';
+import RegistrationDialog from '../../components/RegistrationDialog';
 import { mergeHackathons } from '../../utils/serverHackathons';
 import {
   getUserTeamForHackathon,
@@ -83,14 +86,92 @@ const SCREENING_CHECKS = [
   { key: "licenseMIT", label: "Open source license" }
 ];
 
-const RUBRIC_CRITERIA = [
-  { key: "architecture", label: "Architecture", max: 30 },
-  { key: "usability", label: "Usability & UX", max: 25 },
-  { key: "innovation", label: "Innovation", max: 25 },
-  { key: "completeness", label: "Completeness", max: 20 }
-];
+/**
+ * Published result for a team, as an outcome — "selected as winner",
+ * "runner-up", "finalist" or "not selected" — without the judges' scores.
+ */
+const OUTCOME_COPY = {
+  winner: { tone: "success", title: "Congratulations — you’re selected as the winner!", text: (t, e) => `${t} won ${e}. Your winner certificate is ready.` },
+  runner_up: { tone: "success", title: "Congratulations — you’re selected as a runner-up!", text: (t, e) => `${t} placed among the top teams of ${e}. Your runner-up certificate is ready.` },
+  finalist: { tone: "info", title: "You were a finalist", text: (t, e) => `${t} reached the final judging round of ${e}. Your certificate of participation is ready.` },
+  not_selected: { tone: "neutral", title: "Thank you for participating", text: (t, e) => `${t} wasn’t selected in the final results of ${e}. Your certificate of participation is ready.` },
+};
+
+function ResultOutcome({ evaluation, teamName = "Your team", eventTitle = "this hackathon", onCertificates }) {
+  // Local demo evaluations carry no outcome: treat them as "results released".
+  const copy = OUTCOME_COPY[evaluation.outcome] || { tone: "info", title: "Results are out", text: () => "The organizer has published the results. Your certificate is in the Certificates tab." };
+  const celebrate = evaluation.outcome === "winner" || evaluation.outcome === "runner_up";
+  return (
+    <div className="space-y-4 text-center">
+      {celebrate ? (
+        <Trophy className="mx-auto h-12 w-12 text-accent-text" aria-hidden="true" />
+      ) : (
+        <Award className="mx-auto h-12 w-12 text-fg-subtle" aria-hidden="true" />
+      )}
+      <div className="space-y-1">
+        <p className="text-lg font-semibold text-fg">{copy.title}</p>
+        <p className="text-sm text-fg-muted">{copy.text(teamName, eventTitle)}</p>
+      </div>
+      <Button variant="secondary" onClick={onCertificates}>View certificate</Button>
+    </div>
+  );
+}
+
+/**
+ * What the screening committee decided and on what basis, in plain words.
+ * Uses only team-visible data (status, checklist, remarks, date).
+ */
+function ScreeningDecisionSummary({ submission, isLeader }) {
+  const status = submission.screeningStatus;
+  const when = submission.screenedAt
+    ? new Date(submission.screenedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+    : null;
+  const checks = submission.checks ? SCREENING_CHECKS.filter((c) => submission.checks[c.key]) : null;
+  const basis = checks ? `${checks.length} of ${SCREENING_CHECKS.length} compliance checks passed` : null;
+  if (status === "Shortlisted") {
+    return (
+      <Alert tone="success" title="Approved by the screening committee">
+        Your project was shortlisted for the judging round{when ? ` on ${when}` : ""}.
+        {basis && ` Basis: ${basis}${submission.screeningRemarks ? " and the reviewer's remarks below" : ""}.`}
+      </Alert>
+    );
+  }
+  if (status === "Rejected") {
+    return (
+      <Alert tone="danger" title="Not shortlisted by the screening committee">
+        The committee did not shortlist this project{when ? ` (decision on ${when})` : ""}.
+        {basis && ` ${basis}.`} See the reviewer's remarks below.
+      </Alert>
+    );
+  }
+  if (status === "Awaiting final submission") {
+    return (
+      <Alert tone="info" title="Not in screening yet">
+        {isLeader
+          ? "Finalize your submission to send it to the screening committee. Drafts are not reviewed."
+          : "Your team leader still needs to finalize the submission before the screening committee can review it."}
+      </Alert>
+    );
+  }
+  return (
+    <Alert tone="info" title="Waiting for the screening committee">
+      Your finalized submission is in the screening queue. You'll be notified when the committee decides.
+    </Alert>
+  );
+}
+
+/**
+ * Local (browser-only) submissions follow the same rule as the server: only a
+ * finalized submission is in screening, so a draft never shows a screening
+ * status, checklist or remarks — whatever the demo data says.
+ */
+function asParticipantView(sub) {
+  if (!sub || sub.status === "finalized") return sub;
+  return { ...sub, screeningStatus: "Awaiting final submission", checks: undefined, screeningRemarks: "", rejectionReason: "" };
+}
 
 function screeningTone(status) {
+  if (status === "Awaiting final submission") return "neutral";
   if (status === "Shortlisted") return "success";
   if (status === "Rejected") return "danger";
   return "warning";
@@ -283,6 +364,17 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
   }, [user, userEmail, refreshKey, serverNotifications]);
   const unreadNotifsCount = notifications.filter((n) => !n.read).length;
 
+  // Marks a notification read and opens the tab (and event) it is about.
+  const navigate = useNavigate();
+  const openNotification = (n) => {
+    if (n.isServer && api.getToken()) api.markNotificationRead(n.id).catch(() => {});
+    markAsRead(n.id);
+    setServerNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+    setRefreshKey((k) => k + 1);
+    const target = resolveNotificationLink(n.link, user);
+    if (target) navigate(target);
+  };
+
   // Certificates: issued by the server when results are published (signed in),
   // merged with any locally stored demo certificates.
   const [serverCertificates, setServerCertificates] = useState([]);
@@ -309,12 +401,6 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
       .catch(() => {});
     return () => { cancelled = true; };
   }, [refreshKey]);
-  const certificates = useMemo(() => {
-    if (refreshKey) { /* trigger re-eval */ }
-    const local = getUserCertificates(userEmail);
-    const seen = new Set(serverCertificates.map((c) => c.certificateId));
-    return [...serverCertificates, ...local.filter((c) => !seen.has(c.certificateId))];
-  }, [userEmail, refreshKey, serverCertificates]);
 
   // Server hackathons state
   const [serverHackathons, setServerHackathons] = useState([]);
@@ -337,6 +423,19 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     const local = getStoredHackathons();
     return mergeHackathons(local, serverHackathons);
   }, [refreshKey, serverHackathons]);
+
+  // Certificates exist only for events whose results are published. Server
+  // events: the server issues them at publication (local copies are ignored).
+  // Local demo events: shown only once that event's results are marked published.
+  const certificates = useMemo(() => {
+    if (refreshKey) { /* trigger re-eval */ }
+    const serverEventIds = new Set(serverHackathons.map((h) => h.id));
+    const local = getUserCertificates(userEmail).filter(
+      (c) => !serverEventIds.has(c.hackathonId) && isResultsPublished(c.hackathonId)
+    );
+    const seen = new Set(serverCertificates.map((c) => c.certificateId));
+    return [...serverCertificates, ...local.filter((c) => !seen.has(c.certificateId))];
+  }, [userEmail, refreshKey, serverCertificates, serverHackathons]);
 
   // Available open hackathons for team creation & discovery
   const availableOpenHackathons = useMemo(() => {
@@ -375,7 +474,21 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     return [...fromServer, ...local];
   }, [userEmail, refreshKey, serverRegistrations]);
 
-  const [selectedHackathonId, setSelectedHackathonId] = useState(null);
+  // The hackathon shown in the dashboard. A notification link opens a specific
+  // event with ?event=<id>; picking another event in the dropdown clears it.
+  const [pickedHackathonId, setPickedHackathonId] = useState(null);
+  const eventParam = searchParams.get("event");
+  const selectedHackathonId = eventParam || pickedHackathonId;
+  const setSelectedHackathonId = (id) => {
+    setPickedHackathonId(id);
+    if (eventParam) {
+      setSearchParams((prev) => {
+        const params = new URLSearchParams(prev);
+        params.delete("event");
+        return params;
+      }, { replace: true });
+    }
+  };
 
   // New team formation state
   const [newTeamName, setNewTeamName] = useState("");
@@ -576,7 +689,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
   const teamSubmission = (currentTeam && activeSprint)
     ? backendTeam
       ? serverSync?.submission || null
-      : getSubmissionByTeamAndHackathon(currentTeam.code, activeSprint.id)
+      : asParticipantView(getSubmissionByTeamAndHackathon(currentTeam.code, activeSprint.id))
     : null;
 
   const isLeader = isLeaderRole && Boolean(
@@ -591,7 +704,11 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
 
   // Evaluation & Results resolution
   const resultsReleased = activeSprint
-    ? Boolean(activeSprint.resultsPublished || backendTeam?.resultsPublished || isResultsPublished(activeSprint.id))
+    // Server events: the server decides (a stale flag in this browser's local
+    // demo data must never mark them as published). Local-only events: local flag.
+    ? backendTeam || activeSprint.isServer
+      ? Boolean(backendTeam?.resultsPublished || activeSprint.resultsPublished)
+      : isResultsPublished(activeSprint.id)
     : false;
   const [serverResults, setServerResults] = useState({ teamId: null, results: null });
   useEffect(() => {
@@ -603,19 +720,30 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     return () => { cancelled = true; };
   }, [backendTeam?.id, backendTeam?.resultsPublished, refreshKey]);
   const publishedServerResult = backendTeam && serverResults.teamId === backendTeam.id ? serverResults.results : null;
+  // Teams are told their outcome (selected / not selected), never the judges'
+  // exact scores — the server only sends the outcome to participants.
   const teamEvaluation = publishedServerResult
     ? {
-        totalScore: publishedServerResult.totalScore,
-        maxTotal: publishedServerResult.maxTotal,
+        outcome: publishedServerResult.outcome,
         rank: publishedServerResult.rank,
-        teamsRanked: publishedServerResult.teamsRanked,
-        criteria: publishedServerResult.criteria,
-        feedback: publishedServerResult.feedback.join(" "),
-        judgeName: `${publishedServerResult.judgeCount} judge${publishedServerResult.judgeCount === 1 ? "" : "s"} · rank ${publishedServerResult.rank} of ${publishedServerResult.teamsRanked}`,
+        finalists: publishedServerResult.finalists,
+        shortlisted: publishedServerResult.shortlisted,
       }
     : (currentTeam && activeSprint)
       ? getTeamEvaluation(currentTeam.code, activeSprint.id)
       : null;
+  // Guidance from the event's mentors (server teams).
+  const [mentorNotesState, setMentorNotesState] = useState({ teamId: null, notes: [] });
+  useEffect(() => {
+    if (!api.getToken() || !backendTeam?.id) return undefined;
+    let cancelled = false;
+    api.getMentorNotes(backendTeam.id)
+      .then((res) => { if (!cancelled) setMentorNotesState({ teamId: backendTeam.id, notes: res?.notes || [] }); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [backendTeam?.id, refreshKey]);
+  const mentorNotes = backendTeam && mentorNotesState.teamId === backendTeam.id ? mentorNotesState.notes : [];
+
   // Judging progress (judge counts only — never scores) before publication.
   const judgingProgress = backendTeam?.judgingProgress || teamSubmission?.judgingProgress || null;
 
@@ -946,15 +1074,17 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     }
   };
 
-  const handleRegisterDirect = (hackathonId, title) => {
-    const res = registerForHackathon(userEmail, hackathonId);
-    if (res.success) {
-      setSubmissionNotice({ type: "success", text: `✓ Successfully registered for ${title}!` });
-      setSelectedHackathonId(hackathonId);
-      setRefreshKey((k) => k + 1);
-    } else {
-      setSubmissionNotice({ type: "info", text: res.error || "Already registered." });
-    }
+  // Registration goes through the registration form (details + rules).
+  const [registrationTarget, setRegistrationTarget] = useState(null);
+  const handleRegisterDirect = (hackathonId) => {
+    const target = allHackathons.find((h) => h.id === hackathonId);
+    if (target) setRegistrationTarget(target);
+  };
+  const handleRegistered = () => {
+    if (!registrationTarget) return;
+    setSubmissionNotice({ type: "success", text: `✓ Registered for ${registrationTarget.title}.` });
+    setSelectedHackathonId(registrationTarget.id);
+    setRefreshKey((k) => k + 1);
     setTimeout(() => setSubmissionNotice(null), 4000);
   };
 
@@ -1201,9 +1331,9 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
     ? null
     : resultsReleased
       ? "Leaderboard Published"
-      : teamSubmission?.screeningStatus === "Shortlisted"
+      : teamSubmission?.status === "finalized" && teamSubmission.screeningStatus === "Shortlisted"
         ? "Rubric Judging"
-        : teamSubmission
+        : teamSubmission?.status === "finalized"
           ? "Screening Gate"
           : currentTeam
             ? "Team Formation"
@@ -1672,6 +1802,26 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
         {/* TAB 2: TEAM & ROSTER MANAGEMENT */}
         {/* ========================================================= */}
         <TabPanel value="roster" activeValue={activeTab} idPrefix="student" className="space-y-6 focus:outline-none">
+          {mentorNotes.length > 0 && (
+            <Card>
+              <CardContent className="space-y-3 pt-5">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-fg">
+                  <Mail className="h-4 w-4 text-accent-text" aria-hidden="true" />
+                  Mentor guidance
+                </h3>
+                <ul className="space-y-2">
+                  {mentorNotes.slice().reverse().map((n) => (
+                    <li key={n.id} className="rounded-lg bg-raised/50 p-3">
+                      <p className="text-sm leading-relaxed text-fg">{n.note}</p>
+                      <p className="mt-1 text-xs text-fg-subtle">
+                        {n.mentorName} · {new Date(n.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
           {teamActionFeedback && (
             <Alert tone={teamActionFeedback.type === "success" ? "success" : "danger"}>
               {noticeText(teamActionFeedback.text)}
@@ -2122,8 +2272,8 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                     <CardTitle as="h2">Automated & technical compliance</CardTitle>
                   </div>
                 </div>
-                <Badge tone={screeningTone(teamSubmission?.screeningStatus)} dot>
-                  {teamSubmission?.screeningStatus || "Pending review"}
+                <Badge tone={screeningTone(teamSubmission ? teamSubmission.screeningStatus : "Awaiting final submission")} dot>
+                  {teamSubmission ? teamSubmission.screeningStatus || "Pending review" : "Not submitted"}
                 </Badge>
               </CardHeader>
               <CardContent className="space-y-5">
@@ -2140,11 +2290,12 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                   </div>
                 ) : teamSubmission ? (
                   <>
-                    {/* The reviewer's checklist is only stored for local entries; server
-                        decisions carry the status and the remarks shared with the team. */}
-                    {!teamSubmission.isServer && (
+                    <ScreeningDecisionSummary submission={teamSubmission} isLeader={isLeaderRole} />
+
+                    {/* Checklist the committee verified (the basis of the decision). */}
+                    {teamSubmission.checks && teamSubmission.screeningStatus !== "Awaiting final submission" && (
                     <div className="space-y-2">
-                      <h3 className="text-sm font-semibold text-fg">Compliance criteria</h3>
+                      <h3 className="text-sm font-semibold text-fg">Compliance checks verified by the committee</h3>
                       <ul className="divide-y divide-line rounded-lg border border-line">
                         {SCREENING_CHECKS.map((check) => {
                           const passed = Boolean(teamSubmission.checks?.[check.key]);
@@ -2212,82 +2363,12 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                   </div>
                 </div>
                 <Badge tone={resultsReleased ? "success" : "neutral"} dot>
-                  {resultsReleased ? "Officially released" : judgingProgress?.status === "complete" ? "Awaiting publication" : "Under evaluation"}
+                  {resultsReleased ? "Officially released" : judgingProgress?.status === "complete" ? "Awaiting publication" : teamSubmission?.screeningStatus === "Shortlisted" ? "Under evaluation" : "Not started"}
                 </Badge>
               </CardHeader>
               <CardContent className="space-y-5">
                 {resultsReleased && teamEvaluation ? (
-                  <>
-                    <div className="space-y-3 rounded-lg border border-success/25 bg-success/5 p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <p className="eyebrow">Certified total score</p>
-                          <p className="text-4xl font-semibold tabular-nums tracking-tight text-fg sm:text-5xl">
-                            {teamEvaluation.totalScore}
-                            <span className="ml-1 text-base font-normal text-fg-subtle">/ {teamEvaluation.maxTotal || 100}</span>
-                          </p>
-                        </div>
-                        <Badge tone="success">
-                          <Trophy className="h-3 w-3" aria-hidden="true" />
-                          Results published
-                        </Badge>
-                      </div>
-                      <ProgressBar
-                        value={Number(teamEvaluation.totalScore) || 0}
-                        max={100}
-                        label="Certified total score"
-                      />
-                    </div>
-
-                    <div className="space-y-3">
-                      <h3 className="text-sm font-semibold text-fg">Criteria breakdown</h3>
-                      <ul className="space-y-3">
-                        {(teamEvaluation.criteria
-                          ? teamEvaluation.criteria.map((c) => ({ key: c.id, label: c.name, max: c.maxScore, score: c.averageScore }))
-                          : RUBRIC_CRITERIA
-                        ).map((c) => {
-                          const score = c.score ?? teamEvaluation.scores?.[c.key] ?? 0;
-                          const pct = Math.min(100, Math.round((score / c.max) * 100));
-                          return (
-                            <li key={c.key} className="space-y-1.5">
-                              <div className="flex items-center justify-between text-sm">
-                                <span className="text-fg-muted">{c.label}</span>
-                                <span className="font-medium tabular-nums text-fg">
-                                  {score} <span className="text-fg-subtle">/ {c.max}</span>
-                                </span>
-                              </div>
-                              <div
-                                className="h-1.5 w-full overflow-hidden rounded-full bg-raised"
-                                role="progressbar"
-                                aria-label={c.label}
-                                aria-valuenow={score}
-                                aria-valuemin={0}
-                                aria-valuemax={c.max}
-                              >
-                                <div
-                                  className="h-full rounded-full bg-gradient-to-r from-accent to-accent-2 transition-[width] duration-300"
-                                  style={{ width: `${pct}%` }}
-                                />
-                              </div>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </div>
-
-                    {teamEvaluation.feedback && (
-                      <figure className="relative space-y-1 overflow-hidden rounded-lg bg-raised/50 p-3 pl-4">
-                        <span className="absolute inset-y-0 left-0 w-0.5 bg-gradient-to-b from-accent to-accent-2" aria-hidden="true" />
-                        <p className="eyebrow">Judge panel feedback</p>
-                        <blockquote className="text-sm italic leading-relaxed text-fg-muted">
-                          "{teamEvaluation.feedback}"
-                        </blockquote>
-                        <figcaption className="text-xs text-fg-subtle">
-                          Evaluated by: {teamEvaluation.judgeName || "Expert Panel"}
-                        </figcaption>
-                      </figure>
-                    )}
-                  </>
+                  <ResultOutcome evaluation={teamEvaluation} teamName={currentTeam?.name} eventTitle={activeSprint?.title} onCertificates={() => setActiveTab("certificates")} />
                 ) : (
                   <EmptyState
                     illustration="review"
@@ -2398,7 +2479,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                 <IconTile icon={Bell} />
                 <div className="min-w-0 space-y-1">
                   <CardTitle as="h2">Notifications</CardTitle>
-                  <CardDescription>Platform activity and competition updates. Select one to mark it as read.</CardDescription>
+                  <CardDescription>Platform activity and competition updates. Select one to open it.</CardDescription>
                 </div>
               </div>
               {unreadNotifsCount > 0 && (
@@ -2426,7 +2507,7 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                   <li key={n.id}>
                     <button
                       type="button"
-                      onClick={() => { markAsRead(n.id); setRefreshKey((k) => k + 1); }}
+                      onClick={() => openNotification(n)}
                       className={cn(
                         "flex w-full items-start justify-between gap-3 px-5 py-4 text-left transition-colors last:rounded-b-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                         !n.read ? "bg-raised/70 hover:bg-raised" : "hover:bg-raised/40"
@@ -2531,10 +2612,12 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                           <Check className="h-3 w-3" aria-hidden="true" />
                           Registered
                         </Badge>
-                      ) : (
-                        <Button size="sm" onClick={() => handleRegisterDirect(h.id, h.title)}>
+                      ) : getRegistrationWindow(h).open ? (
+                        <Button size="sm" onClick={() => handleRegisterDirect(h.id)}>
                           Register
                         </Button>
+                      ) : (
+                        <Badge tone="neutral" title={getRegistrationWindow(h).reason}>{getRegistrationWindow(h).label}</Badge>
                       )}
                     </div>
                     </div>
@@ -2640,6 +2723,13 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
         )}
       </Dialog>
 
+      <RegistrationDialog
+        open={Boolean(registrationTarget)}
+        onClose={() => setRegistrationTarget(null)}
+        hackathon={registrationTarget}
+        user={user}
+        onRegistered={handleRegistered}
+      />
     </DashboardLayout>
   );
 }

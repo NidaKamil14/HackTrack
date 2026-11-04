@@ -542,6 +542,8 @@ class HackTrackStore {
     this.notificationKeys = new Set();
     // Screening decisions with reviewer notes (internal) and feedback (shown to the team).
     this.screeningReviews = [];
+    // Guidance from mentors bound to an event, shared with the team.
+    this.mentorNotes = [];
     this.emailOutbox = [];
 
     this.init();
@@ -634,6 +636,11 @@ class HackTrackStore {
     if (judgeUser) judgeUser.assignedHackathonIds = ['hack-001'];
     const screenUser = this.users.find((u) => u.id === 'usr-screening-004');
     if (screenUser) screenUser.assignedHackathonIds = ['hack-001'];
+    // The seed mentor guides every seed event that offers mentorship.
+    const mentorUser = this.users.find((u) => u.id === 'usr-mentor-008');
+    if (mentorUser) {
+      mentorUser.assignedHackathonIds = this.hackathons.filter((h) => h.hasMentorship).map((h) => h.id);
+    }
 
     // Seed initial hackathon registrations
     this.registrations = [
@@ -1098,6 +1105,7 @@ class HackTrackStore {
             user_id VARCHAR(50) NOT NULL,
             user_email VARCHAR(255) NOT NULL,
             status VARCHAR(50) NOT NULL DEFAULT 'Registration Verified',
+            details JSON NULL,
             registered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             UNIQUE KEY idx_user_hackathon_reg (hackathon_id, user_id),
@@ -1107,6 +1115,8 @@ class HackTrackStore {
           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         `);
 
+        // Databases created before registration details were stored.
+        await pool.query('ALTER TABLE hackathon_registrations ADD COLUMN details JSON NULL').catch(() => {});
         const [dbRegs] = await pool.query('SELECT * FROM hackathon_registrations');
         if (dbRegs.length === 0) {
           for (const r of this.registrations) {
@@ -1132,6 +1142,7 @@ class HackTrackStore {
               university: user?.university || 'University / Organization',
               memberId: user?.memberId || null,
               status: r.status || 'Registration Verified',
+              details: typeof r.details === 'string' ? JSON.parse(r.details) : r.details || null,
               registeredAt: r.registered_at ? new Date(r.registered_at).toISOString() : new Date().toISOString(),
             };
           });
@@ -1151,12 +1162,15 @@ class HackTrackStore {
             status VARCHAR(20) NOT NULL,
             feedback TEXT NULL,
             internal_note TEXT NULL,
+            checks JSON NULL,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             INDEX idx_screening_team (team_id),
             INDEX idx_screening_hackathon (hackathon_id)
           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         `);
+        // Databases created before the checklist was stored.
+        await pool.query('ALTER TABLE screening_reviews ADD COLUMN checks JSON NULL').catch(() => {});
         const [dbReviews] = await pool.query('SELECT * FROM screening_reviews ORDER BY created_at ASC');
         this.screeningReviews = dbReviews.map((r) => ({
           id: r.id,
@@ -1166,12 +1180,14 @@ class HackTrackStore {
           status: r.status,
           feedback: r.feedback || '',
           internalNote: r.internal_note || '',
+          checks: typeof r.checks === 'string' ? JSON.parse(r.checks) : r.checks || null,
           createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
         }));
         for (const r of this.screeningReviews) {
           const team = this.findTeamById(r.teamId);
           if (team) {
             team.screeningFeedback = r.feedback;
+            team.screeningChecks = r.checks;
             team.screenedAt = r.createdAt;
           }
         }
@@ -1627,7 +1643,7 @@ class HackTrackStore {
   }
 
   // --- Hackathon Registrations ---
-  registerUserForHackathon({ hackathonId, userId, userEmail, status }) {
+  registerUserForHackathon({ hackathonId, userId, userEmail, status, details = null }) {
     const hackathon = this.getHackathonById(hackathonId);
     if (!hackathon) throw new Error('Hackathon not found');
 
@@ -1660,6 +1676,8 @@ class HackTrackStore {
       university: user.university || 'University / Organization',
       memberId: user.memberId || null,
       status: status || 'Registration Verified',
+      // Details the participant confirmed in the registration form.
+      details: details || null,
       registeredAt: new Date().toISOString(),
     };
 
@@ -1668,10 +1686,10 @@ class HackTrackStore {
     // Persist to MySQL
     asyncDbWrite(() =>
       pool.query(
-        `INSERT INTO hackathon_registrations (id, hackathon_id, user_id, user_email, status, registered_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO hackathon_registrations (id, hackathon_id, user_id, user_email, status, details, registered_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE status = VALUES(status)`,
-        [id, canonicalHackathonId, user.id, user.email, newReg.status, toSqlDate(newReg.registeredAt)]
+        [id, canonicalHackathonId, user.id, user.email, newReg.status, newReg.details ? JSON.stringify(newReg.details) : null, toSqlDate(newReg.registeredAt)]
       )
     );
 
@@ -2242,11 +2260,14 @@ class HackTrackStore {
    * Shortlisting assigns the team's submission to every judge bound to the
    * hackathon, so it appears in their workspace automatically.
    */
-  recordScreeningDecision(teamId, status, { reviewerId = null, feedback = '', internalNote = '' } = {}) {
+  recordScreeningDecision(teamId, status, { reviewerId = null, feedback = '', internalNote = '', checks = null } = {}) {
     const team = this.updateTeamScreeningStatus(teamId, status);
     if (!team) return null;
     team.screeningFeedback = feedback || '';
     team.screenedAt = new Date().toISOString();
+    // The compliance checklist is the basis of the decision: it is saved with
+    // it, kept across sessions and shown to the team (unlike internal notes).
+    team.screeningChecks = checks || null;
     const review = {
       id: `scr-${crypto.randomBytes(4).toString('hex')}`,
       teamId: team.id,
@@ -2255,14 +2276,15 @@ class HackTrackStore {
       status,
       feedback: feedback || '',
       internalNote: internalNote || '',
+      checks: checks || null,
       createdAt: team.screenedAt,
     };
     this.screeningReviews.push(review);
     asyncDbWrite(() =>
       pool.query(
-        `INSERT INTO screening_reviews (id, team_id, hackathon_id, reviewer_id, status, feedback, internal_note, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [review.id, review.teamId, review.hackathonId, review.reviewerId, review.status, review.feedback, review.internalNote, toSqlDate(review.createdAt)]
+        `INSERT INTO screening_reviews (id, team_id, hackathon_id, reviewer_id, status, feedback, internal_note, checks, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [review.id, review.teamId, review.hackathonId, review.reviewerId, review.status, review.feedback, review.internalNote, review.checks ? JSON.stringify(review.checks) : null, toSqlDate(review.createdAt)]
       )
     );
     if (status === 'shortlisted') {
@@ -2282,6 +2304,39 @@ class HackTrackStore {
     return { team, review };
   }
 
+  /**
+   * Screening status as everyone outside the committee should see it: a team
+   * only enters screening once its submission is finalized (locked), so a
+   * missing or draft submission reads "not_submitted" whatever was recorded.
+   */
+  effectiveScreeningStatus(team) {
+    if (!team) return 'not_submitted';
+    const submission = this.getSubmissionByTeamId(team.id);
+    if (!submission || !submission.isLocked) return 'not_submitted';
+    return team.screeningStatus || 'pending';
+  }
+
+  addMentorNote({ teamId, mentorId, note }) {
+    const team = this.findTeamById(teamId);
+    const mentor = this.findUserById(mentorId);
+    if (!team || !mentor) throw new Error('Team or mentor not found.');
+    const entry = {
+      id: `mn-${crypto.randomBytes(4).toString('hex')}`,
+      teamId: team.id,
+      hackathonId: team.hackathonId,
+      mentorId: mentor.id,
+      mentorName: mentor.fullName,
+      note,
+      createdAt: new Date().toISOString(),
+    };
+    this.mentorNotes.push(entry);
+    return entry;
+  }
+
+  getMentorNotes(teamId) {
+    return this.mentorNotes.filter((n) => n.teamId === teamId);
+  }
+
   getScreeningReviews(teamId) {
     return this.screeningReviews.filter((r) => r.teamId === teamId);
   }
@@ -2298,6 +2353,34 @@ class HackTrackStore {
     else if (done === assigned.size) status = 'complete';
     else if (done > 0) status = 'in_progress';
     return { status, judgesAssigned: assigned.size, judgesCompleted: done };
+  }
+
+  /**
+   * What a team is told once results are published: its outcome (selected as
+   * winner / runner-up / finalist, or not selected) and certificate — never the
+   * judges' individual scores, which stay with organizers and admins.
+   */
+  getTeamOutcome(teamId) {
+    const team = this.findTeamById(teamId);
+    if (!team) return null;
+    const hackathon = this.getHackathonById(team.hackathonId);
+    if (!hackathon?.resultsPublished) return null;
+    const ranked = this.calculateLeaderboard(hackathon.id).filter((l) => l.judgeCount > 0);
+    const entry = ranked.find((l) => l.teamId === team.id);
+    let outcome = 'not_selected';
+    if (entry && entry.rank === 1) outcome = 'winner';
+    else if (entry && entry.rank <= 3) outcome = 'runner_up';
+    else if (entry) outcome = 'finalist';
+    return {
+      teamId: team.id,
+      hackathonId: hackathon.id,
+      hackathonTitle: hackathon.title,
+      outcome,
+      rank: entry ? entry.rank : null,
+      finalists: ranked.length,
+      shortlisted: team.screeningStatus === 'shortlisted',
+      publishedAt: hackathon.resultsPublishedAt,
+    };
   }
 
   /** A team's own result, only once results are published (BR-9). */
@@ -2340,7 +2423,10 @@ class HackTrackStore {
     const teams = this.getTeamsByHackathon(hackathon.id);
     const subs = this.getSubmissionsByHackathon(hackathon.id);
     const screening = { pending: 0, shortlisted: 0, rejected: 0 };
-    teams.forEach((t) => { if (subs.some((s) => s.teamId === t.id)) screening[t.screeningStatus || 'pending'] = (screening[t.screeningStatus || 'pending'] || 0) + 1; });
+    // Only finalized submissions are in screening.
+    teams.forEach((t) => {
+      if (subs.some((s) => s.teamId === t.id && s.isLocked)) screening[t.screeningStatus || 'pending'] = (screening[t.screeningStatus || 'pending'] || 0) + 1;
+    });
     const judging = { awaiting_assignment: 0, not_started: 0, in_progress: 0, complete: 0 };
     teams.filter((t) => t.screeningStatus === 'shortlisted').forEach((t) => {
       const p = this.getJudgingProgress(t.id);
@@ -2375,6 +2461,7 @@ class HackTrackStore {
     this.certificates = this.certificates.filter((c) => c.hackathonId !== hackathonId);
     this.registrations = this.registrations.filter((r) => r.hackathonId !== hackathonId);
     this.screeningReviews = this.screeningReviews.filter((r) => r.hackathonId !== hackathonId);
+    this.mentorNotes = this.mentorNotes.filter((n) => n.hackathonId !== hackathonId);
     const users = new Set(userIds);
     this.notifications = this.notifications.filter((n) => !users.has(n.userId));
     for (const key of [...this.notificationKeys]) if ([...users].some((u) => key.endsWith(`:${u}`))) this.notificationKeys.delete(key);
@@ -2515,12 +2602,43 @@ class HackTrackStore {
   lockSubmission(submissionId) {
     const submission = this.getSubmissionById(submissionId);
     if (!submission) return null;
+    const wasLocked = Boolean(submission.isLocked);
     submission.isLocked = true;
     submission.updatedAt = new Date().toISOString();
     asyncDbWrite(() =>
       pool.query('UPDATE submissions SET is_locked = 1, updated_at = ? WHERE id = ?', [toSqlDate(submission.updatedAt), submissionId])
     );
+    if (!wasLocked) {
+      submission.lockedAt = submission.updatedAt;
+      this.startScreeningFresh(submission);
+    }
     return submission;
+  }
+
+  /**
+   * A finalized submission enters screening fresh. Anything recorded while it
+   * was still a draft — a preset/stale screening status, checklist, remarks,
+   * judge assignments or scores — is not a decision on the finalized work and
+   * is cleared, so the team is "pending" until the committee actually decides.
+   */
+  startScreeningFresh(submission) {
+    const team = this.findTeamById(submission.teamId);
+    if (team) {
+      team.screeningStatus = 'pending';
+      team.screeningFeedback = '';
+      team.screeningChecks = null;
+      team.screenedAt = null;
+      asyncDbWrite(() => pool.query("UPDATE teams SET screening_status = 'pending' WHERE id = ?", [team.id]));
+    }
+    const hadJudging = this.judgeAssignments.some((a) => a.submissionId === submission.id) || this.evaluations.some((e) => e.submissionId === submission.id);
+    if (hadJudging) {
+      this.judgeAssignments = this.judgeAssignments.filter((a) => a.submissionId !== submission.id);
+      this.evaluations = this.evaluations.filter((e) => e.submissionId !== submission.id);
+      asyncDbWrite(async () => {
+        await pool.query('DELETE FROM evaluations WHERE submission_id = ?', [submission.id]);
+        await pool.query('DELETE FROM judge_assignments WHERE submission_id = ?', [submission.id]);
+      });
+    }
   }
 
   // --- Evaluations & Judge Assignments (FR-22 to FR-27, BR-7, BR-8) ---
@@ -2900,7 +3018,7 @@ class HackTrackStore {
   generateHackathonCode(hackathonId, role, createdBy) {
     const hackathon = this.getHackathonById(hackathonId);
     if (!hackathon) throw new Error('Hackathon not found.');
-    if (!['judge', 'screening'].includes(role)) throw new Error('Role must be judge or screening.');
+    if (!['judge', 'screening', 'mentor'].includes(role)) throw new Error('Role must be judge, screening or mentor.');
 
     // Revoke previous unused code for same hackathon+role if organizer regenerates
     this.hackathonCodes = this.hackathonCodes.filter(
