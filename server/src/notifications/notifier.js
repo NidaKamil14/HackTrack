@@ -53,6 +53,10 @@ const EVENT_CATEGORY = {
   judge_assigned: 'assignments',
   access_granted: 'assignments',
   reviewer_joined: 'assignments',
+  committee_invitation: 'assignments',
+  team_invitation: 'team',
+  invitation_accepted: 'assignments',
+  team_invitation_accepted: 'team',
 };
 
 /* ---- Signed, single-purpose unsubscribe links ------------------------------
@@ -456,6 +460,70 @@ export const notifyRoleChanged = (user, previousRole, actorId) => guard('role_ch
 /**
  * Password reset requested → send email with reset link to user.
  */
+/* ---- Invitations ------------------------------------------------------------
+   An existing account gets an in-app notification (and email) and accepts in
+   the app. An address without an account gets one email with a single-use
+   sign-up link; the token only appears in that link, never in logs or the
+   in-app record. Returns how the invitation was delivered, as reported by the
+   queue (never claims an email was sent). */
+export function deliverInvitation({ invitation, token, recipient }) {
+  try {
+    const hackathon = store.getHackathonById(invitation.hackathonId);
+    const inviter = store.findUserById(invitation.invitedBy) || { fullName: 'A HackTrack organizer' };
+    if (recipient) {
+      const team = invitation.teamId ? store.findTeamById(invitation.teamId) : null;
+      const type = invitation.kind === 'team' ? 'team_invitation' : 'committee_invitation';
+      const [result] = notify({
+        type,
+        recipients: [recipient.id],
+        dedupeBase: `${invitation.id}:${invitation.expiresAt}`,
+        data: () => ({ hackathon, team, inviter, role: invitation.role, invitation }),
+        inApp: {
+          message: () => (invitation.kind === 'team'
+            ? `${inviter.fullName} invited you to join ${team?.teamName} for ${hackathon.title}. Accept or decline from your dashboard.`
+            : `${inviter.fullName} invited you to the ${invitation.role} team for ${hackathon.title}. Accept or decline from your dashboard.`),
+        },
+      });
+      return { channel: 'in_app', email: result?.status || 'skipped', reason: result?.reason || null };
+    }
+
+    if (!token) return { channel: 'none', email: 'skipped', reason: 'No sign-up link was issued' };
+    const { frontendUrl } = emailConfig();
+    const inviteUrl = `/invite/${encodeURIComponent(token)}`;
+    const data = { recipient: { fullName: '' }, hackathon, inviter, role: invitation.role, inviteUrl };
+    const email = renderEmail('committee_invitation_signup', data, { frontendUrl, unsubscribeUrl: null, categoryLabel: CATEGORIES.assignments.label });
+    let skip = null;
+    if (getProvider().disabled) skip = 'Email delivery is disabled on this server';
+    else if (!isValidEmail(invitation.email)) skip = 'Not a valid email address';
+    else if (invitation.email.endsWith('@demo.hacktrack.io')) skip = 'Demonstration address: emails are not sent to demo addresses';
+    if (skip) return { channel: 'email', email: 'skipped', reason: skip };
+    enqueueEmail({ notificationId: null, to: invitation.email, subject: email.subject, html: email.html, text: email.text, headers: {} });
+    return { channel: 'email', email: 'queued', reason: null };
+  } catch (err) {
+    console.error(`[Notify] invitation ${invitation.id} failed: ${err.message}`);
+    return { channel: 'none', email: 'error', reason: 'The invitation could not be delivered' };
+  }
+}
+
+/** Invitation accepted → the person who sent it. */
+export const notifyInvitationAccepted = (invitation) => guard('invitation_accepted', () => {
+  const hackathon = store.getHackathonById(invitation.hackathonId);
+  const member = store.findUserById(invitation.acceptedUserId);
+  const team = invitation.teamId ? store.findTeamById(invitation.teamId) : null;
+  if (!hackathon || !member) return [];
+  return notify({
+    type: invitation.kind === 'team' ? 'team_invitation_accepted' : 'invitation_accepted',
+    recipients: [invitation.invitedBy],
+    dedupeBase: invitation.id,
+    data: () => ({ hackathon, invitation, member, team }),
+    inApp: {
+      message: () => (invitation.kind === 'team'
+        ? `${member.fullName} accepted your invitation and joined ${team?.teamName}.`
+        : `${member.fullName} accepted your invitation to the ${invitation.role} team for ${hackathon.title}.`),
+    },
+  });
+});
+
 export const notifyPasswordReset = ({ user, token }) => guard('password_reset', () => {
   const resetUrl = `/reset-password?token=${encodeURIComponent(token)}`;
   // The token only ever appears in the emailed link: dedupe keys, headers and

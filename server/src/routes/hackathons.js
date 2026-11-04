@@ -467,7 +467,12 @@ router.post('/:id/codes', requireAuth, requireRole('organizer'), (req, res) => {
   }
 
   try {
-    const codeRecord = store.generateHackathonCode(req.params.id, role, req.user.id);
+    // Optional limits: hours until the code stops working, and how many accounts may use it.
+    const toInt = (v) => (v === undefined || v === null || v === '' ? null : Number(v));
+    const codeRecord = store.generateHackathonCode(req.params.id, role, req.user.id, {
+      expiresInHours: toInt(req.body?.expiresInHours),
+      maxUses: toInt(req.body?.maxUses),
+    });
     return res.status(201).json({
       status: 201,
       message: `Access code generated for ${role} role.`,
@@ -482,6 +487,21 @@ router.post('/:id/codes', requireAuth, requireRole('organizer'), (req, res) => {
       message: err.message,
     });
   }
+});
+
+// DELETE /api/v1/hackathons/:id/codes/:role: turn off the event's code for a role
+// (people who already joined keep their access; invitations still work)
+router.delete('/:id/codes/:role', requireAuth, requireRole('organizer'), (req, res) => {
+  const hackathon = store.getHackathonById(req.params.id);
+  if (!hackathon) return res.status(404).json({ status: 404, error: 'Not Found', message: 'Hackathon not found.' });
+  if (!checkOrganizerAccess(req.user, hackathon)) {
+    return res.status(403).json({ status: 403, error: 'Forbidden', message: 'Organizers can only manage codes for hackathons they created or manage.' });
+  }
+  if (!['judge', 'screening', 'mentor'].includes(req.params.role)) {
+    return res.status(400).json({ status: 400, error: 'Bad Request', message: "Role must be 'judge', 'screening' or 'mentor'." });
+  }
+  const removed = store.revokeHackathonCode(hackathon.id, req.params.role);
+  return res.json({ status: 200, message: removed ? `The ${req.params.role} code is turned off.` : `There was no ${req.params.role} code to turn off.` });
 });
 
 // GET /api/v1/hackathons/:id/codes: Get all access codes and redeemers for a hackathon

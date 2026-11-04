@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import ThemeToggle from '../ThemeToggle';
 import EmailPreferencesDialog from '../notifications/EmailPreferencesDialog';
 import NotificationCenterDialog from '../notifications/NotificationCenterDialog';
+import PendingInvitations from '../invitations/PendingInvitations';
 import { getUnreadNotificationCount } from '../../utils/notificationService';
 import api from '../../utils/api';
 import { subscribeToDataSync } from '../../utils/syncService';
@@ -171,6 +172,8 @@ export default function DashboardLayout({
         <main id="main-content" tabIndex={-1} className="container-page py-6 focus:outline-none sm:py-8">
           {/* Dashboards render their PageHeader as a hero panel. */}
           <PageHeaderVariantContext.Provider value="hero">
+            {/* Invitations to a committee or a team, on every dashboard. */}
+            <PendingInvitations />
             <div className="rise-children">{children}</div>
           </PageHeaderVariantContext.Provider>
         </main>

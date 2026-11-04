@@ -144,9 +144,7 @@ router.post('/register', registerLimiter, async (req, res) => {
     }
     // Only a real code issued by an event organizer counts; it also binds the
     // reviewer to that event. (A prefix check would let any made-up value in.)
-    matchedCodeRecord = store.hackathonCodes.find(
-      (c) => c.code.toUpperCase() === codeToVerify.toUpperCase() && c.role === 'screening'
-    );
+    matchedCodeRecord = store.findUsableHackathonCode(codeToVerify, 'screening');
     if (!matchedCodeRecord) {
       return res.status(400).json({
         status: 400,
@@ -176,9 +174,7 @@ router.post('/register', registerLimiter, async (req, res) => {
         message: 'A valid Judge Access Code or Invitation Code is required to register as a Judge.',
       });
     }
-    matchedCodeRecord = store.hackathonCodes.find(
-      (c) => c.code.toUpperCase() === codeToVerify.toUpperCase() && c.role === 'judge'
-    );
+    matchedCodeRecord = store.findUsableHackathonCode(codeToVerify, 'judge');
     if (!matchedCodeRecord) {
       return res.status(400).json({
         status: 400,
@@ -211,9 +207,7 @@ router.post('/register', registerLimiter, async (req, res) => {
     // An event's mentor access code (binds the account to that event) or a
     // configured platform mentor key. No prefix patterns: "MENTOR-ANYTHING" is not a key.
     const isPlatformMentorKey = inviteKeys('MENTOR_INVITE_CODES', DEV_MENTOR_KEYS).has(codeToVerify.toUpperCase());
-    matchedCodeRecord = store.hackathonCodes.find(
-      (c) => c.code.toUpperCase() === codeToVerify.toUpperCase() && c.role === 'mentor'
-    );
+    matchedCodeRecord = store.findUsableHackathonCode(codeToVerify, 'mentor');
     if (!matchedCodeRecord && !isPlatformMentorKey) {
       return res.status(400).json({
         status: 400,

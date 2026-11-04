@@ -145,11 +145,58 @@ class ApiClient {
     return this.request(`/hackathons/${encodeURIComponent(hackathonId)}/codes`);
   }
 
-  async generateHackathonCode(hackathonId, role) {
+  // options: { expiresInHours, maxUses } (both optional)
+  async generateHackathonCode(hackathonId, role, options = {}) {
     return this.request(`/hackathons/${encodeURIComponent(hackathonId)}/codes`, {
       method: 'POST',
-      body: JSON.stringify({ role }),
+      body: JSON.stringify({ role, ...options }),
     });
+  }
+
+  async revokeHackathonCode(hackathonId, role) {
+    return this.request(`/hackathons/${encodeURIComponent(hackathonId)}/codes/${encodeURIComponent(role)}`, { method: 'DELETE' });
+  }
+
+  // ── Invitations (organizer → committee, leader → team member) ─────────
+
+  async inviteCommitteeMember(hackathonId, email, role) {
+    return this.request('/invitations/committee', { method: 'POST', body: JSON.stringify({ hackathonId, email, role }) });
+  }
+
+  async getCommitteeInvitations(hackathonId) {
+    return this.request(`/invitations/committee?hackathonId=${encodeURIComponent(hackathonId)}`);
+  }
+
+  async inviteTeamMember(teamId, email) {
+    return this.request('/invitations/team', { method: 'POST', body: JSON.stringify({ teamId, email }) });
+  }
+
+  async getTeamInvitations(teamId) {
+    return this.request(`/invitations/team?teamId=${encodeURIComponent(teamId)}`);
+  }
+
+  async getMyInvitations() {
+    return this.request('/invitations/mine');
+  }
+
+  async respondToInvitation(id, action) {
+    return this.request(`/invitations/${encodeURIComponent(id)}/${action === 'accept' ? 'accept' : 'decline'}`, { method: 'POST' });
+  }
+
+  async resendInvitation(id) {
+    return this.request(`/invitations/${encodeURIComponent(id)}/resend`, { method: 'POST' });
+  }
+
+  async revokeInvitation(id) {
+    return this.request(`/invitations/${encodeURIComponent(id)}/revoke`, { method: 'POST' });
+  }
+
+  async getInvitationByToken(token) {
+    return this.request(`/invitations/token/${encodeURIComponent(token)}`);
+  }
+
+  async registerWithInvitation(token, details) {
+    return this.request(`/invitations/token/${encodeURIComponent(token)}/register`, { method: 'POST', body: JSON.stringify(details) });
   }
 
   async createHackathon(data) {
@@ -190,10 +237,6 @@ class ApiClient {
       method: 'POST',
       body: details ? JSON.stringify(details) : undefined,
     });
-  }
-
-  async getMyRegistrations() {
-    return this.request('/hackathons/my-registrations');
   }
 
   async getHackathonRegistrations(hackathonId) {
@@ -442,19 +485,6 @@ class ApiClient {
   async regenerateOrganizerInvitation(id) {
     return this.request(`/admin/organizers/invitations/${encodeURIComponent(id)}/regenerate`, {
       method: 'POST',
-    });
-  }
-
-  // ── Hackathon Event Access Codes (Organizer / Admin) ─────────────────
-
-  async getHackathonCodes(hackathonId) {
-    return this.request(`/hackathons/${encodeURIComponent(hackathonId)}/codes`);
-  }
-
-  async generateHackathonCode(hackathonId, role) {
-    return this.request(`/hackathons/${encodeURIComponent(hackathonId)}/codes`, {
-      method: 'POST',
-      body: JSON.stringify({ role }),
     });
   }
 

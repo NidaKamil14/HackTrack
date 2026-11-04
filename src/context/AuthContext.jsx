@@ -97,6 +97,21 @@ export function AuthProvider({ children }) {
     return res;
   };
 
+  // A session the server already created (e.g. signing up from an invitation link).
+  const signInWithSession = (token, sessionUser) => {
+    if (token) api.setToken(token);
+    localStorage.setItem('hacktrack_current_user', JSON.stringify(sessionUser));
+    setUser(sessionUser);
+    triggerDataSync('user_registered', { user: sessionUser });
+  };
+
+  // The signed-in account changed on the server (e.g. an accepted invitation).
+  const updateSessionUser = (sessionUser) => {
+    if (!sessionUser) return;
+    localStorage.setItem('hacktrack_current_user', JSON.stringify(sessionUser));
+    setUser(sessionUser);
+  };
+
   const logout = () => {
     api.logout();
     logoutUser();
@@ -133,6 +148,8 @@ export function AuthProvider({ children }) {
         register,
         logout,
         switchDemoRole,
+        signInWithSession,
+        updateSessionUser,
         getRoleDashboardPath
       }}
     >
@@ -154,6 +171,8 @@ export function useAuth() {
       register: registerUser,
       logout: logoutUser,
       switchDemoRole: () => null,
+      signInWithSession: () => {},
+      updateSessionUser: () => {},
       getRoleDashboardPath
     };
   }

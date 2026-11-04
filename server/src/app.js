@@ -12,6 +12,7 @@ import adminRoutes from './routes/admin.js';
 import notificationRoutes from './routes/notifications.js';
 import analyticsRoutes from './routes/analytics.js';
 import demoRoutes from './routes/demo.js';
+import invitationRoutes from './routes/invitations.js';
 import statsRoutes from './routes/stats.js';
 import { requireAuth, requireRole } from './middleware/auth.js';
 import store from './database/store.js';
@@ -93,6 +94,7 @@ app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/demo', demoRoutes);
+app.use('/api/v1/invitations', invitationRoutes);
 app.use('/api/v1/stats', statsRoutes);
 app.use('/api/v1/statistics', statsRoutes);
 

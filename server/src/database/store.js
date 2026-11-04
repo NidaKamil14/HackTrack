@@ -9,6 +9,7 @@ function toSqlDate(d) {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 }
 
+const INVITATION_TTL_MS = 7 * 24 * 3600_000; // invitations stay open for 7 days
 const isTestMode = () => Boolean(process.env.NODE_TEST_CONTEXT || process.env.NODE_ENV === 'test');
 
 // Public shape of a user: never includes credentials or reset state.
@@ -545,6 +546,8 @@ class HackTrackStore {
     this.screeningReviews = [];
     // Guidance from mentors bound to an event, shared with the team.
     this.mentorNotes = [];
+    // Invitations: organizer -> committee member, team leader -> participant.
+    this.invitations = [];
     this.emailOutbox = [];
 
     this.init();
@@ -1110,6 +1113,9 @@ class HackTrackStore {
 
       // 8. Hackathon Codes
       try {
+        // Databases created before codes could expire or be limited.
+        await pool.query('ALTER TABLE hackathon_codes ADD COLUMN expires_at DATETIME NULL').catch(() => {});
+        await pool.query('ALTER TABLE hackathon_codes ADD COLUMN max_uses INT NULL').catch(() => {});
         const [dbCodes] = await pool.query('SELECT * FROM hackathon_codes');
         if (dbCodes.length === 0) {
           for (const c of this.hackathonCodes) {
@@ -1129,6 +1135,8 @@ class HackTrackStore {
             createdBy: c.created_by,
             createdAt: c.created_at ? new Date(c.created_at).toISOString() : new Date().toISOString(),
             redeemedBy: typeof c.redeemed_by === 'string' ? JSON.parse(c.redeemed_by) : (c.redeemed_by || []),
+            expiresAt: c.expires_at ? new Date(c.expires_at).toISOString() : null,
+            maxUses: c.max_uses == null ? null : Number(c.max_uses),
           }));
         }
       } catch (codeErr) {
@@ -1281,6 +1289,49 @@ class HackTrackStore {
         }
       } catch (invErr) {
         console.warn('organizer_invitations sync warning:', invErr.message);
+      }
+
+      // 12. Invitations (organizer -> committee member, leader -> participant)
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS invitations (
+            id VARCHAR(50) NOT NULL,
+            kind VARCHAR(20) NOT NULL,
+            hackathon_id VARCHAR(50) NOT NULL,
+            team_id VARCHAR(50) NULL,
+            role VARCHAR(20) NOT NULL,
+            email VARCHAR(255) NOT NULL,
+            invited_by VARCHAR(50) NOT NULL,
+            status VARCHAR(20) NOT NULL,
+            token_hash CHAR(64) NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME NOT NULL,
+            responded_at DATETIME NULL,
+            accepted_user_id VARCHAR(50) NULL,
+            PRIMARY KEY (id),
+            INDEX idx_inv_email (email),
+            INDEX idx_inv_hackathon (hackathon_id),
+            UNIQUE KEY idx_inv_token (token_hash)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        const [rows] = await pool.query('SELECT * FROM invitations');
+        this.invitations = rows.map((r) => ({
+          id: r.id,
+          kind: r.kind,
+          hackathonId: r.hackathon_id,
+          teamId: r.team_id,
+          role: r.role,
+          email: r.email,
+          invitedBy: r.invited_by,
+          status: r.status,
+          tokenHash: r.token_hash,
+          createdAt: new Date(r.created_at).toISOString(),
+          expiresAt: new Date(r.expires_at).toISOString(),
+          respondedAt: r.responded_at ? new Date(r.responded_at).toISOString() : null,
+          acceptedUserId: r.accepted_user_id,
+        }));
+      } catch (invitationErr) {
+        console.warn('invitations sync warning:', invitationErr.message);
       }
 
       console.log('✓ Store successfully synchronized with MySQL database.');
@@ -2577,6 +2628,7 @@ class HackTrackStore {
     this.registrations = this.registrations.filter((r) => r.hackathonId !== hackathonId);
     this.screeningReviews = this.screeningReviews.filter((r) => r.hackathonId !== hackathonId);
     this.mentorNotes = this.mentorNotes.filter((n) => n.hackathonId !== hackathonId);
+    this.invitations = this.invitations.filter((i) => i.hackathonId !== hackathonId);
     const users = new Set(userIds);
     this.notifications = this.notifications.filter((n) => !users.has(n.userId));
     for (const key of [...this.notificationKeys]) if ([...users].some((u) => key.endsWith(`:${u}`))) this.notificationKeys.delete(key);
@@ -3130,15 +3182,24 @@ class HackTrackStore {
 
   // --- Hackathon Access Codes (Judge / Screening / Mentor assignment) ---
 
-  generateHackathonCode(hackathonId, role, createdBy) {
+  /**
+   * Issues the event's code for a role, replacing the previous one (which stops
+   * working; people who joined with it keep their access). Optional limits:
+   * `expiresInHours` (the code stops working after that) and `maxUses`
+   * (how many different accounts can use it).
+   */
+  generateHackathonCode(hackathonId, role, createdBy, { expiresInHours = null, maxUses = null } = {}) {
     const hackathon = this.getHackathonById(hackathonId);
     if (!hackathon) throw new Error('Hackathon not found.');
     if (!['judge', 'screening', 'mentor'].includes(role)) throw new Error('Role must be judge, screening or mentor.');
+    if (expiresInHours != null && !(Number.isInteger(expiresInHours) && expiresInHours >= 1 && expiresInHours <= 24 * 90)) {
+      throw new Error('expiresInHours must be a whole number of hours between 1 and 2160.');
+    }
+    if (maxUses != null && !(Number.isInteger(maxUses) && maxUses >= 1 && maxUses <= 500)) {
+      throw new Error('maxUses must be a whole number between 1 and 500.');
+    }
 
-    // Revoke previous unused code for same hackathon+role if organizer regenerates
-    this.hackathonCodes = this.hackathonCodes.filter(
-      (c) => !(c.hackathonId === hackathonId && c.role === role)
-    );
+    this.revokeHackathonCode(hackathonId, role);
 
     const abbrev = hackathon.title
       .replace(/[^a-zA-Z0-9 ]/g, '')
@@ -3159,6 +3220,8 @@ class HackTrackStore {
       createdBy,
       createdAt: new Date().toISOString(),
       redeemedBy: [], // [{ userId, redeemedAt }]
+      expiresAt: expiresInHours ? new Date(Date.now() + expiresInHours * 3600_000).toISOString() : null,
+      maxUses: maxUses || null,
     };
 
     this.hackathonCodes.push(record);
@@ -3167,10 +3230,10 @@ class HackTrackStore {
     try {
       if (!isTestMode()) {
         pool.query(
-          `INSERT INTO hackathon_codes (id, hackathon_id, role, code, created_by, created_at, redeemed_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO hackathon_codes (id, hackathon_id, role, code, created_by, created_at, redeemed_by, expires_at, max_uses)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE code = VALUES(code)`,
-          [record.id, record.hackathonId, record.role, record.code, record.createdBy, toSqlDate(record.createdAt), JSON.stringify([])]
+          [record.id, record.hackathonId, record.role, record.code, record.createdBy, toSqlDate(record.createdAt), JSON.stringify([]), toSqlDate(record.expiresAt), record.maxUses]
         ).catch(() => {});
       }
     } catch { /* ignore */ }
@@ -3178,9 +3241,33 @@ class HackTrackStore {
     return record;
   }
 
+  /**
+   * The code record if it can be used right now by `userId` (or anyone), else
+   * null: unknown, wrong role, expired, or out of uses. Someone who already used
+   * it can always use it again (re-binding is harmless).
+   */
+  findUsableHackathonCode(code, role = null, userId = null) {
+    const clean = String(code || '').trim().toUpperCase();
+    if (!clean) return null;
+    const record = this.hackathonCodes.find((c) => c.code.toUpperCase() === clean && (!role || c.role === role));
+    if (!record) return null;
+    if (userId && (record.redeemedBy || []).some((r) => r.userId === userId)) return record;
+    if (record.expiresAt && new Date(record.expiresAt) <= new Date()) return null;
+    if (record.maxUses && (record.redeemedBy || []).length >= record.maxUses) return null;
+    return record;
+  }
+
+  /** Turns off the event's code for a role. Returns how many codes were removed. */
+  revokeHackathonCode(hackathonId, role) {
+    const removed = this.hackathonCodes.filter((c) => c.hackathonId === hackathonId && c.role === role);
+    if (removed.length === 0) return 0;
+    this.hackathonCodes = this.hackathonCodes.filter((c) => !(c.hackathonId === hackathonId && c.role === role));
+    asyncDbWrite(() => pool.query('DELETE FROM hackathon_codes WHERE hackathon_id = ? AND role = ?', [hackathonId, role]));
+    return removed.length;
+  }
+
   redeemHackathonCode(code, userId) {
-    const clean = (code || '').trim().toUpperCase();
-    const record = this.hackathonCodes.find((c) => c.code.toUpperCase() === clean);
+    const record = this.findUsableHackathonCode(code, null, userId);
     if (!record) throw new Error('Invalid or unavailable access code.');
 
     const user = this.findUserById(userId);
@@ -3224,6 +3311,240 @@ class HackTrackStore {
       role: record.role,
       redeemedAt: new Date().toISOString(),
     };
+  }
+
+  // --- Invitations ------------------------------------------------------------
+  // Organizers invite committee members (judge, screening, mentor) and team
+  // leaders invite participants, by email. An existing account accepts in the
+  // app; someone without an account gets a single-use sign-up link. Only a
+  // SHA-256 hash of that link's token is stored.
+
+  invitationStatus(inv) {
+    if (inv.status === 'pending' && new Date(inv.expiresAt) <= new Date()) return 'expired';
+    return inv.status;
+  }
+
+  persistInvitation(inv) {
+    asyncDbWrite(() =>
+      pool.query(
+        `INSERT INTO invitations (id, kind, hackathon_id, team_id, role, email, invited_by, status, token_hash, created_at, expires_at, responded_at, accepted_user_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE status = VALUES(status), token_hash = VALUES(token_hash), expires_at = VALUES(expires_at),
+           responded_at = VALUES(responded_at), accepted_user_id = VALUES(accepted_user_id)`,
+        [inv.id, inv.kind, inv.hackathonId, inv.teamId, inv.role, inv.email, inv.invitedBy, inv.status, inv.tokenHash,
+          toSqlDate(inv.createdAt), toSqlDate(inv.expiresAt), toSqlDate(inv.respondedAt), inv.acceptedUserId]
+      )
+    );
+  }
+
+  /** What an authorised viewer may see: never the token hash. */
+  publicInvitation(inv) {
+    const hackathon = this.getHackathonById(inv.hackathonId);
+    const team = inv.teamId ? this.findTeamById(inv.teamId) : null;
+    const inviter = this.findUserById(inv.invitedBy);
+    return {
+      id: inv.id,
+      kind: inv.kind,
+      hackathonId: inv.hackathonId,
+      hackathonTitle: hackathon?.title || inv.hackathonId,
+      teamId: inv.teamId,
+      teamName: team?.teamName || null,
+      role: inv.role,
+      email: inv.email,
+      invitedByName: inviter?.fullName || 'HackTrack',
+      status: this.invitationStatus(inv),
+      hasAccount: Boolean(this.findUserByEmail(inv.email)),
+      createdAt: inv.createdAt,
+      expiresAt: inv.expiresAt,
+      respondedAt: inv.respondedAt,
+    };
+  }
+
+  findInvitationById(id) {
+    return this.invitations.find((i) => i.id === id) || null;
+  }
+
+  findInvitationByToken(token) {
+    if (!token || typeof token !== 'string' || token.length > 200) return null;
+    const hash = crypto.createHash('sha256').update(token).digest('hex');
+    return this.invitations.find((i) => i.tokenHash === hash) || null;
+  }
+
+  listInvitations({ hackathonId = null, teamId = null, kind = null } = {}) {
+    return this.invitations
+      .filter((i) => (!hackathonId || i.hackathonId === hackathonId) && (!teamId || i.teamId === teamId) && (!kind || i.kind === kind))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  /** Pending (not expired) invitations addressed to this email. */
+  pendingInvitationsFor(email) {
+    const clean = String(email || '').trim().toLowerCase();
+    return this.invitations.filter((i) => i.email === clean && this.invitationStatus(i) === 'pending');
+  }
+
+  /** A fresh single-use sign-up token for invitees without an account (stored as a hash). */
+  issueInvitationToken(inv) {
+    if (this.findUserByEmail(inv.email)) {
+      inv.tokenHash = null;
+      return null;
+    }
+    const token = crypto.randomBytes(24).toString('base64url');
+    inv.tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    return token;
+  }
+
+  /**
+   * kind "committee": role judge|screening|mentor for an event (organizer).
+   * kind "team": role "member" for a team (its leader; existing participant
+   * accounts only, since joining a team needs an event registration).
+   */
+  createInvitation({ kind, hackathonId, teamId = null, role, email, invitedBy }) {
+    const clean = String(email || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean) || clean.length > 254) throw new Error('Enter a valid email address.');
+    const hackathon = this.getHackathonById(hackathonId);
+    if (!hackathon) throw new Error('Hackathon not found.');
+    const existing = this.findUserByEmail(clean);
+
+    if (kind === 'committee') {
+      if (!['judge', 'screening', 'mentor'].includes(role)) throw new Error('Role must be judge, screening or mentor.');
+      if (role === 'mentor' && !hackathon.hasMentorship) throw new Error('Mentorship is not enabled for this hackathon.');
+      if (existing && existing.role !== role) {
+        throw new Error(`${clean} already has a HackTrack ${existing.role} account, so it can't join as ${role}.`);
+      }
+      if (existing && (existing.assignedHackathonIds || []).includes(hackathonId)) {
+        throw new Error(`${clean} is already on this hackathon's ${role} team.`);
+      }
+    } else if (kind === 'team') {
+      const team = this.findTeamById(teamId);
+      if (!team || team.hackathonId !== hackathonId) throw new Error('Team not found.');
+      if (team.leaderId !== invitedBy) throw new Error('Only the team leader can invite members.');
+      if (team.rosterLocked) throw new Error('Unlock the roster before inviting members.');
+      if (!existing || !['student', 'leader'].includes(existing.role)) {
+        throw new Error(`${clean} doesn't have a HackTrack participant account yet. Ask them to sign up and register for ${hackathon.title}, then invite them.`);
+      }
+      if (existing.id === team.leaderId) throw new Error("You're already the leader of this team.");
+      const inATeam = this.teamMembers.some((m) => m.hackathonId === hackathonId && m.userId === existing.id && m.status === 'accepted')
+        || this.teams.some((t) => t.hackathonId === hackathonId && t.leaderId === existing.id);
+      if (inATeam) throw new Error(`${clean} is already in a team for this hackathon.`);
+      const accepted = this.teamMembers.filter((m) => m.teamId === team.id && m.status === 'accepted').length;
+      if (accepted >= hackathon.maxTeamSize) throw new Error(`The team is full (${hackathon.maxTeamSize} members).`);
+      role = 'member';
+    } else {
+      throw new Error('Unknown invitation type.');
+    }
+
+    const duplicate = this.invitations.find((i) => i.kind === kind && i.hackathonId === hackathonId && (i.teamId || null) === (teamId || null)
+      && i.email === clean && i.role === role && this.invitationStatus(i) === 'pending');
+    if (duplicate) throw new Error(`${clean} already has a pending invitation. Resend it instead.`);
+
+    const inv = {
+      id: `inv-${crypto.randomBytes(6).toString('hex')}`,
+      kind,
+      hackathonId,
+      teamId: kind === 'team' ? teamId : null,
+      role,
+      email: clean,
+      invitedBy,
+      status: 'pending',
+      tokenHash: null,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + INVITATION_TTL_MS).toISOString(),
+      respondedAt: null,
+      acceptedUserId: null,
+    };
+    const token = kind === 'committee' ? this.issueInvitationToken(inv) : null;
+    this.invitations.push(inv);
+    this.persistInvitation(inv);
+    return { invitation: inv, token, recipient: existing || null };
+  }
+
+  /** Revoked invitations can't be accepted; answered ones are history. */
+  revokeInvitation(id) {
+    const inv = this.findInvitationById(id);
+    if (!inv) throw new Error('Invitation not found.');
+    const status = this.invitationStatus(inv);
+    if (status !== 'pending' && status !== 'expired') throw new Error(`This invitation was already ${status}.`);
+    inv.status = 'revoked';
+    inv.tokenHash = null;
+    inv.respondedAt = new Date().toISOString();
+    this.persistInvitation(inv);
+    return inv;
+  }
+
+  /** Extends a pending or expired invitation by 7 days with a new link. */
+  resendInvitation(id) {
+    const inv = this.findInvitationById(id);
+    if (!inv) throw new Error('Invitation not found.');
+    const status = this.invitationStatus(inv);
+    if (status !== 'pending' && status !== 'expired') throw new Error(`This invitation was already ${status}.`);
+    inv.status = 'pending';
+    inv.expiresAt = new Date(Date.now() + INVITATION_TTL_MS).toISOString();
+    const token = inv.kind === 'committee' ? this.issueInvitationToken(inv) : null;
+    this.persistInvitation(inv);
+    return { invitation: inv, token, recipient: this.findUserByEmail(inv.email) || null };
+  }
+
+  /** The invited account accepts or declines. Accepting binds (committee) or joins (team). */
+  respondToInvitation(id, userId, action) {
+    const inv = this.findInvitationById(id);
+    const user = this.findUserById(userId);
+    if (!inv || !user || inv.email !== String(user.email).toLowerCase()) throw new Error('Invitation not found.');
+    const status = this.invitationStatus(inv);
+    if (status !== 'pending') throw new Error(status === 'expired' ? 'This invitation has expired. Ask for a new one.' : `This invitation was already ${status}.`);
+    if (!['accept', 'decline'].includes(action)) throw new Error('Action must be accept or decline.');
+
+    if (action === 'accept') {
+      if (inv.kind === 'committee') {
+        if (user.role !== inv.role) throw new Error(`This invitation is for a ${inv.role} account.`);
+        this.bindUserToHackathon(user, inv.hackathonId);
+      } else {
+        const team = this.findTeamById(inv.teamId);
+        if (!team) throw new Error('This team no longer exists.');
+        if (!['student', 'leader'].includes(user.role)) throw new Error('Only participant accounts can join a team.');
+        if (!this.isUserRegisteredForHackathon(user.id, inv.hackathonId)) {
+          const hackathon = this.getHackathonById(inv.hackathonId);
+          const err = new Error(`Register for ${hackathon?.title || 'the hackathon'} first, then accept the invitation.`);
+          err.code = 'REGISTER_FIRST';
+          throw err;
+        }
+        // Same rules as a join request the leader approves (size, lock, one team per event).
+        let request = this.teamMembers.find((m) => m.teamId === team.id && m.userId === user.id && m.status === 'pending');
+        if (!request) request = this.requestJoinTeam({ teamCode: team.teamCode, userId: user.id });
+        this.respondToJoinRequest({ teamId: team.id, requestId: request.id, leaderId: team.leaderId, action: 'accept' });
+      }
+      inv.status = 'accepted';
+      inv.acceptedUserId = user.id;
+    } else {
+      inv.status = 'declined';
+    }
+    inv.tokenHash = null;
+    inv.respondedAt = new Date().toISOString();
+    this.persistInvitation(inv);
+    return inv;
+  }
+
+  /** Marks a committee invitation accepted by a just-created account. */
+  completeInvitationSignup(inv, user) {
+    // createUser returns a safe copy: bind the stored account.
+    this.bindUserToHackathon(this.findUserById(user.id), inv.hackathonId);
+    inv.status = 'accepted';
+    inv.acceptedUserId = user.id;
+    inv.tokenHash = null;
+    inv.respondedAt = new Date().toISOString();
+    this.persistInvitation(inv);
+    return inv;
+  }
+
+  /** Adds an event to a committee member's bindings (and saves it). */
+  bindUserToHackathon(user, hackathonId) {
+    if (!user.assignedHackathonIds) user.assignedHackathonIds = [];
+    if (!user.assignedHackathonIds.includes(hackathonId)) {
+      user.assignedHackathonIds.push(hackathonId);
+      asyncDbWrite(() =>
+        pool.query('UPDATE users SET assigned_hackathon_ids = ? WHERE id = ?', [JSON.stringify(user.assignedHackathonIds), user.id])
+      );
+    }
+    return user;
   }
 
   getCodesForHackathon(hackathonId) {

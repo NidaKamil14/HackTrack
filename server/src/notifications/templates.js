@@ -33,6 +33,14 @@ const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || 'there'
 const teamTab = (tab, hackathonId) =>
   `/dashboard/student?tab=${tab}${hackathonId ? `&event=${encodeURIComponent(hackathonId)}` : ''}`;
 
+const ROLE_TEAM = { judge: 'judging panel', screening: 'screening committee', mentor: 'mentor team' };
+const ROLE_DASHBOARD = { judge: '/dashboard/judge', screening: '/dashboard/screening', mentor: '/dashboard/mentor' };
+const ROLE_WORK = {
+  judge: 'score the shortlisted projects against the event rubric',
+  screening: 'check finalized submissions and decide which go to judging',
+  mentor: 'guide the teams and send them advice',
+};
+
 const CERT_LABELS = { winner: 'Winner', runner_up: 'Runner-up', participation: 'Participation' };
 
 /* ---- Event templates ------------------------------------------------------
@@ -228,6 +236,54 @@ export const TEMPLATES = {
     cta: { label: 'Open your workspace', path: role === 'judge' ? '/dashboard/judge' : role === 'mentor' ? '/dashboard/mentor' : '/dashboard/screening' },
   }),
 
+  // Invitations never contain access codes or passwords. The sign-up link is
+  // single-use, expires with the invitation and only works for this address.
+  committee_invitation: ({ hackathon, role, inviter }) => ({
+    subject: `${inviter.fullName} invited you to the ${ROLE_TEAM[role]} for ${hackathon.title}`,
+    heading: `You’re invited to the ${ROLE_TEAM[role]}`,
+    intro: `${inviter.fullName} invited you to join the ${ROLE_TEAM[role]} for ${hackathon.title}.`,
+    body: [
+      `As part of it you’ll ${ROLE_WORK[role]}.`,
+      'Open your HackTrack dashboard to accept or decline. The invitation expires in 7 days.',
+    ],
+    cta: { label: 'Review the invitation', path: ROLE_DASHBOARD[role] },
+  }),
+
+  committee_invitation_signup: ({ hackathon, role, inviter, inviteUrl }) => ({
+    subject: `${inviter.fullName} invited you to the ${ROLE_TEAM[role]} for ${hackathon.title}`,
+    heading: `You’re invited to the ${ROLE_TEAM[role]}`,
+    intro: `${inviter.fullName} invited you to join the ${ROLE_TEAM[role]} for ${hackathon.title} on HackTrack.`,
+    body: [
+      `As part of it you’ll ${ROLE_WORK[role]}.`,
+      'Use the button below to create your account with this email address. The link works once and expires in 7 days.',
+      'If you weren’t expecting this, you can ignore this email.',
+    ],
+    cta: { label: 'Accept and create your account', path: inviteUrl },
+    reason: `You’re receiving this because an organizer of ${hackathon.title} invited this email address.`,
+  }),
+
+  team_invitation: ({ hackathon, team, inviter }) => ({
+    subject: `${inviter.fullName} invited you to join “${team.teamName}”`,
+    heading: 'You’re invited to a team',
+    intro: `${inviter.fullName} invited you to join ${team.teamName} for ${hackathon.title}.`,
+    body: ['Open your dashboard to accept or decline. Accepting adds you to the team straight away; no team code is needed.'],
+    cta: { label: 'Review the invitation', path: teamTab('roster', hackathon.id) },
+  }),
+
+  invitation_accepted: ({ hackathon, invitation, member, team }) => ({
+    subject: invitation.kind === 'team'
+      ? `${member.fullName} joined “${team?.teamName}”`
+      : `${member.fullName} joined the ${ROLE_TEAM[invitation.role]} for ${hackathon.title}`,
+    heading: 'Your invitation was accepted',
+    intro: invitation.kind === 'team'
+      ? `${member.fullName} accepted your invitation and is now on ${team?.teamName}.`
+      : `${member.fullName} accepted your invitation to the ${ROLE_TEAM[invitation.role]} for ${hackathon.title}.`,
+    body: [invitation.kind === 'team' ? 'You can see them on your roster.' : 'You can see everyone on this hackathon’s committee in Codes & committee.'],
+    cta: invitation.kind === 'team'
+      ? { label: 'Open your roster', path: teamTab('roster', hackathon.id) }
+      : { label: 'Open organizer workspace', path: '/dashboard/organizer' },
+  }),
+
   reviewer_joined: ({ hackathon, role, reviewer }) => ({
     subject: `${reviewer.fullName} joined ${hackathon.title} as ${role === 'judge' ? 'a judge' : 'a screener'}`,
     heading: 'Your committee grew',
@@ -236,6 +292,9 @@ export const TEMPLATES = {
     cta: { label: 'Open organizer workspace', path: '/dashboard/organizer' },
   }),
 };
+
+// A leader's "your invitation was accepted" uses the same wording (team category).
+TEMPLATES.team_invitation_accepted = TEMPLATES.invitation_accepted;
 
 /* ---- Layout ---------------------------------------------------------------- */
 const C = {
@@ -250,7 +309,7 @@ export function renderEmail(type, data, { frontendUrl, unsubscribeUrl, categoryL
   const t = template(data);
   const greeting = `Hi ${firstName(data.recipient?.fullName)},`;
   const ctaUrl = `${frontendUrl}${t.cta.path}`;
-  const reason = `You’re receiving this because you have a HackTrack account and ${categoryLabel.toLowerCase()} emails are turned on.`;
+  const reason = t.reason || `You’re receiving this because you have a HackTrack account and ${categoryLabel.toLowerCase()} emails are turned on.`;
 
   const paragraphs = [t.intro, ...t.body]
     .map((p) => `<p style="margin:0 0 14px;font:15px/1.6 ${FONT};color:${C.muted};">${escapeHtml(p)}</p>`)

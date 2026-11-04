@@ -20,6 +20,7 @@ import { setResultsPublished } from '../../utils/evaluationService';
 import api from '../../utils/api';
 import PlatformReach from '../../components/analytics/PlatformReach';
 import { mergeHackathons } from '../../utils/serverHackathons';
+import Invitations from '../../components/invitations/Invitations';
 import {
   ArrowDown,
   ArrowRight,
@@ -356,12 +357,25 @@ export default function OrganizerDashboard() {
     setServerData((prev) => ({ ...prev, committee: { ...prev.committee, [hackathonId]: res } }));
   };
 
-  const handleRegenerateCode = async (role) => {
+  const handleDisableCode = async (role) => {
+    if (!manageTarget?.isServer) return;
+    setCodeError(null);
+    try {
+      const res = await api.revokeHackathonCode(manageTarget.id, role);
+      await refreshServerCommittee(manageTarget.id);
+      setNotice(`${res.message} People who already joined keep their access; invitations still work.`);
+      setTimeout(() => setNotice(null), 6000);
+    } catch (err) {
+      setCodeError(err.message || "The code could not be turned off.");
+    }
+  };
+
+  const handleRegenerateCode = async (role, options = {}) => {
     if (!manageTarget) return;
     if (manageTarget.isServer) {
       setCodeError(null);
       try {
-        const res = await api.generateHackathonCode(manageTarget.id, role);
+        const res = await api.generateHackathonCode(manageTarget.id, role, options);
         await refreshServerCommittee(manageTarget.id);
         setNotice(`New ${role} code for ${manageTarget.title}: ${res.codeRecord.code}. The previous ${role} code no longer works; people who already joined keep their access.`);
         setTimeout(() => setNotice(null), 6000);
@@ -1602,6 +1616,22 @@ export default function OrganizerDashboard() {
 
               {codeError && <Alert tone="danger">{codeError}</Alert>}
 
+              {manageTarget.isServer && (
+                <Invitations
+                  mode="committee"
+                  hackathonId={manageTarget.id}
+                  roles={manageTarget.hasMentorship ? ["screening", "judge", "mentor"] : ["screening", "judge"]}
+                  title="Invite by email (recommended)"
+                  description="The person accepts inside HackTrack, so nothing has to be shared outside the platform. Someone without an account gets a one-time sign-up link that only works for their email address. Invitations expire after 7 days."
+                />
+              )}
+
+              {manageTarget.isServer && (
+                <p className="pt-1 text-xs font-medium uppercase tracking-wide text-fg-subtle">
+                  Or share an access code (optional; you can limit or turn it off)
+                </p>
+              )}
+
               {/* Access code sections */}
               <AccessCodeSection
                 icon={ShieldCheck}
@@ -1612,7 +1642,9 @@ export default function OrganizerDashboard() {
                 code={screeningCodeRecord?.code}
                 copied={Boolean(screeningCodeRecord?.code) && copiedCode === screeningCodeRecord?.code}
                 onCopy={() => handleCopyCode(screeningCodeRecord?.code)}
-                onRegenerate={() => handleRegenerateCode('screening')}
+                onRegenerate={(opts) => handleRegenerateCode('screening', opts)}
+                  record={screeningCodeRecord}
+                  onDisable={manageTarget.isServer ? () => handleDisableCode('screening') : undefined}
                 rosterLabel="Bound screening reviewers"
                 members={committee.screeners}
                 fallbackName="Screening Reviewer"
@@ -1628,7 +1660,9 @@ export default function OrganizerDashboard() {
                 code={judgeCodeRecord?.code}
                 copied={Boolean(judgeCodeRecord?.code) && copiedCode === judgeCodeRecord?.code}
                 onCopy={() => handleCopyCode(judgeCodeRecord?.code)}
-                onRegenerate={() => handleRegenerateCode('judge')}
+                onRegenerate={(opts) => handleRegenerateCode('judge', opts)}
+                  record={judgeCodeRecord}
+                  onDisable={manageTarget.isServer ? () => handleDisableCode('judge') : undefined}
                 rosterLabel="Bound judges / evaluators"
                 members={committee.judges}
                 fallbackName="Judge Evaluator"
@@ -1645,7 +1679,9 @@ export default function OrganizerDashboard() {
                   code={mentorCodeRecord?.code}
                   copied={Boolean(mentorCodeRecord?.code) && copiedCode === mentorCodeRecord?.code}
                   onCopy={() => handleCopyCode(mentorCodeRecord?.code)}
-                  onRegenerate={() => handleRegenerateCode('mentor')}
+                  onRegenerate={(opts) => handleRegenerateCode('mentor', opts)}
+                  record={mentorCodeRecord}
+                  onDisable={manageTarget.isServer ? () => handleDisableCode('mentor') : undefined}
                   rosterLabel="Bound mentors"
                   members={committee.mentors}
                   fallbackName="Mentor"
@@ -1743,7 +1779,18 @@ function AccessCodeSection({
   members,
   fallbackName,
   emptyText,
+  record,
+  onDisable,
 }) {
+  // Limits for the next code (server events): how long it works and for how many people.
+  const [validFor, setValidFor] = useState("");
+  const [maxUses, setMaxUses] = useState("");
+  const limits = onDisable
+    ? { ...(validFor ? { expiresInHours: Number(validFor) } : {}), ...(maxUses ? { maxUses: Number(maxUses) } : {}) }
+    : {};
+  const used = record?.redeemedBy?.length || 0;
+  const expired = record?.expiresAt && new Date(record.expiresAt) <= new Date();
+  const usedUp = record?.maxUses && used >= record.maxUses;
   return (
     <section className="space-y-3 rounded-lg border border-line p-4" aria-label={title}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1757,11 +1804,41 @@ function AccessCodeSection({
           </div>
           <p className="text-xs text-fg-muted">{description}</p>
         </div>
-        <Button variant="secondary" size="sm" onClick={onRegenerate} className="self-start">
-          <RefreshCw aria-hidden="true" />
-          {code ? "Regenerate" : "Generate"}
-        </Button>
+        <div className="flex shrink-0 gap-2 self-start">
+          {onDisable && code && (
+            <Button variant="ghost" size="sm" onClick={onDisable} aria-label={`Turn off the ${title.toLowerCase()}`}>
+              <X aria-hidden="true" />
+              Turn off
+            </Button>
+          )}
+          <Button variant="secondary" size="sm" onClick={() => onRegenerate(limits)}>
+            <RefreshCw aria-hidden="true" />
+            {code ? "Regenerate" : "Generate"}
+          </Button>
+        </div>
       </div>
+
+      {onDisable && (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <Field label="Next code works for">
+            <Select value={validFor} onChange={(e) => setValidFor(e.target.value)}>
+              <option value="">No time limit</option>
+              <option value="24">24 hours</option>
+              <option value="168">7 days</option>
+              <option value="720">30 days</option>
+            </Select>
+          </Field>
+          <Field label="Next code can be used by">
+            <Select value={maxUses} onChange={(e) => setMaxUses(e.target.value)}>
+              <option value="">Any number of people</option>
+              <option value="1">1 person</option>
+              <option value="5">5 people</option>
+              <option value="10">10 people</option>
+              <option value="25">25 people</option>
+            </Select>
+          </Field>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
         <div
@@ -1770,7 +1847,7 @@ function AccessCodeSection({
             code ? 'text-fg' : 'text-fg-subtle'
           )}
         >
-          {code || "NOT GENERATED"}
+          {code || (onDisable ? "OFF: no code" : "NOT GENERATED")}
         </div>
         <Button
           variant={copied ? "secondary" : "primary"}
@@ -1788,6 +1865,19 @@ function AccessCodeSection({
           {copied ? "Code copied to clipboard" : ""}
         </span>
       </div>
+
+      {record && (record.expiresAt || record.maxUses) && (
+        <p className={cn("text-xs", expired || usedUp ? "text-danger" : "text-fg-subtle")}>
+          {expired
+            ? "This code has expired. Generate a new one or invite people by email."
+            : usedUp
+              ? `All ${record.maxUses} uses are taken. Generate a new code or invite people by email.`
+              : [
+                  record.expiresAt && `Works until ${new Date(record.expiresAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`,
+                  record.maxUses && `${used} of ${record.maxUses} uses taken`,
+                ].filter(Boolean).join(" · ")}
+        </p>
+      )}
 
       <div className="space-y-2 border-t border-line pt-3">
         <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">

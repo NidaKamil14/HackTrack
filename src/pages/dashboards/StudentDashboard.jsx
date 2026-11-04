@@ -36,6 +36,7 @@ import { getUserRegistrations, isUserRegistered, normalizeHackathonId } from '..
 import { triggerDataSync } from '../../utils/syncService';
 import api from '../../utils/api';
 import { resolveNotificationLink } from '../../utils/notificationLinks';
+import Invitations from '../../components/invitations/Invitations';
 import { mapServerSubmission } from '../../utils/serverSubmissions';
 import { getRegistrationWindow } from '../../utils/registrationWindow';
 import RegistrationDialog from '../../components/RegistrationDialog';
@@ -1910,6 +1911,17 @@ export default function StudentDashboard({ initialTab = "workspace" }) {
                         )}
                       </div>
                     </div>
+
+                    {/* Leader invites registered participants by email: they join by accepting, no code needed. */}
+                    {isLeader && backendTeam && !currentTeam.rosterLocked && (
+                      <Invitations
+                        mode="team"
+                        teamId={backendTeam.id}
+                        hackathonId={backendTeam.hackathonId}
+                        title="Invite a teammate by email"
+                        description={`They accept from their HackTrack dashboard and join ${currentTeam.name} straight away; no code and no approval step. They need a participant account registered for ${activeSprint?.title || "this hackathon"}.`}
+                      />
+                    )}
 
                     {/* Team Details Summary Grid */}
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 rounded-xl border border-line bg-surface/50 p-4">
